@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+
+-module(cn_server_graphics).
+
+=======
 -module(cn_graphics_server)
 -behaviour(gen_server).
 

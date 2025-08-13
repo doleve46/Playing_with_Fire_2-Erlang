@@ -109,17 +109,27 @@ format_status(_Opt, [_PDict, _StateName, _State]) ->
     Status.
 
 %% @private
+%% %% @private
 %% @doc This function is called by a gen_statem when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
 %% necessary cleaning up. When it returns, the gen_statem terminates with
 %% Reason. The return value is ignored.
 terminate(normal, _CurrentState, StateData = #bomb_state{}) ->
+    %% Send explosion message to GN
     StateData#bomb_state.gn_pid ! {bomb_exploded, self()},
     ok;
 
-terminate(_Reason, _StateName, _State = #bomb_state{}) ->
+terminate(Reason, _StateName, StateData = #bomb_state{}) ->
+    %% For any other termination reason, also send explosion message
+    case Reason of
+        {exploded, _Radius} ->
+            StateData#bomb_state.gn_pid ! {bomb_exploded, self()};
+        {exploded_repeating, _Radius} ->
+            StateData#bomb_state.gn_pid ! {bomb_exploded, self()};
+        _ ->
+            ok %% Don't send explosion for other termination reasons
+    end,
     ok.
-
 
 
 %% @private

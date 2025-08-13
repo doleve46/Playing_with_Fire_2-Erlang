@@ -9,7 +9,7 @@
 -module(player_fsm).
 -behaviour(gen_statem).
 
--export([start_link/5, start_link/6, input_command/2, gn_response/2, inflict_damage/1, set_bot_difficulty/2]).
+-export([start_link/6, input_command/2, gn_response/2, inflict_damage/1, set_bot_difficulty/2, place_bomb/1]).
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
@@ -40,6 +40,7 @@
     % Process info
     % todo: changed the names of some of these (local_gn, pid, target_gn) - verify consistency
     request_cooldown = 0,   % milliseconds until next GN request allowed
+    movement_cooldown = 0,  % milliseconds until next movement request allowed
     local_gn = default, % which GN (**registered name**) does the player FSM & IO is physically running on
     local_gn_pid = default, % which gn (**PID**) does the player FSM sends all his problems
     target_gn = default, % Which GN(**registered name**) does the player need to communicate with (in whose quarter is he)
@@ -73,19 +74,35 @@
 %%% API
 %%%===================================================================
 
-%% @doc Spawns the player FSM
--spec start_link(PlayerNumber::integer(), StartPos::[integer()], GN_Pid::pid(), IsBot::boolean(), IO_pid::pid()) ->
+%% @doc Spawns the player FSM with appropriate I/O handler
+-spec start_link(PlayerNumber::integer(), StartPos::[integer()], GN_Pid::pid(), IsBot::boolean(), KeyboardMode::boolean(), BotDifficulty::atom()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid) ->
-    start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, easy).
-
-%% @doc Spawns the player FSM with bot difficulty
--spec start_link(PlayerNumber::integer(), StartPos::[integer()], GN_Pid::pid(), IsBot::boolean(), IO_pid::pid(), BotDifficulty::atom()) ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link(PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, BotDifficulty) ->
+start_link(PlayerNumber, StartPos, GN_Pid, IsBot, KeyboardMode, BotDifficulty) ->
+    % First spawn the appropriate I/O handler if needed
+    IOHandlerPid = case IsBot of
+        true -> 
+            none; % Bot uses internal logic, no external I/O handler needed
+        false ->
+            % Spawn I/O handler for human player
+            {ok, IOPid} = io_handler:start_link(PlayerNumber, KeyboardMode),
+            IOPid
+    end,
+    
+    % Spawn player FSM
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
-    gen_statem:start_link({local, ServerName}, ?MODULE, 
-        [PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, BotDifficulty], []).
+    Result = gen_statem:start_link({local, ServerName}, ?MODULE, 
+        [PlayerNumber, StartPos, GN_Pid, IsBot, IOHandlerPid, BotDifficulty], []),
+    
+    % Link I/O handler to player if human player
+    case {Result, IsBot} of
+        {{ok, PlayerPid}, false} ->
+            io_handler:set_player_pid(IOHandlerPid, PlayerPid),
+            {ok, PlayerPid};
+        {{ok, PlayerPid}, true} ->
+            {ok, PlayerPid};
+        Error ->
+            Error
+    end.
 
 %% @doc Send input command from I/O handler
 input_command(PlayerPid, Command) ->
@@ -103,6 +120,10 @@ inflict_damage(PlayerPid) ->
 set_bot_difficulty(PlayerPid, Difficulty) ->
     gen_statem:cast(PlayerPid, {set_bot_difficulty, Difficulty}).
 
+%% @doc Player requests to place bomb at current position
+place_bomb(PlayerPid) ->
+    gen_statem:cast(PlayerPid, place_bomb).
+
 %%%===================================================================
 %%% gen_statem callbacks
 %%%===================================================================
@@ -110,7 +131,7 @@ set_bot_difficulty(PlayerPid, Difficulty) ->
 callback_mode() ->
     state_functions.
 
-init([PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, BotDifficulty]) ->
+init([PlayerNumber, StartPos, GN_Pid, IsBot, IOHandlerPid, BotDifficulty]) ->
     {_, GN_registered_name} = process_info(GN_Pid, registered_name),
     Data = #player_data{
         player_number = PlayerNumber,
@@ -122,7 +143,7 @@ init([PlayerNumber, StartPos, GN_Pid, IsBot, IO_pid, BotDifficulty]) ->
         local_gn_pid = GN_Pid,
         bot = IsBot,
         bot_difficulty = BotDifficulty,
-        io_handler_pid = IO_pid
+        io_handler_pid = IOHandlerPid  % Will be 'none' for bots
     },
     
     % Start cooldown timer
@@ -281,7 +302,7 @@ disconnected(Type, Event, Data) ->
 %%%===================================================================
 
 handle_input_command(Command, Data) ->
-    case can_send_request(Data) of
+    case can_send_request(Command, Data) of
         true ->
             case process_command(Command, Data) of
                 {ok, Request, NewData} ->
@@ -289,10 +310,9 @@ handle_input_command(Command, Data) ->
                     gen_server:cast(Data#player_data.local_gn_pid, 
                         {player_message, Request}), % ? removed self() from the tuple, relevant data already in Request
                     
-                    % Update cooldown
+                    % Update cooldown - no immediate cooldown change, wait for GN response
                     CooldownData = NewData#player_data{
-                        request_cooldown = ?REQUEST_COOLDOWN, % ? 
-                        last_request_time = erlang:system_time(millisecond)
+                        last_request_time = erlang:convert_time_unit(erlang:system_time(), native, millisecond)
                     },
                     {next_state, waiting_gn_response, CooldownData};
                 {error, Reason} ->
@@ -345,61 +365,87 @@ process_command(Command, Data) ->
 
 handle_gn_response(Response, Data) ->
     case Response of
-        {move_result, accepted} -> % move successful
-            %% todo: don't allow any movement inputs besides 'going back' for the time it takes to be at
-            %% todo: half-way point of the movement
-            placeholder;
-        {move_result, denied} -> % move denied
-            %% todo: don't allow any movement request for a short time
-            placeholder;
+        {move_result, accepted} ->
+            % Move accepted - player is now moving, cannot move again for X seconds
+            % but can still drop bombs or use other abilities
+            NewData = Data#player_data{
+                movement_cooldown = 2000,  % 2 seconds until next movement allowed
+                request_cooldown = 0       % can send non-movement requests immediately
+            },
+            send_io_ack({move_accepted}, NewData),
+            {next_state, idle, NewData};
+            
+        {move_result, denied, Reason} ->
+            % Move denied - short cooldown before any request
+            NewData = Data#player_data{
+                request_cooldown = 200     % 200ms before next request
+            },
+            send_io_ack({move_denied, Reason}, NewData),
+            {next_state, idle, NewData};
+            
+        {move_result, accepted, switch_gn, NewTargetGN} ->
+            % Move accepted AND player is switching to new GN territory
+            NewData = Data#player_data{
+                movement_cooldown = 2000,  % 2 seconds until next movement
+                request_cooldown = 0,      % can send non-movement requests
+                target_gn = NewTargetGN    % update target GN
+            },
+            send_io_ack({move_accepted, gn_switched, NewTargetGN}, NewData),
+            {next_state, idle, NewData};
 
-        %% !! this entire section below is outdated
-        {move_result, success, NewPos, PickedUpPowerup} ->
-            % Move successful
-            NewData = update_position(NewPos, Data),    % update player position
-            FinalData = apply_powerup(PickedUpPowerup, NewData),    % apply power-up if any
-            send_io_ack({move_success, NewPos, PickedUpPowerup}, FinalData),   % send ack to I/O 
-            {next_state, idle, FinalData};  % return to idle state
-            
-        {move_result, failed, Reason} ->
-            % Move failed
-            send_io_ack({move_failed, Reason}, Data),
-            {next_state, idle, Data};   % return to idle state
-            
         {bomb_result, success} ->
             % Bomb dropped successfully
-            send_io_ack(bomb_dropped, Data),
-            {next_state, idle, Data};   % return to idle state
+            NewData = Data#player_data{
+                request_cooldown = 100     % short cooldown before next request
+            },
+            send_io_ack(bomb_dropped, NewData),
+            {next_state, idle, NewData};
             
         {bomb_result, failed, Reason} ->
             % Bomb drop failed - restore bomb count
-            NewData = Data#player_data{bombs_placed = Data#player_data.bombs_placed - 1},
+            NewData = Data#player_data{
+                bombs_placed = Data#player_data.bombs_placed - 1,
+                request_cooldown = 200     % short cooldown before retry
+            },
             send_io_ack({bomb_failed, Reason}, NewData),
-            {next_state, idle, NewData};    % return to idle state
+            {next_state, idle, NewData};
             
         {bomb_exploded} ->
             % One of player's bombs exploded - restore bomb count
             NewData = Data#player_data{bombs_placed = Data#player_data.bombs_placed - 1},
             {keep_state, NewData};  % no ack needed for explosion
             
-        {ignite_result, Count} ->
+        {ignite_result, success, Count} ->
             % Remote bombs ignited
-            send_io_ack({ignited_bombs, Count}, Data),
-            {next_state, idle, Data};   % return to idle state
+            NewData = Data#player_data{
+                request_cooldown = 300     % cooldown before next request
+            },
+            send_io_ack({ignited_bombs, Count}, NewData),
+            {next_state, idle, NewData};
+            
+        {ignite_result, failed, Reason} ->
+            % Remote ignition failed
+            NewData = Data#player_data{
+                request_cooldown = 200     % short cooldown before retry
+            },
+            send_io_ack({ignite_failed, Reason}, NewData),
+            {next_state, idle, NewData};
             
         _ ->
             % Unknown response
             send_io_ack({error, unknown_response}, Data),
-            {next_state, idle, Data}    % return to idle state
+            {next_state, idle, Data}
     end.
 
 handle_tick(Data) ->
-    % Reduce cooldown
-    NewCooldown = max(0, Data#player_data.request_cooldown - ?TICK),
+    % Reduce cooldowns
+    NewRequestCooldown = max(0, Data#player_data.request_cooldown - ?TICK),
+    NewMovementCooldown = max(0, Data#player_data.movement_cooldown - ?TICK),
     % Reduce bot bomb cooldown
     NewBombCooldown = max(0, Data#player_data.bot_bomb_cooldown - ?TICK),
     NewData = Data#player_data{
-        request_cooldown = NewCooldown,
+        request_cooldown = NewRequestCooldown,
+        movement_cooldown = NewMovementCooldown,
         bot_bomb_cooldown = NewBombCooldown
     }, 
     
@@ -437,58 +483,138 @@ handle_disconnect_check(Data) ->
 handle_common_events(_Type, _Event, Data) ->
     {keep_state, Data}. % default handler for unexpected events
 
+%% Handle bomb placement request
+playing(cast, place_bomb, StateData) ->
+    %% Get current position from your state data
+    CurrentPosition = StateData#player_state.position, % Adjust this field name to match your record
+    
+    %% Send request to target GN  
+    gen_server:cast(StateData#player_state.target_gn,  % Adjust this field name to match your record
+        {player_message, {place_bomb, StateData#player_state.player_number, CurrentPosition}}),
+    {keep_state_and_data};
+
+%% Handle bomb placement responses from GN
+playing(info, {gn_response, {bomb_placed, Result}}, StateData) ->
+    case Result of
+        ok -> 
+            io:format("Player ~p: Bomb placed successfully~n", [StateData#player_state.player_number]);
+        {error, Reason} -> 
+            io:format("Player ~p: Failed to place bomb: ~p~n", 
+                     [StateData#player_state.player_number, Reason])
+    end,
+    {keep_state_and_data};
+
+%% Handle damage taken from explosions
+playing(info, {gn_response, {damage_taken, NewLife}}, StateData) ->
+    UpdatedStateData = StateData#player_state{life = NewLife}, % Adjust field name to match your record
+    case NewLife =< 0 of
+        true ->
+            io:format("Player ~p died!~n", [StateData#player_state.player_number]),
+            {next_state, dead, UpdatedStateData};
+        false ->
+            io:format("Player ~p damaged, life remaining: ~p~n", 
+                     [StateData#player_state.player_number, NewLife]),
+            {keep_state, UpdatedStateData}
+    end;
+
+%% Handle powerup collection
+playing(info, {gn_response, {powerup_collected, PowerupType}}, StateData) ->
+    io:format("Player ~p collected powerup: ~p~n", [StateData#player_state.player_number, PowerupType]),
+    {keep_state_and_data};
+
+%% In your io_handler.erl, when player presses bomb key:
+handle_bomb_key_press(PlayerPid) ->
+    player_fsm:place_bomb(PlayerPid).
+
 %%%===================================================================
 %%% Bot AI Functions
 %%%===================================================================
 
 %% @doc Generate bot action based on difficulty and current state
 generate_bot_action(Data) ->
+    % Check what actions are available based on cooldowns
+    CanMove = Data#player_data.request_cooldown =< 0 andalso 
+              Data#player_data.movement_cooldown =< 0,
+    CanNonMove = Data#player_data.request_cooldown =< 0,
+    
     case Data#player_data.bot_difficulty of
-        easy -> generate_easy_action(Data);
-        medium -> generate_medium_action(Data);
-        hard -> generate_hard_action(Data)
+        easy -> generate_easy_action(Data, CanMove, CanNonMove);
+        medium -> generate_medium_action(Data, CanMove, CanNonMove);
+        hard -> generate_hard_action(Data, CanMove, CanNonMove)
     end.
 
 %% @doc Easy bot - mostly random movement, occasional bombs
-generate_easy_action(Data) ->
-    case rand:uniform() < ?BOMB_PROBABILITY andalso Data#player_data.bot_bomb_cooldown =< 0 of
-        true ->
-            drop_bomb;
-        false ->
-            Directions = [up, down, left, right],
-            Direction = lists:nth(rand:uniform(length(Directions)), Directions),
-            {move, Direction}
+generate_easy_action(Data, CanMove, CanNonMove) ->
+    case {CanMove, CanNonMove} of
+        {false, false} ->
+            % Cannot do anything, return a safe no-op (this shouldn't happen with proper scheduling)
+            {move, up}; % Will be rejected due to cooldown
+        {false, true} ->
+            % Can only do non-movement actions
+            case rand:uniform() < 0.7 andalso Data#player_data.bot_bomb_cooldown =< 0 of
+                true -> drop_bomb;
+                false -> ignite_remote % Try special ability
+            end;
+        {true, _} ->
+            % Can move
+            case rand:uniform() < ?BOMB_PROBABILITY andalso Data#player_data.bot_bomb_cooldown =< 0 of
+                true -> drop_bomb;
+                false ->
+                    Directions = [up, down, left, right],
+                    Direction = lists:nth(rand:uniform(length(Directions)), Directions),
+                    {move, Direction}
+            end
     end.
 
 %% @doc Medium bot - smarter movement patterns, better bomb timing
-generate_medium_action(Data) ->
-    case should_drop_bomb_medium(Data) of
-        true ->
-            drop_bomb;
-        false ->
-            case should_change_direction(Data) of
-                true ->
-                    get_smart_direction(Data);
+generate_medium_action(Data, CanMove, CanNonMove) ->
+    case {CanMove, CanNonMove} of
+        {false, false} ->
+            {move, up}; % Will be rejected
+        {false, true} ->
+            % Prioritize bombs when can't move
+            case should_drop_bomb_medium(Data) of
+                true -> drop_bomb;
+                false -> ignite_remote
+            end;
+        {true, _} ->
+            case should_drop_bomb_medium(Data) of
+                true -> drop_bomb;
                 false ->
-                    % Continue last direction or pick new one
-                    case Data#player_data.bot_last_action of
-                        {move, Dir} -> {move, Dir};
-                        _ -> get_smart_direction(Data)
+                    case should_change_direction(Data) of
+                        true -> get_smart_direction(Data);
+                        false ->
+                            case Data#player_data.bot_last_action of
+                                {move, Dir} -> {move, Dir};
+                                _ -> get_smart_direction(Data)
+                            end
                     end
             end
     end.
 
 %% @doc Hard bot - advanced strategies, optimal bomb placement, evasion
-generate_hard_action(Data) ->
-    case should_drop_bomb_hard(Data) of
-        true ->
-            drop_bomb;
-        false ->
-            case should_use_special_ability(Data) of
-                {true, Action} ->
-                    Action;
+generate_hard_action(Data, CanMove, CanNonMove) ->
+    case {CanMove, CanNonMove} of
+        {false, false} ->
+            {move, up}; % Will be rejected
+        {false, true} ->
+            % Use this opportunity for tactical non-movement actions
+            case should_drop_bomb_hard(Data) of
+                true -> drop_bomb;
                 false ->
-                    get_tactical_direction(Data)
+                    case should_use_special_ability(Data) of
+                        {true, Action} -> Action;
+                        false -> drop_bomb % Default to bomb when can't move
+                    end
+            end;
+        {true, _} ->
+            case should_drop_bomb_hard(Data) of
+                true -> drop_bomb;
+                false ->
+                    case should_use_special_ability(Data) of
+                        {true, Action} -> Action;
+                        false -> get_tactical_direction(Data)
+                    end
             end
     end.
 
@@ -554,8 +680,16 @@ schedule_bot_action(Data) ->
 %%%===================================================================
 
 %% Helper functions
-can_send_request(Data) ->
-    Data#player_data.request_cooldown =< 0. % can send request if cooldown is 0 or less
+can_send_request(Command, Data) ->
+    case Command of
+        {move, _Direction} ->
+            % Movement requests need both general and movement cooldowns to be 0
+            Data#player_data.request_cooldown =< 0 andalso 
+            Data#player_data.movement_cooldown =< 0;
+        _ ->
+            % Non-movement requests only need general cooldown to be 0
+            Data#player_data.request_cooldown =< 0
+    end.
 
 can_drop_bomb(Data) ->
     Data#player_data.bombs_placed < Data#player_data.bombs. % can drop bomb if placed bombs < max bombs
@@ -605,7 +739,8 @@ get_bomb_type(Abilities) ->
 
 send_io_ack(Response, Data) ->
     case Data#player_data.io_handler_pid of
-        undefined -> ok;
+        none -> ok;      % Bot - no I/O handler to notify
+        undefined -> ok; % No I/O handler
         Pid -> gen_server:cast(Pid, {player_ack, Response})
     end.
 
@@ -615,4 +750,8 @@ terminate(_Reason, _State, _Data) ->
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
 
+<<<<<<< HEAD
+=======
 %%% Need to add kick, freeze?
+
+>>>>>>> 84786454eac406a5c0ffbcc755946e9c0c8f3be9

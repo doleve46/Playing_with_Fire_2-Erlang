@@ -104,6 +104,22 @@ check_cn_and_gn_status() ->
             not_connected
     end.
 
+check_detailed_cn_and_gn_status() ->
+    try
+        case cn_server:get_detailed_connection_status() of
+            {ok, ConnectedCount, GNStatus} ->
+                io:format("Detailed GN Status: ~p~n", [GNStatus]),
+                {connected, ConnectedCount, GNStatus};
+            {error, cn_not_running} ->
+                not_connected;
+            {error, _} ->
+                not_connected
+        end
+    catch
+        _:_ ->
+            not_connected
+    end.
+
 %% Start 60-second timer for player choice
 start_choice_timer(Port) ->
     spawn(fun() ->

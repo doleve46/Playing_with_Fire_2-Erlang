@@ -70,6 +70,22 @@ init([GN_number, PlayerType]) ->
 handle_call(_Request, _From, State = #gn_state{}) ->
     {reply, ok, State}.
 
+%% @doc Handle ping requests for health checks from CN server
+handle_call(ping, _From, State = #gn_state{}) ->
+    {reply, pong, State};
+
+%% @doc Handling call messages
+-spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
+    State :: #gn_state{}) ->
+    {reply, Reply :: term(), NewState :: #gn_state{}} |
+    {reply, Reply :: term(), NewState :: #gn_state{}, timeout() | hibernate} |
+    {noreply, NewState :: #gn_state{}} |
+    {noreply, NewState :: #gn_state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: #gn_state{}} |
+    {stop, Reason :: term(), NewState :: #gn_state{}}).
+handle_call(_Request, _From, State = #gn_state{}) ->
+    {reply, ok, State}.
+
 %%% ============== Handle cast ==============
 
 -spec(handle_cast(Request :: term(), State :: #gn_state{}) ->

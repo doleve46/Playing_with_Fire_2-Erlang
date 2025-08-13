@@ -176,32 +176,9 @@ interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
             %% no buffs help with running into a wall, movement request is denied
             interact_with_entity(T, BuffsList, Direction, cant_move);
         {bomb, Bomb} ->
-            %% check if can kick bombs, freeze them or phased movement, act accordingly
-            Relevant_buffs = [Buff || Buff <- BuffsList, lists:member(Buff, [?KICK_BOMB, ?PHASED, ?FREEZE_BOMB])],
-            case Relevant_buffs of
-                [] -> 
-                    %% no special buffs, can't push bomb, movement is denied
-                    interact_with_entity(T, BuffsList, Direction, cant_move);
-                [?KICK_BOMB] ->
-                    %% kick bomb special buff, tries to initiate a move for the bomb in the movement direction of the player
-                    %% ?: send message to self, prompting a bomb's movement request
-                    gen_server:cast(self(), 
-                        {bomb_kicked, Bomb, Direction}
-                    ), % ! prototype for the message format - sends to GN
-                    interact_with_entity(T, BuffsList, Direction, cant_move);
-                [?PHASED] ->
-                    %% can move through bombs. does not cause the bomb to move, able to keep moving
-                    interact_with_entity(T, BuffsList, Direction, can_move);
-                [?FREEZE_BOMB] ->
-                    %% freezes the bomb, cannot move through it
-                    %% let the bomb know
-                    bomb_as_fsm:freeze_bomb(Bomb#mnesia_bombs.pid),
-                    %% update the mnesia table 
-                    update_bomb_status(Bomb, State#gn_state.bombs_table_name),
-                    interact_with_entity(T, BuffsList, Direction, cant_move)
-            end,
-            
-            ok;
+            %% Use new bomb interaction function
+            BombResult = interact_with_bomb(Bomb, BuffsList, Direction, State),
+            interact_with_entity(T, BuffsList, Direction, State, BombResult);
         {player, _Other_player} ->
             %% For now, cannot move through other players - same interaction as with a tile
             interact_with_entity(T, BuffsList, Direction, MoveStatus)
@@ -214,6 +191,59 @@ update_bomb_status(Bomb, Bombs_table) ->
     Fun = fun() ->
         [CurrentRecord] = mnesia:wread({Bombs_table, BombKey}),
         mnesia:write(Bombs_table, CurrentRecord#mnesia_bombs{status = frozen}, write)
+    end,
+    mnesia:activity(transaction, Fun).
+
+    %% Handle bomb interactions when player encounters a bomb
+interact_with_bomb(Bomb, BuffsList, Direction, State) ->
+    %% Check what buffs the player has that are relevant to bombs
+    RelevantBuffs = [Buff || Buff <- BuffsList, 
+                     lists:member(Buff, [?KICK_BOMB, ?PHASED, ?FREEZE_BOMB])],
+    
+    case RelevantBuffs of
+        [] -> 
+            %% No special buffs, can't interact with bomb
+            cant_move;
+        _ ->
+            %% Player has relevant buffs, handle interaction
+            handle_bomb_buff_interaction(Bomb, RelevantBuffs, Direction, State)
+    end.
+
+%% Handle specific buff interactions with bombs
+handle_bomb_buff_interaction(Bomb, [?KICK_BOMB | _], Direction, State) ->
+    %% Player can kick bombs
+    gen_server:cast(self(), {bomb_kicked, Bomb, Direction}),
+    cant_move; %% Player can't move through, but bomb will move
+
+handle_bomb_buff_interaction(Bomb, [?PHASED | _], _Direction, _State) ->
+    %% Player can move through bombs
+    can_move;
+
+handle_bomb_buff_interaction(Bomb, [?FREEZE_BOMB | _], _Direction, State) ->
+    %% Player can freeze bombs
+    bomb_as_fsm:freeze_bomb(Bomb#mnesia_bombs.pid),
+    update_bomb_status(Bomb, State#gn_state.bombs_table_name),
+    cant_move; %% Player can't move through frozen bomb
+
+handle_bomb_buff_interaction(Bomb, [_OtherBuff | RestBuffs], Direction, State) ->
+    %% Try next buff in list
+    handle_bomb_buff_interaction(Bomb, RestBuffs, Direction, State);
+
+handle_bomb_buff_interaction(_Bomb, [], _Direction, _State) ->
+    %% No more buffs to try
+    cant_move.
+
+%% Update bomb status in mnesia table
+update_bomb_status(Bomb, Bombs_table) ->
+    BombPosition = Bomb#mnesia_bombs.position,
+    Fun = fun() ->
+        case mnesia:read(Bombs_table, BombPosition, write) of
+            [CurrentRecord] ->
+                UpdatedRecord = CurrentRecord#mnesia_bombs{status = frozen},
+                mnesia:write(Bombs_table, UpdatedRecord, write);
+            [] ->
+                ok %% Bomb not found, might have exploded
+        end
     end,
     mnesia:activity(transaction, Fun).
 
