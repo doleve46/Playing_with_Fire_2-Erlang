@@ -184,14 +184,14 @@ interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
                     interact_with_entity(T, BuffsList, Direction, cant_move);
                 [?KICK_BOMB] ->
                     %% kick bomb special buff, tries to initiate a move for the bomb in the movement direction of the player
-                    %% ?: send message to self, prompting a bomb's movement request
-                    gen_server:cast(self(), 
-                        {bomb_kicked, Bomb, Direction}
-                    ), % ! prototype for the message format - sends to GN
+                    %% ? send message to bomb, prompting it to initiate appropriate movement based on it's own state
+                    update_bomb_direction_movement(
+                        Bomb, State#gn_state.bombs_table_name, bomb_as_fsm:kick_bomb(Bomb#mnesia_bombs.pid, Direction)
+                    ),
                     interact_with_entity(T, BuffsList, Direction, cant_move);
                 [?PHASED] ->
                     %% can move through bombs. does not cause the bomb to move, able to keep moving
-                    interact_with_entity(T, BuffsList, Direction, can_move);
+                    interact_with_entity(T, BuffsList, Direction, MoveStatus);
                 [?FREEZE_BOMB] ->
                     %% freezes the bomb, cannot move through it
                     %% let the bomb know
@@ -203,13 +203,14 @@ interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
             
             ok;
         {player, _Other_player} ->
-            %% For now, cannot move through other players - same interaction as with a tile
-            interact_with_entity(T, BuffsList, Direction, MoveStatus)
+            %% design decision: cannot move through other players - same interaction as with a tile
+            %% ! need to check if this isn't the player who initiated this - or is it fine 
+            interact_with_entity(T, BuffsList, Direction, cant_move)
     end.
 
 
-%% * re-read the bomb and update status to frozen on mnesia table
 update_bomb_status(Bomb, Bombs_table) ->
+    %% re-read the bomb and update status to frozen on mnesia table
     BombKey = Bomb#mnesia_bombs.position,
     Fun = fun() ->
         [CurrentRecord] = mnesia:wread({Bombs_table, BombKey}),
@@ -217,6 +218,31 @@ update_bomb_status(Bomb, Bombs_table) ->
     end,
     mnesia:activity(transaction, Fun).
 
+
+update_bomb_direction_movement(Bomb, Bombs_table, ToUpdate) ->
+    BombKey = Bomb#mnesia_bombs.position,
+    %% Separate handling if only updating direction or direction&movement
+    Fun = case ToUpdate of
+        Direction -> % only direction neeeds to be updated
+            fun() -> 
+                [CurrentRecord] = mnesia:wread({Bombs_table, BombKey}),
+                mnesia:write(Bombs_table, CurrentRecord#mnesia_bombs{direction = Direction}, write)
+            end;
+        {Direction, Movement} ->
+            fun() ->
+            [CurrentRecord] = mnesia:wread({Bombs_table, BombKey}),
+            mnesia:write(Bombs_table, CurrentRecord#mnesia_bombs{direction = Direction, movement = Movement}, write)
+            end
+    end,
+    mnesia:activity(transaction, Fun).
+
+read_and_remove_bomb(BombPid, Bombs_table) ->
+    Fun = fun() ->
+        [Record] = mnesia:match_object(Bombs_table, #mnesia_bombs{pid = BombPid, _ = '_'}, read),
+        mnesia:delete_object(Record),
+        Record
+    end,
+    mnesia:activity(transaction, Fun).
 %% =====================================================================
 
 -spec get_managing_node_by_coord(X::integer(), Y::integer()) -> atom().
@@ -228,6 +254,13 @@ get_managing_node_by_coord(X,Y) when X > 7 , X =< 15 , Y >= 0 , Y =< 7 -> 'GN4_s
 
 node_name_to_number(Name) ->
     list_to_integer([lists:nth(3, atom_to_list(Name))]).
+
+
+-spec get_gn_number_by_coord(X:: integer(), Y::integer()) -> {Num::integer(), Tile_table_name::atom()}.
+get_gn_number_by_coord(X,Y) when X>=0, X=<7, Y>7, Y=<15 -> {1, gn1_tiles};
+get_gn_number_by_coord(X,Y) when X > 7, X =< 15 , Y > 7 , Y =< 15 -> {2, gn2_tiles};
+get_gn_number_by_coord(X,Y) when X >= 0 , X =< 7 , Y >= 0 , Y =< 7 -> {3, gn3_tiles};
+get_gn_number_by_coord(X,Y) when X > 7 , X =< 15 , Y >= 0 , Y =< 7 -> {4, gn4_tiles}.
 
 
 -spec update_player_direction(PlayerNum::integer(), atom(), atom()) -> term().
