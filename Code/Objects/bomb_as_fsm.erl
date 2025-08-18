@@ -117,7 +117,8 @@ format_status(_Opt, [_PDict, _StateName, _State]) ->
 %% necessary cleaning up. When it returns, the gen_statem terminates with
 %% Reason. The return value is ignored.
 terminate(normal, _CurrentState, StateData = #bomb_state{}) ->
-    StateData#bomb_state.gn_pid ! {bomb_exploded, self()},
+    %% tell local GN the bomb exploded - goes to handle_info
+    % StateData#bomb_state.gn_pid ! {bomb_exploded, self()},
     ok;
 
 terminate(_Reason, _StateName, _State = #bomb_state{}) ->
@@ -181,7 +182,7 @@ armed(cast, ignite, StateData = #bomb_state{}) ->
 
 armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, normal, StateData};
+    {stop, exploded, StateData};
 
 %% unknown messages - stop the process with an error
 armed(cast, _Message, StateData = #bomb_state{}) ->
@@ -199,7 +200,7 @@ active_movement(enter, _OldState, StateData = #bomb_state{}) ->
 
 active_movement(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, normal, StateData};
+    {stop, exploded, StateData};
 
 active_movement(cast, freeze, StateData = #bomb_state{}) ->
     %% if already frozen - do nothing.
@@ -304,7 +305,7 @@ delayed_explosion_state(info, _AnyMessage, StateData = #bomb_state{}) ->
 
 delayed_explosion_state(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, normal, StateData}.
+    {stop, exploded, StateData}.
 
 %% todo: add ignoring for other messages (cast,call)? idk
 
@@ -337,13 +338,12 @@ remote_idle(cast, damage_taken, StateData = #bomb_state{}) ->
     {next_state, delayed_explosion_state, StateData, [{state_timeout, ?TICK_DELAY, external_explode}]};
 
 remote_idle(cast, ignite, StateData = #bomb_state{}) ->
-    %% wrong bomb type, ignore it
     if
         StateData#bomb_state.status == frozen -> % bomb is frozen and armed,
             UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
             {next_state, remote_armed, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]};
         true ->
-            {stop, normal, StateData}
+            {stop, exploded, StateData}
     end.
 
 % todo: add addressing/ignoring for everything not in here? (cast,call,info) idk
@@ -352,7 +352,7 @@ remote_idle(cast, ignite, StateData = #bomb_state{}) ->
 
 remote_armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, normal, StateData};
+    {stop, exploded, StateData};
 
 remote_armed(cast, freeze, StateData = #bomb_state{}) ->
     %% Already frozen, ignore this
@@ -474,7 +474,7 @@ remote_idle_movement(cast, ignite, StateData = #bomb_state{}) ->
     %% else (frozen) - update record, start state_timeout timer & switch to remote_armed_frozen_movement
     case StateData#bomb_state.status of
         normal -> % not frozen, explode immediately
-            {stop, normal, StateData};
+            {stop, exploded, StateData};
         frozen -> % frozen, update record, start timer, switch states
             UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
             {next_state, remote_armed_frozen_movement, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]}
@@ -490,7 +490,7 @@ remote_idle_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
 
 remote_armed_frozen_movement(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, normal, StateData};
+    {stop, exploded, StateData};
 
 remote_armed_frozen_movement(cast, freeze, StateData = #bomb_state{}) ->
     %% already frozen, change nothing
