@@ -15,7 +15,7 @@
 -define(TICK_DELAY, 50). % a small delay, used for very short bomb interactions and io handler polling intervals
 -define(HALFWAY_TILE, 350). % time to complete half the movement - the switching point between tiles
 -define(TILE_MOVE, 700). % time to complete a tile movement in normal movespeed (=1)
-
+-define(MIN_MOVE_REQ_TIME, 800). % minimal overhead time for requesting movement (should be higher than movement itself)
 
 %%% ================== Naming from map generator ==================
 %% todo: There's a copy of them in the map_generator.erl for now. later on it should be removed and also reference this

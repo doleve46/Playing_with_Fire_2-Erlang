@@ -24,9 +24,11 @@
     remote_armed/3, remote_idle_movement/3, remote_armed_frozen_movement/3]).
 
 %% Parameters Definitions
--define(SERVER, ?MODULE).
 -include("object_records.hrl").
--include_lib("src/clean-repo/Code/common_parameters.hrl").
+%% Linux compatible
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
+%% Windows compatible
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
 
 
 %%%===================================================================
@@ -38,7 +40,7 @@
 %% function does not return until Module:init/1 has returned.
 start_link(Pos_x, Pos_y, Type, Optional) ->
     %% optional is a list containing [Player_ID, Radius]
-    %% bomb is nameless - identified based on Pid (**consider changing if needed**)
+    %% bomb is nameless - identified based on Pid
     gen_statem:start_link({local}, ?MODULE, [[Pos_x, Pos_y], Type, self(), Optional], []).
 
 %% @doc send freeze message to bomb
@@ -46,6 +48,7 @@ freeze_bomb(BombPid) ->
     gen_statem:cast(BombPid, freeze).
 
 %% @doc return value to this is the reply, {reply, From, {request_movement, Direction}}
+%% @doc Sends a message from the overlord GN to 'kick' the bomb. If a movement is requested 
 kick_bomb(BombPid, Direction) ->
     gen_statem:call(BombPid, {kick, Direction}).
 
@@ -149,9 +152,11 @@ armed(cast, freeze, StateData = #bomb_state{}) ->
 
 armed({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     %% message from GN received - kicked by player.
-    %% Reply with request for movement in said direction: {request_movement, Direction}
+    %% Reply with direction change (to be updated in mnesia table) 
+    %% request movement in said direction, sent to local GN
     %% remain in the same state until answered, retain state_timeout
-    {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, {request_movement, Direction}}]};
+    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+    {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
 
 armed(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
     %% received a reply from GN about the movement request
@@ -207,9 +212,33 @@ active_movement(cast, freeze, StateData = #bomb_state{}) ->
     {keep_state, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode}]}
     end;
 
-active_movement({call, GN}, {kick, _Direction}, StateData = #bomb_state{}) ->
-    %% Shouldn't exist in this state. The bomb first needs to collide
-    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}};
+active_movement({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
+    %% If the new direction is opposite to current direction - stop movement
+    %% else - stop current movement and issue request based on new direction
+    Opposite_direction = calc_opposite_direction(StateData#bomb_state.direction),
+    %% stop current movement, returns to 'armed' state.
+    UpdatedData = stop_active_movement(StateData),
+    TempTime = calc_new_explode_delay(StateData),
+    if 
+        Direction == Opposite_direction ->
+            %% opposite direction - just cancel current movement timer (if exists)
+            {next_state, armed, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode}], {reply, GN, {none, false}}};
+        true ->
+            %% any other direction - send request to move at new direction
+            %% Check if there's enough time to request the movement before the bomb explodes
+            TimeLeft = TempTime - erlang:system_time(millisecond),
+            if
+                TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
+                    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+                    {next_state, armed, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode},
+                        {reply, GN, {UpdatedData#bomb_state{direction=Direction}, false}}]
+                    };
+                true -> % not enough time - do not make request
+                    {next_state, armed, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode},
+                        {reply, GN, {none, false}}]}
+            end
+    end;
+
 
 active_movement(cast, stop_movement, StateData = #bomb_state{}) ->
     %% External stop movement (i.e. player collided into it).
@@ -259,7 +288,13 @@ active_movement(cast, damage_taken, StateData = #bomb_state{}) ->
 
 active_movement(cast, ignite, StateData = #bomb_state{}) ->
     %% wrong bomb type, ignore it
-    {keep_state, StateData}.
+    {keep_state, StateData};
+
+active_movement(cast, _Message, StateData = #bomb_state{}) ->
+    {stop, unsupported_message_in_state, StateData};
+
+active_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
+    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
 
 %% ~~~~~~~~~ State = delayed_explosion_state ~~~~~~~~~
 %% Throwaway state to ignore everything but state_timeout to explode
@@ -282,7 +317,8 @@ remote_idle({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     %% message from GN received - kicked by player.
     %% Reply with request for movement in said direction: {request_movement, Direction}
     %% remain in the same state until answered, retain state_timeout
-    {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, {request_movement, Direction}}]};
+    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+    {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
 
 remote_idle(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
     %% received a reply from GN about the movement request
@@ -324,9 +360,17 @@ remote_armed(cast, freeze, StateData = #bomb_state{}) ->
 
 remote_armed({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     %% message from GN received - kicked by player.
-    %% Reply with request for movement in said direction: {request_movement, Direction}
+    %% Reply with request for movement in said direction, as long as there's enough time before explosion
     %% remain in the same state until answered, retain state_timeout
-    {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, {request_movement, Direction}}]};
+    TimeLeft = calc_new_explode_delay(StateData) - erlang:system_time(millisecond),
+    if
+        TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
+            gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+            {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
+        true -> % not enough time - do not make request
+            {keep_state, StateData, [{reply, GN, StateData#bomb_state.direction}]}
+    end;
+
 
 remote_armed(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
     %% received a reply from GN about the movement request
@@ -367,13 +411,23 @@ remote_idle_movement(enter, _OldState, StateData = #bomb_state{}) ->
 remote_idle_movement(cast, freeze, StateData = #bomb_state{}) ->
     {keep_state, StateData#bomb_state{status = frozen}};
 
-remote_idle_movement({call, GN}, {kick, _Direction}, StateData = #bomb_state{}) ->
-    %% Shouldn't exist in this state. The bomb first needs to collide
-    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}};
+remote_idle_movement({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
+    %% stop current movement. if the new direction is not opposite to current - request new movement
+    Opposite_direction = calc_opposite_direction(StateData#bomb_state.direction),
+    UpdatedData = stop_active_movement(StateData),
+    if 
+        Direction == Opposite_direction ->
+            %% opposite direction - just cancel current movement timer (if exists)        
+            {next_state, remote_idle, UpdatedData, [{reply, GN, {none, false}}]};
+        true ->
+            %% any other direction - send request to move at new direction
+            gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+            {next_state, remote_idle, UpdatedData, [{reply, GN, {none, false}}]}
+    end;
 
 remote_idle_movement(cast, stop_movement, StateData = #bomb_state{}) ->
     %% External stop movement (i.e. player collided into it).
-    %% update records, move to 'armed' state, stop movement timer
+    %% update records, stop movement timer
     case StateData#bomb_state.movement of
         {true, TimerRef} -> erlang:cancel_timer(TimerRef);
         false -> ok
@@ -424,7 +478,13 @@ remote_idle_movement(cast, ignite, StateData = #bomb_state{}) ->
         frozen -> % frozen, update record, start timer, switch states
             UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
             {next_state, remote_armed_frozen_movement, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]}
-    end.
+    end;
+
+remote_idle_movement(cast, _Message, StateData = #bomb_state{}) ->
+    {stop, unsupported_message_in_state, StateData};
+
+remote_idle_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
+    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
 
 %% ~~~~~~~~~ State = remote_armed_frozen_movement ~~~~~~~~~
 
@@ -436,9 +496,28 @@ remote_armed_frozen_movement(cast, freeze, StateData = #bomb_state{}) ->
     %% already frozen, change nothing
     {keep_state, StateData};
 
-remote_armed_frozen_movement({call, GN}, {kick, _Direction}, StateData = #bomb_state{}) ->
-    %% Shouldn't exist in this state. The bomb first needs to collide
-    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}};
+remote_armed_frozen_movement({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
+    %% stop current movement. if the new direction is not opposite to current - request new movement
+    Opposite_direction = calc_opposite_direction(StateData#bomb_state.direction),
+    UpdatedData = stop_active_movement(StateData),
+    TempTime = calc_new_explode_delay(StateData),
+    if 
+        Direction == Opposite_direction ->
+            %% opposite direction - just cancel current movement timer (if exists)
+            {next_state, remote_armed, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode}, {reply, GN, {none, false}}]};
+        true ->
+            %% any other direction - send request to move at new direction
+            %% Only sends request if there's enough time
+            TimeLeft = TempTime - erlang:system_time(millisecond),
+            if
+                TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
+                    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+                    {next_state, remote_armed, UpdatedData#bomb_state{direction = Direction},
+                        [{state_timeout, TempTime - erlang:system_time(millisecond), explode},
+                        {reply, GN, {Direction, false}}]};
+                true -> % not enough time - do not make request
+                    {keep_state, UpdatedData, [{reply, GN, {none, false}}]}
+            end;
 
 remote_armed_frozen_movement(cast, stop_movement, StateData = #bomb_state{}) ->
     %% External stop movement (i.e. player collided into it).
@@ -492,16 +571,25 @@ remote_armed_frozen_movement(cast, damage_taken, StateData = #bomb_state{}) ->
 
 remote_armed_frozen_movement(cast, ignite, StateData = #bomb_state{}) ->
     %% already armed, ignore this
-    {keep_state, StateData}.
+    {keep_state_and_data};
 
+remote_armed_frozen_movement(cast, _Message, StateData = #bomb_state{}) ->
+    {stop, unsupported_message_in_state, StateData};
+
+remote_armed_frozen_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
+    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
 
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 calc_new_explode_delay(State = #bomb_state{}) ->
+    %% Was updated to be used globally - not only for frozen states
     {_, InitialIgnitionTime} = State#bomb_state.ignited,
-    ?EXPLODE_DELAY + ?FREEZE_DELAY + InitialIgnitionTime.
+    case State#bomb_state.status of
+        frozen -> ?EXPLODE_DELAY + ?FREEZE_DELAY + InitialIgnitionTime;
+        normal -> ?EXPLODE_DELAY + InitialIgnitionTime
+    end.
 
 new_position(Old_position, Direction) ->
     [X,Y] = Old_position,
@@ -511,3 +599,24 @@ new_position(Old_position, Direction) ->
         left -> [X-1,Y];
         right -> [X+1,Y]
     end.
+
+
+stop_active_movement(State = #bomb_state{}) ->
+    %% stops movement when in active_movement state
+    %% returns updated state
+    case State#bomb_state.movement of
+        {true, TimerRef} -> erlang:cancel_timer(TimerRef);
+        false -> ok
+    end,
+    State#bomb_state{movement = false, direction = none}.
+
+
+calc_opposite_direction(Direction) ->
+    %% Returns the opposite direction to the one given
+    case Direction of
+        up -> down;
+        down -> up;
+        right -> left;
+        left -> right
+    end.
+    
