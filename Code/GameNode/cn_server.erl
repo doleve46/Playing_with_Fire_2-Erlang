@@ -32,6 +32,9 @@
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
 
+% Required modules for QLC and Mnesia
+-include_lib("stdlib/include/qlc.hrl").
+-include_lib("mnesia/include/mnesia.hrl").
 
 %% todo: move this record (if it is even necessary) to the .hrl
 -record(gn_data, {
@@ -117,7 +120,11 @@ handle_cast({query_request, AskingGN, Request}, State) ->
                 false ->
                     erlang:error(record_not_found, [node(), Player_record])
             end,
-            {noreply, State}
+            {noreply, State};
+        {handle_bomb_explosion, Coord, Radius} ->
+            %% handled in a side function
+            %% Calculates affected coordinates, then sends damage_taken messages to all objects impacted
+            bomb_explosion_handler(Coord, Radius)
     end;
 
 %% * handles a player transfer from one GN to another
@@ -198,3 +205,102 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
         end
     end,
     mnesia:activity(transaction, Fun).
+
+bomb_explosion_handler(Coord, Radius) ->
+    {atomic, ResultList} = calculate_explosion_reach(Coord, Radius),
+    %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
+    %% todo: ResultList can be passed to the graphics server so it knows where to show an explosion
+    %% Sends inflict_damage messages to all objects affected by the explosion
+    notify_affected_objects(ResultList).
+
+calculate_explosion_reach([X, Y], Max_range) ->
+    Fun = fun() -> calculate_affected([X, Y], Max_range) end,
+	mnesia:activity(transaction, Fun).
+
+
+-spec calculate_affected(Center::list(), Radius::integer()) -> list().
+calculate_affected([X,Y] = Center, Radius) ->
+	North = {0, 1}, South = {0, -1}, East = {1, 0}, West = {-1, 0},
+	
+	EmptyResults = {[], [], [], []},
+	
+	{CenterIndex, _} = req_player_move:get_gn_number_by_coord(X,Y),
+	IntermedResults = erlang:setelement(CenterIndex, EmptyResults, [Center]),
+	
+	NorthResults = trace_ray(Center, North, Radius, IntermedResults),
+	SouthResults = trace_ray(Center, South, Radius, IntermedResults),
+	EastResults = trace_ray(Center, East, Radius, IntermedResults),
+	WestResults = trace_ray(Center, West, Radius, IntermedResults),
+	
+	merge_results(NorthResults, SouthResults, EastResults, WestResults).
+	
+	
+merge_results({List1a, List1b, List1c, List1d}, {List2a, List2b, List2c, List2d}, 
+            {List3a, List3b, List3c, List3d}, {List4a, List4b, List4c, List4d}) ->
+	[List1a ++ List2a ++ List3a ++ List4a, 
+    List1b ++ List2b ++ List3b ++ List4b, 
+    List1c ++ List2c ++ List3c ++ List4c, 
+    List1d ++ List2d ++ List3d ++ List4d].
+	
+
+%% end of recursion - reverse the lists.
+trace_ray(_CurCoord, _Direction, 0, {List1, List2, List3, List4}) -> 
+	{lists:reverse(List1), lists:reverse(List2), lists:reverse(List3), lists:reverse(List4)};
+
+trace_ray([X, Y], {PlusX, PlusY}=Direction, StepsLeft, Accums) ->
+	[NextX, NextY] = [X + PlusX, Y + PlusY],
+	{TableIndex, TableName} = req_player_move:get_gn_number_by_coord(NextX, NextY),
+	
+	case mnesia:read(TableName, [NextX, NextY]) of
+		[] -> % no tile found
+			UpdatedList = erlang:element(TableIndex, Accums),
+			NewAccums = erlang:setelement(TableIndex, Accums, [ [NextX, NextY] | UpdatedList]),
+			trace_ray([NextX, NextY], Direction, StepsLeft-1, NewAccums);
+		[_] -> % found a tile
+			UpdatedList = erlang:element(TableIndex, Accums),
+			NewAccums = erlang:setelement(TableIndex, Accums, [ [NextX, NextY] | UpdatedList]),
+			trace_ray([NextX, NextY], Direction, 0, NewAccums) % go to the end of the recursion
+	end.
+
+%% Handler for letting all objects be affected by the explosion in the affected coordinates list
+notify_affected_objects(ResultList) ->
+    spawn(fun() -> process_affected_objects(lists:nth(1, ResultList), gn1_tiles, gn1_bombs, gn1_players) end),
+    spawn(fun() -> process_affected_objects(lists:nth(2, ResultList), gn2_tiles, gn2_bombs, gn2_players) end),
+    spawn(fun() -> process_affected_objects(lists:nth(3, ResultList), gn3_tiles, gn3_bombs, gn3_players) end),
+    spawn(fun() -> process_affected_objects(lists:nth(4, ResultList), gn4_tiles, gn4_bombs, gn4_players) end).
+
+process_affected_objects(ListOfCoords, Tiles_table, Bombs_table, Players_table) ->
+    Fun = fun() -> lists:foreach(
+        fun(Coord) -> process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) end, ListOfCoords
+    ) end,
+    mnesia:activity(read_only, Fun).
+
+process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) ->
+    %% using QLC querries to make this faster
+    TilesPids = qlc:e(qlc:q(
+        [T#mnesia_tiles.pid || T <- mnesia:table(Tiles_table), T#mnesia_tiles.position == Coord]
+    )),
+    BombsPids = qlc:e(qlc:q(
+        [B#mnesia_bombs.pid || B <- mnesia:table(Bombs_table), B#mnesia_bombs.position == Coord]
+    )),
+    PlayersPids = qlc:e(qlc:q(
+        [P#mnesia_players.pid || P <- mnesia:table(Players_table), P#mnesia_players.position == Coord]
+    )),
+
+    % Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
+    inflict_damage_handler(TilesPids, tile, damage_taken),
+    inflict_damage_handler(BombsPids, bomb_as_fsm, damage_taken),
+    inflict_damage_handler(PlayersPids, player_fsm, inflict_damage),
+    ok.
+
+
+inflict_damage_handler(PidsList, Module, Function) ->
+    lists:foreach(fun(Pid) ->
+        try
+            _ = apply(Module, Function, [Pid])
+        catch
+            Class:Reason ->
+                io:format(standard_error, "Error calling ~p:~p(~p). Class: ~p, Reason: ~p~n", [Module, Function, Pid, Class, Reason])
+        end
+    end, PidsList),
+    ok.

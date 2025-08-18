@@ -226,7 +226,8 @@ handle_cast(_Request, State = #gn_state{}) ->
 %% * Checks if the player stays in current GNs boundaries
 %% * If it changes GNs, transfer the players table entry to the new GN, and update the Player FSM of that change
 %% * Regardless, checks destination for power-ups/explosions
-%% ! explosions are a tricky thing - for now im not going to do it; the explosion checks everything in its radius when it explodes and that's it
+%% ! explosions are a tricky thing - for now im not going to do it; 
+%% ! the explosion checks everything in its radius when it explodes and that's it
 handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
         case req_player_move:read_and_update_coord(player, PlayerNum, State#gn_state.players_table_name) of
             not_found -> % got an error somewhere, crash the process. this is mostly for debugging as of now
@@ -258,6 +259,16 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
         end,
         {noreply, State};
 
+%% * handle bomb explosions
+handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
+    %% Read and remove bomb from mnesia table. Pass record to cn_server to process explosion
+    {atomic, Record} = req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name),
+    gen_server:cast(cn_server, 
+        {query_request, get_registered_name(self()), 
+            {handle_bomb_explosion, Record#mnesia_bombs.position, Record#mnesia_bombs.radius}}),
+    %% todo: update player's active bombs count, let playerFSM know.
+    placeholder;
+        
 
 %% * default, catch-all and ignore
 handle_info(_Info, State = #gn_state{}) ->
