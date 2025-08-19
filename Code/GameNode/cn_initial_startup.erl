@@ -270,7 +270,8 @@ create_tables(GN_node, CN_node, Node_number) ->
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_players},
-        {type, set}
+        {type, set},
+        {index, [pid]} % allows indexing (searching more easily) by pid field
     ]),
     io:format("CN: full printout of create_tables for node number #~w:~ntiles: ~w~nbombs: ~w~npowerups: ~w~nplayers: ~w~n", 
         [Node_number,Debug1 ,Debug2, Debug3, Debug4]).
