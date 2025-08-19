@@ -17,6 +17,15 @@
 -define(TILE_MOVE, 700). % time to complete a tile movement in normal movespeed (=1)
 -define(MIN_MOVE_REQ_TIME, 800). % minimal overhead time for requesting movement (should be higher than movement itself)
 
+%% Player FSM related definitions
+-define(REQUEST_COOLDOWN, 100). % cooldown between requests to GN (MAYBE TO CHANGE)
+-define(IMMUNITY_TIME, 2000). % 2 seconds immunity after damage
+-define(DISCONNECT_TIMEOUT, 60000). % 60 seconds until process kill
+%% Bot-specific constants
+-define(MIN_ACTION_DELAY, 300).  % Minimum delay between bot actions (ms)
+-define(MAX_ACTION_DELAY, 800).  % Maximum delay between bot actions (ms)
+-define(BOMB_PROBABILITY, 0.15). % Base probability of dropping bomb vs moving
+
 %%% ================== Naming from map generator ==================
 %% todo: There's a copy of them in the map_generator.erl for now. later on it should be removed and also reference this
 
