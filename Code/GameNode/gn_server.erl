@@ -162,7 +162,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             req_player_move:handle_bomb_movement_clearance(BombIdentifier, Answer, State#gn_state.bombs_table_name),
             {noreply, State};
 
-        %% ! ***REMOVE***
+        %% ! ***REMOVE*** IM NOT SURE IF I MEANT THIS - NEED TO VERIFY BEFORE DELETION
         %% ** Forwarded messages regarding the actual movement update for a player
         {update_coords, player, PlayerNum, New_coord} ->
             %% pass the message to the player FSM
@@ -208,6 +208,15 @@ handle_cast({incoming_player, PlayerNum}, State) ->
     req_player_move:check_entered_coord(Player_record), % TODO - not written yet!
     {noreply, State};
 
+%% * A tile updates his status (broken/transition to one_hit)
+handle_cast({tile_update, Message, Position}, State = #gn_state{}) ->
+    case Message of
+        tile_breaking -> % tile broke from explosion, remove from table
+            tile_helper_functions:break_tile(Position, State#gn_state.tiles_table_name);
+        one_hit -> % tile was hit, but is of two_hit type - update in mnesia table
+            ok = tile_helper_functions:update_to_one_hit(Position, State#gn_state.tiles_table_name) % ! should crash if tile not found
+    end,
+    {noreply, State};
 
 %% * this is a catch-all&ignore clause
 handle_cast(_Request, State = #gn_state{}) -> 
