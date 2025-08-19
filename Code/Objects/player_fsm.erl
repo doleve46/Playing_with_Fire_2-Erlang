@@ -9,7 +9,7 @@
 -module(player_fsm).
 -behaviour(gen_statem).
 
--export([start_link/5, input_command/2, gn_response/2, inflict_damage/1]).
+-export([start_link/5, input_command/2, gn_response/2, inflict_damage/1, bomb_exploded/1]).
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
@@ -85,6 +85,10 @@ gn_response(PlayerNum, Response) ->
 inflict_damage(PlayerPid) ->
     gen_statem:cast(PlayerPid, inflict_damage).
 
+%% @doc Notify player of one of his own bombs exploding
+bomb_exploded(PlayerPid) ->
+    gen_statem:cast(PlayerPid, bomb_exploded).
+    %% TODO: implement support for this function
 
 
 %%%===================================================================

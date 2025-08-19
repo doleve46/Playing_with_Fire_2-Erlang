@@ -12,8 +12,8 @@
 -behaviour(gen_statem).
 
 %% API
--export([start_link/4,
-    freeze_bomb/1, kick_bomb/2, answer_move_req/2,damage_taken/1]). % todo: check whether start_link/start_monitor is desired
+-export([start_monitor/4,
+    freeze_bomb/1, kick_bomb/2, answer_move_req/2,damage_taken/1]).
 
 %% gen_statem callbacks
 -export([init/1, format_status/2, terminate/3,
@@ -38,10 +38,10 @@
 %% @doc Creates a gen_statem process which calls Module:init/1 to
 %% initialize. To ensure a synchronized start-up procedure, this
 %% function does not return until Module:init/1 has returned.
-start_link(Pos_x, Pos_y, Type, Optional) ->
+start_monitor(Pos_x, Pos_y, Type, Optional) ->
     %% optional is a list containing [Player_ID, Radius]
     %% bomb is nameless - identified based on Pid
-    gen_statem:start_link({local}, ?MODULE, [[Pos_x, Pos_y], Type, self(), Optional], []).
+    gen_statem:start_monitor(?MODULE, [[Pos_x, Pos_y], Type, self(), Optional], []).
 
 %% @doc send freeze message to bomb
 freeze_bomb(BombPid) ->

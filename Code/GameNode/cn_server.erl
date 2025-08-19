@@ -139,6 +139,9 @@ handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
     end,
     {noreply, State};
 
+%% * Update active bombs in mnesia table and notify controlling player_fsm
+handle_cast({player_bomb_exploded, PlayerPid}, _State = #gn_data{}) ->
+    update_player_active_bombs(PlayerPid);
 
 
 %% @doc General cast messages - as of now ignored.
@@ -304,3 +307,27 @@ inflict_damage_handler(PidsList, Module, Function) ->
         end
     end, PidsList),
     ok.
+
+
+update_player_active_bombs(PlayerPid) ->
+    Tables = [gn1_players, gn2_players, gn3_players, gn4_players],
+    Fun = fun() -> find_in_player_tables(PlayerPid, Tables) end,
+    {atomic, Result} = mnesia:activity(transaction, Fun),
+    case Result of
+        not_found ->
+            erlang:error(player_not_found, [PlayerPid]);
+        {table_updated, Player_record} ->
+            %% Notify player_fsm of this change directly
+            player_fsm:bomb_exploded(Player_record#mnesia_players.pid)
+    end.
+
+
+find_in_player_tables(_Pid, []) -> not_found;
+find_in_player_tables(Pid, [Table| T]) ->
+    case mnesia:index_read(Table, Pid, pid) of
+        [Record] ->  % update active bombs in mnesia table
+            UpdatedRecord = Record#mnesia_players{bombs_placed = Record#mnesia_players.bombs_placed - 1},
+            mnesia:write(Table, UpdatedRecord, write),
+            {table_updated, Record};
+        [] -> find_in_player_tables(Pid, T)
+    end.

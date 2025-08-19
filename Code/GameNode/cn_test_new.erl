@@ -136,7 +136,8 @@ create_tables(GN_node, CN_node, Node_number) ->
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_players},
-        {type, set}
+        {type, set},
+        {index, [pid]} % allows indexing (searching more easily) by pid field
     ]),
     [Mnesia_tiles_name, Mnesia_bombs_name, Mnesia_powerups_name, Mnesia_players_name].
 

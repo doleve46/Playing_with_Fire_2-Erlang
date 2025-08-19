@@ -266,8 +266,8 @@ handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
     gen_server:cast(cn_server, 
         {query_request, get_registered_name(self()), 
             {handle_bomb_explosion, Record#mnesia_bombs.position, Record#mnesia_bombs.radius}}),
-    %% todo: update player's active bombs count, let playerFSM know.
-    placeholder;
+    %% Update player's active bombs count, let playerFSM know.
+    notify_owner_of_bomb_explosion(Record#mnesia_bombs.owner, State);
         
 
 %% * default, catch-all and ignore
@@ -341,3 +341,33 @@ initialize_players(TableName, PlayerType, GN_number) ->
         end,
     mnesia:activity(transaction, Fun).
 
+
+notify_owner_of_bomb_explosion(OwnerID, State) ->
+    %% Notifies owner for the bomb's explosion, as well as updates players' mnesia table for bombs_placed
+    case OwnerID of
+        none -> %default bomb, no player owner
+            ok;
+        Pid -> % there's a real player's Pid on the bomb
+            Fun = fun() -> qlc:eval(qlc:q(
+                Result = [ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.pid == Pid]
+            )),
+            case Result of
+                {player, PlayerRecord} -> %% update active bomb count in mnesia table
+                    mnesia:write(PlayerRecord#mnesia_players{bombs_placed = (PlayerRecord#mnesia_players.bombs_placed - 1)});
+                true -> ok
+            end,
+            Result % return list back from function
+            end, % fun()'s "end"
+            {atomic, Result} = mnesia:activity(transaction, Fun),
+            case Result of
+                [{player, MatchingPlayerRecord}] -> % player found within GN
+                    player_fsm:bomb_exploded(MatchingPlayerRecord#mnesia_players.pid);
+                [] -> % player not found within GN, forward request to CN
+                    %% send cn_server a request to update active bomb in mnesia, and also notify relevant fsm_player
+                    gen_server:cast(cn_server, 
+                        {player_bomb_exploded, Pid});
+                _ReturnValue -> % ! shouldn't happen - error out, this is for debugging
+                    erlang:error(bad_return_value, [Pid, Result])
+            end,
+            ok
+    end.

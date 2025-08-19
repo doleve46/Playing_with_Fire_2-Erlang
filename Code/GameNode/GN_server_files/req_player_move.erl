@@ -159,7 +159,7 @@ get_records_at_location(Coordinate, State = #gn_state{}) ->
                 [ {bomb, B} || B <- mnesia:table(State#gn_state.bombs_table_name), B#mnesia_bombs.position == Coordinate],
                 [ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.position == Coordinate]
             ))) end,
-        mnesia:activity(transaction, Fun).
+        mnesia:activity(read_only, Fun).
 
 
 -spec interact_with_entity(list(), list(), up|down|left|right, #gn_state{}) -> can_move|cant_move.
