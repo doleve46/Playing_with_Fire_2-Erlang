@@ -11,14 +11,16 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2, send_input/2, set_player_pid/2]).
+-export([start_link/1, send_input/2, set_player_pid/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
-% linux compatible
--include_lib("src/clean-repo/Code/common_parameters.hrl").
+%% linux compatible
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
+%% windows compatible
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
 
 
 -record(io_state, {
@@ -34,10 +36,10 @@
 %%%===================================================================
 
 %% @doc Start I/O handler for a player
-start_link(PlayerNumber, KeyboardMode) ->
+start_link(PlayerNumber) ->
     ServerName = list_to_atom("io_handler_" ++ integer_to_list(PlayerNumber)),
     gen_server:start_link({local, ServerName}, ?MODULE, 
-        [PlayerNumber, KeyboardMode], []).
+        [PlayerNumber], []).
 
 %% @doc Send input (for testing)
 send_input(PlayerNumber, Input) ->
