@@ -66,24 +66,12 @@
 %%%===================================================================
 
 %% @doc Spawns the player FSM with appropriate I/O handler
--spec start_link(PlayerNumber::integer(), GN_Pid::pid(), IsBot::boolean(), BotDifficulty::atom()) ->
+-spec start_link(PlayerNumber::integer(), GN_Pid::pid(), IsBot::boolean(), IO_pid::pid()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link(PlayerNumber, GN_Pid, IsBot, BotDifficulty) ->
-    %% Spawn the appropriate I/O or bot handler based on player type
-    IOHandlerPid = case IsBot of
-        true -> 
-            %% todo: change implementation such that player_fsm creates the bot/io handler instead of gn_server
-            {ok, BotPid} = bot_handler:start_link(PlayerNumber, BotDifficulty), % default difficulty for bots
-            BotPid; % Bot uses internal logic, no external I/O handler needed
-        false ->
-            % Spawn I/O handler for human player
-            {ok, IOPid} = io_handler:start_link(PlayerNumber),
-            IOPid
-    end,
-
+start_link(PlayerNumber, GN_Pid, IsBot, IO_pid) ->
     % Spawn player FSM
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
-    gen_statem:start_link({local, ServerName}, ?MODULE, [PlayerNumber, GN_Pid, IsBot, IOHandlerPid], []).
+    gen_statem:start_link({local, ServerName}, ?MODULE, [PlayerNumber, GN_Pid, IsBot, IO_pid], []).
 
 
 %% @doc Send input command from I/O handler
@@ -111,7 +99,8 @@ bomb_exploded(PlayerPid) ->
 callback_mode() ->
     state_functions.
 
-
+-spec init([integer(), pid(), boolean(), pid()]) ->
+    {ok, state, #player_data{}}.
 init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
     {_, GN_registered_name} = process_info(GN_Pid, registered_name),
     Data = #player_data{
@@ -241,12 +230,14 @@ dead(Type, Event, Data) ->
 disconnected(info, disconnect_timeout, Data) ->
     % 60 seconds passed, kill process
     {stop, disconnect_timeout, Data};
+
 disconnected(cast, {input_command, _Command}, Data) ->
     % Player reconnected
     NewData = Data#player_data{disconnected = 0},
     {next_state, idle, NewData};
+
 disconnected(Type, Event, Data) ->
-handle_common_events(Type, Event, Data).
+    handle_common_events(Type, Event, Data).
 
 %%%===================================================================
 %%% Internal Functions
@@ -418,6 +409,8 @@ handle_disconnect_check(Data) ->
     end.
 
 handle_common_events(_Type, _Event, Data) ->
+    io:format("Unhandled event: ~p~n", [{_Type, _Event}]),
+    error_logger:info_msg("Unhandled event: ~p~n", [{_Type, _Event}]),
     {keep_state, Data}. % default handler for unexpected events
 
 %% Handle bomb placement request

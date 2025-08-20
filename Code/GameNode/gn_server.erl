@@ -328,16 +328,21 @@ initialize_tiles(TableName) ->
         end,
     mnesia:activity(transaction, Fun).
 
--spec initialize_players(TableName:: atom(), PlayerType:: atom(), GN_number::1|2|3|4) -> term().
-initialize_players(TableName, PlayerType, GN_number) ->
+
+-spec initialize_players(TableName:: atom(), PlayerIsBot:: boolean(), GN_number::1|2|3|4) -> term().
+initialize_players(TableName, PlayerIsBot, GN_number) ->
     %% start io_handler gen_server
-    {ok, IO_pid} = io_handler:start_link(GN_number, PlayerType),
+    {ok, IO_pid} = case PlayerIsBot of
+        true -> % bot
+            %% ? FOR NOW, DIFFICULTY IS SET TO 'EASY' BY DEFAULT. CAN BE RANDOMIZED?
+            bot_handler:start_link(GN_number, easy);
+        false -> % player
+            io_handler:start_link(GN_number)
+    end,
+    %% Initialize player_fsm process based on data within mnesia table (as initialized whe map was created)
     Fun = fun() ->
         [PlayerRecord = #mnesia_players{}] = mnesia:read(TableName, GN_number),
-        {ok, FSM_pid} = player_fsm:start_link(GN_number, PlayerRecord#mnesia_players.position, self(),
-         PlayerType, IO_pid),
-        %% update FSM Pid in the IO process
-        ok = io_handler:set_player_pid(IO_pid, FSM_pid),
+        {ok, FSM_pid} = player_fsm:start_link(GN_number, self(), PlayerIsBot, IO_pid),
         %% Update mnesia record
         UpdatedRecord = PlayerRecord#mnesia_players{
             local_gn = node(),
@@ -345,7 +350,7 @@ initialize_players(TableName, PlayerType, GN_number) ->
             target_gn = node(), % by default starts at his own GN's quarter
             io_handler_pid = IO_pid,
             pid = FSM_pid,
-            bot = PlayerType},
+            bot = PlayerIsBot},
         mnesia:write(TableName, UpdatedRecord, write)
         end,
     mnesia:activity(transaction, Fun).
