@@ -21,19 +21,19 @@ loop(Port) ->
     end.
 
 handle_gui_event(Port, "play_clicked") ->
-    io:format("User clicked Play – checking server connections...~n"),
+    io:format("User clicked Play — waiting for GN connections...~n"),
     send(Port, "show_loading"),
-    check_server_connections(Port);
+    wait_for_gn_connections(Port);
     
 handle_gui_event(Port, "exit_clicked") ->
-    io:format("User clicked Exit – exiting~n"),
+    io:format("User clicked Exit — exiting~n"),
     port_close(Port),
     ok;
 
 handle_gui_event(Port, "retry_clicked") ->
-    io:format("Retrying – checking connections again~n"),
+    io:format("Retrying — waiting for GN connections again~n"),
     send(Port, "show_loading"),
-    check_server_connections(Port);
+    wait_for_gn_connections(Port);
 
 handle_gui_event(Port, "return_to_menu") ->
     send(Port, "show_main_menu");
@@ -51,7 +51,7 @@ handle_gui_event(Port, "bot_clicked") ->
     start_game(Port);
 
 handle_gui_event(Port, "choice_timeout") ->
-    io:format("Player choice timed out – defaulting to bot~n"),
+    io:format("Player choice timed out — defaulting to bot~n"),
     send(Port, "show_game_setup"),
     timer:sleep(3000),
     start_game(Port);
@@ -59,66 +59,23 @@ handle_gui_event(Port, "choice_timeout") ->
 handle_gui_event(_, Unknown) ->
     io:format("Unhandled message: ~p~n", [Unknown]).
 
-%% Check CN server and GN connections
-check_server_connections(Port) ->
-    spawn(fun() -> connection_checker_loop(Port, 0) end).
-
-connection_checker_loop(Port, ElapsedTime) when ElapsedTime >= 10000 ->
-    %% After 10 seconds, show error if still not connected
-    send(Port, "show_error");
-
-connection_checker_loop(Port, ElapsedTime) ->
-    case check_cn_and_gn_status() of
-        {connected, 4} ->
-            %% All 4 GNs connected, proceed to player choice
+%% Wait for all GN connections (CN already started)
+wait_for_gn_connections(Port) ->
+    spawn(fun() ->
+        try
+            % Wait for all GN connections (CN is already running)
+            % This will block until all 4 GNs are connected
+            ok = cn_initial_startup:await_initial_connections(0, []),
+            % All 4 GNs connected successfully
             io:format("All servers connected! Moving to player choice~n"),
             send(Port, "show_player_choice"),
-            start_choice_timer(Port);
-        {connected, ConnectedCount} ->
-            %% CN connected but not all GNs
-            io:format("Waiting for connections: ~p/4~n", [ConnectedCount]),
-            send(Port, lists:flatten(io_lib:format("show_waiting:~p", [ConnectedCount]))),
-            timer:sleep(1000),
-            connection_checker_loop(Port, ElapsedTime + 1000);
-        not_connected ->
-            %% CN not connected
-            io:format("CN server not connected~n"),
-            send(Port, "show_waiting:0"),
-            timer:sleep(1000),
-            connection_checker_loop(Port, ElapsedTime + 1000)
-    end.
-
-%% Check if CN server is running and how many GNs are connected
-check_cn_and_gn_status() ->
-    try
-        case cn_server:get_connection_status() of
-            {ok, ConnectedCount} ->
-                {connected, ConnectedCount};
-            {error, cn_not_running} ->
-                not_connected;
-            {error, _} ->
-                not_connected
+            start_choice_timer(Port)
+        catch
+            Class:Reason:Stacktrace ->
+                io:format("Error waiting for connections: ~p:~p~n~p~n", [Class, Reason, Stacktrace]),
+                send(Port, "show_error")
         end
-    catch
-        _:_ ->
-            not_connected
-    end.
-
-check_detailed_cn_and_gn_status() ->
-    try
-        case cn_server:get_detailed_connection_status() of
-            {ok, ConnectedCount, GNStatus} ->
-                io:format("Detailed GN Status: ~p~n", [GNStatus]),
-                {connected, ConnectedCount, GNStatus};
-            {error, cn_not_running} ->
-                not_connected;
-            {error, _} ->
-                not_connected
-        end
-    catch
-        _:_ ->
-            not_connected
-    end.
+    end).
 
 %% Start 60-second timer for player choice
 start_choice_timer(Port) ->
