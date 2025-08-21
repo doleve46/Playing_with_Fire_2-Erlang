@@ -181,6 +181,7 @@ convert_input_to_command(Input) ->
         
         % Control commands
         escape -> {ok, quit};  % Escape to quit
+        %% TODO: This is not implemented or supported at the moment - do we even allow to quit?
         
         _ -> invalid_input
     end.

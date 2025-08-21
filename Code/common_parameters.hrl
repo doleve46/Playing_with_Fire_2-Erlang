@@ -18,7 +18,7 @@
 -define(MIN_MOVE_REQ_TIME, 800). % minimal overhead time for requesting movement (should be higher than movement itself)
 
 %% Player FSM related definitions
--define(REQUEST_COOLDOWN, 100). % cooldown between requests to GN (MAYBE TO CHANGE)
+-define(REQUEST_COOLDOWN, 150). % cooldown between requests to GN (MAYBE TO CHANGE)
 -define(IMMUNITY_TIME, 2000). % 2 seconds immunity after damage
 -define(DISCONNECT_TIMEOUT, 60000). % 60 seconds until process kill
 %% Bot-specific constants

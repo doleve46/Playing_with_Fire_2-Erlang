@@ -162,24 +162,10 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             req_player_move:handle_bomb_movement_clearance(BombIdentifier, Answer, State#gn_state.bombs_table_name),
             {noreply, State};
 
-        %% ! ***REMOVE*** IM NOT SURE IF I MEANT THIS - NEED TO VERIFY BEFORE DELETION
-        %% ** Forwarded messages regarding the actual movement update for a player
-        {update_coords, player, PlayerNum, New_coord} ->
-            %% pass the message to the player FSM
-            Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
-            case erlang:is_record(Player_record, mnesia_players) of 
-                true -> 
-                    %% Everything as normal (found the record), pass the message
-                    player_fsm:gn_response(PlayerNum, {update_coords, New_coord});
-                false -> % crash the process
-                    erlang:error(record_not_found, [node(), Player_record])
-            end,
-            {noreply, State};
-
         %% * A player has changed coordinates, resulting in a target GN change.
         %% * this message is sent by the previous GN to let the player FSM update his target
         {new_target_gn, player, PlayerNum, New_GN} ->
-            player_fsm:gn_response(PlayerNum, {new_target_gn, New_GN})
+            player_fsm:update_target_gn(PlayerNum, New_GN)
         
         
     end;
@@ -258,7 +244,7 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
                 %% Check where Player FSM is physically - current node or someplace else
                 case get_registered_name(self()) of
                     Player_local_gn -> %% player FSM on this node
-                        player_fsm:gn_response(PlayerNum, {new_target_gn, New_GN});
+                        player_fsm:update_target_gn(PlayerNum, New_GN);
                     _ -> %% Player FSM on another node
                         gen_server:cast(cn_server,
                             {forward_request, Player_local_gn, 
