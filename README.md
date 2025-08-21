@@ -1,1 +1,1 @@
-# Playing with Fire 2-Earlang
+# Playing with Fire 2-Erlang
