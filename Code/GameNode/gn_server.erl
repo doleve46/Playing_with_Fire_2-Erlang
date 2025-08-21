@@ -326,4 +326,3 @@ initialize_players(TableName, PlayerType, GN_number) ->
         mnesia:write(TableName, UpdatedRecord, write)
         end,
     mnesia:activity(transaction, Fun).
-
