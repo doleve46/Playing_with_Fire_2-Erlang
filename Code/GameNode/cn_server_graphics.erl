@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-
 -module(cn_server_graphics).
-
-=======
--module(cn_graphics_server)
 -behaviour(gen_server).
 
 %% API
@@ -15,6 +10,7 @@
 -include("mnesia_records.hrl").
 
 -define(MAP_SIZE, 16).
+-define(DEATH_DISPLAY_TIME, 10000). % Show dead players for 10 seconds
 
 -record(state, {
     gn_graphics_servers = [],     % List of {Node, Pid} for GN graphics servers
@@ -24,7 +20,9 @@
     subscribed_tables = [],       % List of tables subscribed to
     update_counter = 0,           % Counter for updates (debugging)
     movement_states = #{},        % Track active player movements
-    bomb_movements = #{}          % Track active bomb movements
+    bomb_movements = #{},         % Track active bomb movements
+    dead_players = #{},           % Track recently deceased players: PlayerID => {DeathTime, LastKnownState, LocalGN}
+    last_known_players = #{}      % Track last known player states for death detection
 }).
 
 %%%===================================================================
@@ -52,17 +50,20 @@ init([GNNodes]) ->
     % Create initial state
     State = #state{gn_nodes = GNNodes},
    
-    % Set up mnesia subscriptions (not sure if needs delay)
+    % Set up mnesia subscriptions
     erlang:send(self(), setup_subscriptions),
    
-    % Spawn GN graphics servers (not sure if needs delay)
+    % Spawn GN graphics servers
     erlang:send_after(30, self(), spawn_gn_servers),
    
     % Create Python port
     erlang:send(self(), create_python_port),
    
-    % Start periodic updates (not sure if needs delay)
+    % Start periodic updates
     erlang:send_after(25, self(), periodic_update),
+   
+    % Clean up dead players periodically
+    erlang:send_after(5000, self(), cleanup_dead_players),
    
     io:format("✅ CN Graphics Server initialized~n"),
     {ok, State}.
@@ -77,7 +78,7 @@ handle_call(_Request, _From, State) ->
 %% Handle asynchronous casts
 handle_cast(force_update, State) ->
     io:format("🔄 Updating map state...~n"),
-    NewMapState = create_current_map_state(),
+    NewMapState = create_current_map_state(State),
     UpdatedState = State#state{current_map_state = NewMapState},
     send_map_to_all_targets(UpdatedState),
     {noreply, UpdatedState};
@@ -93,7 +94,6 @@ handle_info(setup_subscriptions, State) ->
     io:format("✅ Subscribed to tables: ~p~n", [SubscribedTables]),
     {noreply, State#state{subscribed_tables = SubscribedTables}};
 
-%% Not sure if its right...
 handle_info(spawn_gn_servers, State) ->
     io:format("🚀 Spawning GN graphics servers...~n"),
     GNServers = spawn_all_gn_graphics_servers(State#state.gn_nodes),
@@ -104,7 +104,7 @@ handle_info(create_python_port, State) ->
     io:format("🐍 Creating Python port...~n"),
     Port = create_python_visualizer_port(),
     % Create initial map state
-    InitialMapState = create_current_map_state(),
+    InitialMapState = create_current_map_state(State),
     UpdatedState = State#state{
         python_port = Port,
         current_map_state = InitialMapState
@@ -116,7 +116,7 @@ handle_info(create_python_port, State) ->
 
 handle_info(periodic_update, State) ->
     % Periodic update every 25 milliseconds
-    NewMapState = create_current_map_state(),
+    NewMapState = create_current_map_state(State),
     UpdatedState = State#state{
         current_map_state = NewMapState,
         update_counter = State#state.update_counter + 1
@@ -136,37 +136,73 @@ handle_info(periodic_update, State) ->
     erlang:send_after(25, self(), periodic_update),
     {noreply, UpdatedState};
 
-% Handle mnesia table events
+handle_info(cleanup_dead_players, State) ->
+    % Remove dead players that have been shown long enough
+    CurrentTime = erlang:system_time(millisecond),
+    NewDeadPlayers = maps:filter(fun(_PlayerID, {DeathTime, _LastState, _LocalGN}) ->
+        CurrentTime - DeathTime < ?DEATH_DISPLAY_TIME
+    end, State#state.dead_players),
+    
+    CleanedCount = maps:size(State#state.dead_players) - maps:size(NewDeadPlayers),
+    if CleanedCount > 0 ->
+        io:format("🧹 Cleaned up ~w expired dead players~n", [CleanedCount]);
+    true -> ok
+    end,
+    
+    % Schedule next cleanup
+    erlang:send_after(5000, self(), cleanup_dead_players),
+    {noreply, State#state{dead_players = NewDeadPlayers}};
+
+% Handle mnesia table events with death detection
 handle_info({mnesia_table_event, {write, Table, Record, ActivityId}}, State) ->
-    case Record of
+    NewState = case Record of
         #mnesia_players{} ->
-            % Check if this is a movement-related update
+            % Update last known player state
+            PlayerID = Record#mnesia_players.player_number,
+            NewLastKnown = maps:put(PlayerID, Record, State#state.last_known_players),
+            
+            % Check for movement changes
             case detect_player_movement_change(Record, State#state.current_map_state) of
                 {movement_started, PlayerData} ->
                     send_movement_confirmation_to_python(State, player, PlayerData),
-                    handle_mnesia_update(State);
+                    State#state{last_known_players = NewLastKnown};
                 no_movement_change ->
                     io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
-                    handle_mnesia_update(State)
+                    State#state{last_known_players = NewLastKnown}
             end;
         #mnesia_bombs{} ->
-            % Check if this is a bomb movement-related update
+            % Check for bomb movement changes
             case detect_bomb_movement_change(Record, State#state.current_map_state) of
                 {movement_started, BombData} ->
                     send_movement_confirmation_to_python(State, bomb, BombData),
-                    handle_mnesia_update(State);
+                    State;
                 no_movement_change ->
                     io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
-                    handle_mnesia_update(State)
+                    State
             end;
         _ ->
             io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
-            handle_mnesia_update(State)
-    end;
+            State
+    end,
+    handle_mnesia_update(NewState);
 
 handle_info({mnesia_table_event, {delete, Table, Key, ActivityId}}, State) ->
-    io:format("🗑️ Mnesia delete: ~w from table ~w~n", [Key, Table]),
-    handle_mnesia_update(State);
+    NewState = case Table of
+        TableName when TableName == gn1_players; TableName == gn2_players; 
+                       TableName == gn3_players; TableName == gn4_players ->
+            % Player deletion detected - aka death
+            case extract_player_id_from_key(Key) of
+                {ok, PlayerID} ->
+                    handle_player_death(PlayerID, Table, State);
+                error ->
+                    io:format("⚠️ Could not extract player ID from key: ~p~n", [Key]),
+                    State
+            end;
+        _ ->
+            io:format("🗑️ Mnesia delete: ~w from table ~w~n", [Key, Table]),
+            State
+    end,
+    handle_mnesia_update(NewState);
 
 handle_info({mnesia_table_event, _Event}, State) ->
     % Other mnesia events
@@ -211,8 +247,98 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
-%%% Internal functions
+%%% Death Detection Functions
 %%%===================================================================
+
+%% Extract player ID from mnesia delete key
+extract_player_id_from_key(Key) ->
+    try
+        % Key might be just PlayerID or {PlayerID} or more complex
+        case Key of
+            PlayerID when is_integer(PlayerID) -> {ok, PlayerID};
+            {PlayerID} when is_integer(PlayerID) -> {ok, PlayerID};
+            {PlayerID, _} when is_integer(PlayerID) -> {ok, PlayerID};
+            _ -> error
+        end
+    catch
+        _:_ -> error
+    end.
+
+%% Handle player death
+handle_player_death(PlayerID, Table, State) ->
+    CurrentTime = erlang:system_time(millisecond),
+    
+    % Get last known state of this player
+    LastKnownState = maps:get(PlayerID, State#state.last_known_players, undefined),
+    
+    % Determine which GN this player belonged to based on table name
+    LocalGN = case Table of
+        gn1_players -> gn1;
+        gn2_players -> gn2;
+        gn3_players -> gn3;
+        gn4_players -> gn4;
+        _ -> unknown
+    end,
+    
+    % Create death record
+    DeathRecord = {CurrentTime, LastKnownState, LocalGN},
+    NewDeadPlayers = maps:put(PlayerID, DeathRecord, State#state.dead_players),
+    
+    % Remove from last known players since they're now dead
+    NewLastKnown = maps:remove(PlayerID, State#state.last_known_players),
+    
+    io:format("💀 Player ~w died! (was on ~w)~n", [PlayerID, LocalGN]),
+    io:format("🕐 Death recorded at ~w~n", [CurrentTime]),
+    
+    State#state{
+        dead_players = NewDeadPlayers,
+        last_known_players = NewLastKnown
+    }.
+
+%%%===================================================================
+%%% Enhanced Map Creation with Death Information
+%%%===================================================================
+
+%% Create current unified map state from all mnesia tables including death info
+create_current_map_state(State) ->
+    try
+        % Initialize empty map
+        EmptyMap = create_empty_map(),
+       
+        % Add tiles from all GN tables
+        MapWithTiles = add_tiles_to_map(EmptyMap),
+       
+        % Add powerups
+        MapWithPowerups = add_powerups_to_map(MapWithTiles),
+       
+        % Add bombs
+        MapWithBombs = add_bombs_to_map(MapWithPowerups),
+       
+        % Add players
+        MapWithPlayers = add_players_to_map(MapWithBombs),
+       
+        % Create enhanced map state with death information
+        #{
+            map => MapWithPlayers,
+            dead_players => State#state.dead_players,
+            update_time => erlang:system_time(millisecond)
+        }
+    catch
+        _:Error ->
+            io:format("❌ Error creating map state: ~p~n", [Error]),
+            #{
+                map => create_empty_map(),
+                dead_players => #{},
+                update_time => erlang:system_time(millisecond)
+            }
+    end.
+
+%%%===================================================================
+%%% Rest of the existing functions (unchanged)
+%%%===================================================================
+
+%% [Include all the existing functions from the original file]
+%% Movement detection, bomb handling, map creation, etc.
 
 %% Detect player movement changes
 detect_player_movement_change(NewRecord, CurrentMapState) ->
@@ -310,7 +436,7 @@ send_movement_confirmation_to_python(State, EntityType, EntityData) ->
 
 %% Handle mnesia updates by recreating map state
 handle_mnesia_update(State) ->
-    NewMapState = create_current_map_state(),
+    NewMapState = create_current_map_state(State),
     UpdatedState = State#state{current_map_state = NewMapState},
     send_map_to_all_targets(UpdatedState),
     {noreply, UpdatedState}.
@@ -361,7 +487,7 @@ spawn_gn_graphics_server(Node) ->
                 {error, Error}
         end
     catch
-        _Error ->
+        Error ->
             io:format("❌ Exception spawning GN server on ~w: ~p~n", [Node, Error]),
             {error, Error}
     end.
@@ -377,30 +503,6 @@ create_python_visualizer_port() ->
         _:Error ->
             io:format("❌ Failed to create Python port: ~p~n", [Error]),
             undefined
-    end.
-
-%% Create current unified map state from all mnesia tables
-create_current_map_state() ->
-    try
-        % Initialize empty map
-        EmptyMap = create_empty_map(),
-       
-        % Add tiles from all GN tables
-        MapWithTiles = add_tiles_to_map(EmptyMap),
-       
-        % Add powerups
-        MapWithPowerups = add_powerups_to_map(MapWithTiles),
-       
-        % Add bombs
-        MapWithBombs = add_bombs_to_map(MapWithPowerups),
-       
-        % Add players
-        FinalMap = add_players_to_map(MapWithBombs),
-       
-        FinalMap
-    catch
-        _:Error ->
-            io:format("❌ Error creating map state: ~p~n", [Error])
     end.
 
 %% Create empty 16x16 map with free tiles
@@ -491,7 +593,7 @@ add_bombs_to_map(Map) ->
         add_bombs_from_table(Table, AccMap)
     end, Map, BombTables).
 
-%% Add bombs from a specific table, include speed info
+%% Add bombs from a specific table
 add_bombs_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_bombs{_ = '_'}, [], ['$_']}])
@@ -524,7 +626,7 @@ update_map_with_bomb(Map, BombRecord) ->
         Map
     end.
 
-%% Add players from all tables, include speed
+%% Add players from all tables
 add_players_to_map(Map) ->
     PlayerTables = [gn1_players, gn2_players, gn3_players, gn4_players],
     lists:foldl(fun(Table, AccMap) ->
@@ -547,7 +649,7 @@ add_players_from_table(Table, Map) ->
             Map
     end.
 
-%% Update map with player information, with speed
+%% Update map with player information
 update_map_with_player(Map, PlayerRecord) ->
     #mnesia_players{position = [X, Y], player_number = PlayerID,
                     life = Life, speed = Speed} = PlayerRecord,
@@ -600,10 +702,10 @@ send_map_to_python(State) ->
     if State#state.python_port =/= undefined andalso
        State#state.current_map_state =/= undefined ->
         try
-            % Convert map to binary Erlang term
+            % Convert enhanced map state to binary Erlang term
             MapBinary = term_to_binary(State#state.current_map_state),
             port_command(State#state.python_port, MapBinary),
-            io:format("🐍 Map sent to Python visualizer~n")
+            io:format("🗺️ Enhanced map (with death info) sent to Python visualizer~n")
         catch
             _:Error ->
                 io:format("❌ Error sending to Python: ~p~n", [Error])
@@ -612,13 +714,14 @@ send_map_to_python(State) ->
         io:format("⚠️ Python port or map state not ready~n")
     end.
 
-%% Send map to all GN graphics servers
+%% Send map to all GN graphics servers with death info
 send_map_to_gn_servers(State) ->
     lists:foreach(fun({Node, Pid}) ->
         if is_pid(Pid) andalso is_process_alive(Pid) ->
             try
+                % Send enhanced map state with death information
                 gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                io:format("📡 Map sent to GN server on ~w~n", [Node])
+                io:format("📡 Enhanced map (with death info) sent to GN server on ~w~n", [Node])
             catch
                 _:Error ->
                     io:format("❌ Error sending to GN server on ~w: ~p~n", [Node, Error])
