@@ -15,8 +15,8 @@
 %%% **Update (21/8):**
 %%% - Overhauled entire state machine
 %%% - Fixed internal and helper functions
-%%% TODO: Need to implement movespeed-dependent delays
-%%% TODO: Need to write apply_powerup/2 - wasn't overhauled yet
+%%% **Update (23/8):**
+%%% - Implemented apply_powerup/2
 %%% @end
 %%% Created : 06. Jul 2025
 %%%-------------------------------------------------------------------
@@ -102,7 +102,7 @@ update_target_gn(PlayerPid, NewTargetGN) ->
     gen_statem:cast(PlayerPid, {update_target_gn, NewTargetGN}).
 
 %% @doc notify player FSM about relevant power-ups gathered (those we keep track of within)
-notify_power_up(PlayerPid, PowerUp) ->
+notify_power_up(PlayerPid, PowerUp) -> % content should be {movespeed, X} | {bombs, X} | {life, X}
     gen_statem:cast(PlayerPid, {notify_power_up, PowerUp}).
 
 %%%===================================================================
@@ -688,21 +688,18 @@ can_send_request(Command, Data) ->
 can_drop_bomb(Data) ->
     Data#player_data.bombs_placed < Data#player_data.bombs. % can drop bomb if placed bombs < max bombs
 
-
-% ? APPLY POWER UP SHOULD BE OVERHAULED - JUST RECEIVE MESSAGES FROM GN WITH BUFFS STORED IN THIS PROCESS
-apply_powerup(none, Data) ->
-    Data;
-apply_powerup(Powerup, Data) -> %% TODO - wasn't fixed yet
+-spec apply_powerup(Powerup::tuple(), Data::#player_data{}) -> ok.
+apply_powerup(Powerup, Data) ->
     case Powerup of
-        movespeed ->
-            Data#player_data{speed = Data#player_data.speed + 1};
-        more_bombs ->
-            Data#player_data{bombs = Data#player_data.bombs + 1};
-        extra_life ->
-            Data#player_data{life = Data#player_data.life + 1};
+        {movespeed, X} ->
+            Data#player_data{speed = X};
+        {bombs, X} ->
+            Data#player_data{bombs = X};
+        {life, X} ->
+            Data#player_data{life = Data#player_data.life + X};
         _ -> % powerup not stored on player fsm process
             ok
-    end.
+    end, ok.
 
 
 send_io_ack(Response, Data) ->
