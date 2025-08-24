@@ -2,7 +2,9 @@
 %%% @author dolev
 %%% @copyright (C) 2025, <COMPANY>
 %%% @doc
-%%%
+%%% ** UPDATE(24/08): **
+%%% The bomb movement is not currently under work.
+%%% Anything related to it is postponed
 %%% @end
 %%% Created : 10. Jul 2025 15:41
 %%%-------------------------------------------------------------------
@@ -13,7 +15,7 @@
 
 %% API
 -export([start_monitor/4,
-    freeze_bomb/1, kick_bomb/2, answer_move_req/2,damage_taken/1]).
+    freeze_bomb/1, kick_bomb/2, answer_move_req/2, damage_taken/1, ignite_bomb/1]).
 
 %% gen_statem callbacks
 -export([init/1, format_status/1, terminate/3,
@@ -60,6 +62,9 @@ answer_move_req(BombPid, Answer) ->
 damage_taken(BombPid) ->
     gen_statem:cast(BombPid, damage_taken).
 
+%% @doc send ignite message to remote bomb
+ignite_bomb(BombPid) ->
+    gen_statem:cast(BombPid, ignite).
 %%%===================================================================
 %%% gen_statem callbacks
 %%%===================================================================
@@ -200,7 +205,7 @@ armed(_Type, _Message, StateData = #bomb_state{}) ->
 
 active_movement(enter, _OldState, StateData = #bomb_state{}) ->
     %% entering to this state from any other state
-    UpdatedData = StateData#bomb_state{movement = {true, erlang:send_after(?HALFWAY_TILE, self(), halfway_timer)}},
+    UpdatedData = StateData#bomb_state{movement = true},
     {keep_state, UpdatedData};
 
 active_movement(state_timeout, _Reason, StateData = #bomb_state{}) ->
@@ -263,8 +268,8 @@ active_movement(info, Send_after_timers, StateData = #bomb_state{}) ->
         halfway_timer -> % halfway point timer
             UpdatedData = StateData#bomb_state{
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
-                movement = {true, erlang:send_after(?HALFWAY_TILE, self(), full_tile_change)}
-                },
+                movement = true
+            },
             UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
             {keep_state, UpdatedData};
         full_tile_change -> % finished a full movement, checking if we can continue moving
@@ -277,7 +282,7 @@ active_movement(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
     %% answer can be 1 of 3: 'approved', {'approved_switch_gn', NewGN}, 'denied'
     case Answer of
         approved -> % movement approved
-            UpdatedData = StateData#bomb_state{movement = {true, erlang:send_after(?HALFWAY_TILE, self(), halfway_timer)}},
+            UpdatedData = StateData#bomb_state{movement = true},
             {keep_state, UpdatedData};
         denied -> % movement denied
             UpdatedData = StateData#bomb_state{movement = false, direction = none},
@@ -421,7 +426,7 @@ remote_armed(_Type, _Message, StateData = #bomb_state{}) ->
 
 remote_idle_movement(enter, _OldState, StateData = #bomb_state{}) ->
     %% entering to this state from any other state
-    UpdatedData = StateData#bomb_state{movement = {true, erlang:send_after(?HALFWAY_TILE, self(), halfway_timer)}},
+    UpdatedData = StateData#bomb_state{movement = true},
     {keep_state, UpdatedData};
 
 remote_idle_movement(cast, freeze, StateData = #bomb_state{}) ->
@@ -457,7 +462,7 @@ remote_idle_movement(info, Send_after_timers, StateData = #bomb_state{}) ->
         halfway_timer -> % halfway point timer
             UpdatedData = StateData#bomb_state{
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
-                movement = {true, erlang:send_after(?HALFWAY_TILE, self(), full_tile_change)}
+                movement = true
             },
             UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
             {keep_state, UpdatedData};
@@ -471,7 +476,7 @@ remote_idle_movement(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) 
     %% answer can be 1 of 3: 'approved', {'approved_switch_gn', NewGN}, 'denied'
     case Answer of
         approved -> % movement approved
-            UpdatedData = StateData#bomb_state{movement = {true, erlang:send_after(?HALFWAY_TILE, self(), halfway_timer)}},
+            UpdatedData = StateData#bomb_state{movement = true},
             {keep_state, UpdatedData};
         denied -> % movement denied
             UpdatedData = StateData#bomb_state{movement = false, direction = none},
@@ -559,7 +564,7 @@ remote_armed_frozen_movement(info, Send_after_timers, StateData = #bomb_state{})
         halfway_timer -> % halfway point timer
             UpdatedData = StateData#bomb_state{
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
-                movement = {true, erlang:send_after(?HALFWAY_TILE, self(), full_tile_change)}
+                movement = true
             },
             UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
             {keep_state, UpdatedData};
@@ -573,7 +578,7 @@ remote_armed_frozen_movement(cast, {reply_move_req, Answer}, StateData = #bomb_s
     %% answer can be 1 of 3: 'approved', {'approved_switch_gn', NewGN}, 'denied'
     case Answer of
         approved -> % movement approved
-            UpdatedData = StateData#bomb_state{movement = {true, erlang:send_after(?HALFWAY_TILE, self(), halfway_timer)}},
+            UpdatedData = StateData#bomb_state{movement = true},
             {keep_state, UpdatedData};
         denied -> % movement denied, stop manual timers, pass along left-over state_timeout
             case StateData#bomb_state.movement of
