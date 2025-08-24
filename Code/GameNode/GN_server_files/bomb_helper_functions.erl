@@ -54,11 +54,11 @@ place_bomb(PlayerNum, PlayersTableName, BombsTableName) ->
 
 %% Helper function to determine bomb type based on player buffs
 get_bomb_type(BuffList) ->
-    case lists:member(?REMOTE_BOMB, BuffList) of
-        true -> ?REMOTE_BOMB;
+    case lists:member(?REMOTE_IGNITION, BuffList) of
+        true -> ?REMOTE_IGNITION;
         false ->
-            case lists:member(?REPEATING_BOMB, BuffList) of
-                true -> ?REPEATING_BOMB;
+            case lists:member(?REPEAT_BOMBS, BuffList) of
+                true -> ?REPEAT_BOMBS;
                 false -> ?NORMAL_BOMB
             end
     end.
