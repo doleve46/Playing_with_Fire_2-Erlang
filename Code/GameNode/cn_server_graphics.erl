@@ -8,6 +8,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -include("mnesia_records.hrl").
+-include("common_parameters.hrl").
 
 -define(MAP_SIZE, 16).
 -define(DEATH_DISPLAY_TIME, 10000). % Show dead players for 10 seconds
@@ -19,10 +20,11 @@
     gn_nodes,                     % List of GN nodes
     subscribed_tables = [],       % List of tables subscribed to
     update_counter = 0,           % Counter for updates (debugging)
-    movement_states = #{},        % Track active player movements
+    movement_states = #{},        % Track active player movements with real timing
     bomb_movements = #{},         % Track active bomb movements
     dead_players = #{},           % Track recently deceased players: PlayerID => {DeathTime, LastKnownState, LocalGN}
-    last_known_players = #{}      % Track last known player states for death detection
+    last_known_players = #{},     % Track last known player states for death detection
+    timer_subscribers = #{}       % Track timer update subscriptions
 }).
 
 %%%===================================================================
@@ -45,7 +47,7 @@ get_current_map() ->
 
 %% Initialize the graphics server
 init([GNNodes]) ->
-    io:format("🎨 CN Graphics Server starting...~n"),
+    io:format("🎨 Enhanced CN Graphics Server starting...~n"),
    
     % Create initial state
     State = #state{gn_nodes = GNNodes},
@@ -59,13 +61,13 @@ init([GNNodes]) ->
     % Create Python port
     erlang:send(self(), create_python_port),
    
-    % Start periodic updates
-    erlang:send_after(25, self(), periodic_update),
+    % Start periodic updates (faster for better timer sync)
+    erlang:send_after(?TICK_DELAY, self(), periodic_update),
    
     % Clean up dead players periodically
     erlang:send_after(5000, self(), cleanup_dead_players),
    
-    io:format("✅ CN Graphics Server initialized~n"),
+    io:format("✅ Enhanced CN Graphics Server initialized~n"),
     {ok, State}.
 
 %% Handle synchronous calls
@@ -77,8 +79,8 @@ handle_call(_Request, _From, State) ->
 
 %% Handle asynchronous casts
 handle_cast(force_update, State) ->
-    io:format("🔄 Updating map state...~n"),
-    NewMapState = create_current_map_state(State),
+    io:format("🔄 Updating enhanced map state...~n"),
+    NewMapState = create_enhanced_map_state(State),
     UpdatedState = State#state{current_map_state = NewMapState},
     send_map_to_all_targets(UpdatedState),
     {noreply, UpdatedState};
@@ -88,52 +90,56 @@ handle_cast(_Msg, State) ->
 
 %% Handle messages
 handle_info(setup_subscriptions, State) ->
-    io:format("📡 Setting up mnesia subscriptions...~n"),
+    io:format("📡 Setting up enhanced mnesia subscriptions...~n"),
     Tables = get_all_tables(),
     SubscribedTables = setup_mnesia_subscriptions(Tables),
     io:format("✅ Subscribed to tables: ~p~n", [SubscribedTables]),
     {noreply, State#state{subscribed_tables = SubscribedTables}};
 
 handle_info(spawn_gn_servers, State) ->
-    io:format("🚀 Spawning GN graphics servers...~n"),
+    io:format("🚀 Spawning enhanced GN graphics servers...~n"),
     GNServers = spawn_all_gn_graphics_servers(State#state.gn_nodes),
-    io:format("✅ Spawned GN graphics servers: ~p~n", [length(GNServers)]),
+    io:format("✅ Spawned enhanced GN graphics servers: ~p~n", [length(GNServers)]),
     {noreply, State#state{gn_graphics_servers = GNServers}};
 
 handle_info(create_python_port, State) ->
-    io:format("🐍 Creating Python port...~n"),
+    io:format("🐍 Creating enhanced Python port...~n"),
     Port = create_python_visualizer_port(),
-    % Create initial map state
-    InitialMapState = create_current_map_state(State),
+    % Create initial enhanced map state
+    InitialMapState = create_enhanced_map_state(State),
     UpdatedState = State#state{
         python_port = Port,
         current_map_state = InitialMapState
     },
     % Send initial state
     send_map_to_all_targets(UpdatedState),
-    io:format("✅ Python port created and initial map sent~n"),
+    io:format("✅ Enhanced Python port created and initial map sent~n"),
     {noreply, UpdatedState};
 
 handle_info(periodic_update, State) ->
-    % Periodic update every 25 milliseconds
-    NewMapState = create_current_map_state(State),
+    % Enhanced periodic update every TICK_DELAY milliseconds for better timer sync
+    NewMapState = create_enhanced_map_state(State),
     UpdatedState = State#state{
         current_map_state = NewMapState,
         update_counter = State#state.update_counter + 1
     },
    
-    % Only send if something changed or every 10th update
+    % Send more frequently for real-time timer updates
     ShouldSend = (NewMapState =/= State#state.current_map_state) orelse
-                 (State#state.update_counter rem 10 == 0),
+                 (State#state.update_counter rem 2 == 0), % Every 2nd update = every 100ms
    
     if ShouldSend ->
-        send_map_to_all_targets(UpdatedState),
-        io:format("🔄 Periodic update #~w sent~n", [UpdatedState#state.update_counter]);
+        send_map_to_all_targets(UpdatedState);
+        % Only log every 20th update to reduce spam
+        if State#state.update_counter rem 20 == 0 ->
+            io:format("🔄 Enhanced periodic update #~w sent~n", [UpdatedState#state.update_counter]);
+        true -> ok
+        end;
     true -> ok
     end,
    
-    % Schedule next update
-    erlang:send_after(25, self(), periodic_update),
+    % Schedule next update using actual backend timing
+    erlang:send_after(?TICK_DELAY, self(), periodic_update),
     {noreply, UpdatedState};
 
 handle_info(cleanup_dead_players, State) ->
@@ -153,53 +159,55 @@ handle_info(cleanup_dead_players, State) ->
     erlang:send_after(5000, self(), cleanup_dead_players),
     {noreply, State#state{dead_players = NewDeadPlayers}};
 
-% Handle mnesia table events with death detection
-handle_info({mnesia_table_event, {write, Table, Record, ActivityId}}, State) ->
+% Enhanced mnesia table event handling with real-time timer tracking
+handle_info({mnesia_table_event, {write, Table, Record, _ActivityId}}, State) ->
     NewState = case Record of
         #mnesia_players{} ->
-            % Update last known player state
+            % Enhanced player state tracking with all timers
             PlayerID = Record#mnesia_players.player_number,
             NewLastKnown = maps:put(PlayerID, Record, State#state.last_known_players),
             
-            % Check for movement changes
-            case detect_player_movement_change(Record, State#state.current_map_state) of
+            % Check for movement changes with real timing
+            case detect_enhanced_player_movement_change(Record, State#state.current_map_state) of
                 {movement_started, PlayerData} ->
                     send_movement_confirmation_to_python(State, player, PlayerData),
                     State#state{last_known_players = NewLastKnown};
+                {timer_update, TimerData} ->
+                    send_timer_update_to_python(State, player, TimerData),
+                    State#state{last_known_players = NewLastKnown};
                 no_movement_change ->
-                    io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
                     State#state{last_known_players = NewLastKnown}
             end;
         #mnesia_bombs{} ->
-            % Check for bomb movement changes
-            case detect_bomb_movement_change(Record, State#state.current_map_state) of
+            % Enhanced bomb state tracking with FSM information
+            case detect_enhanced_bomb_movement_change(Record, State#state.current_map_state) of
                 {movement_started, BombData} ->
                     send_movement_confirmation_to_python(State, bomb, BombData),
                     State;
+                {fsm_state_change, FSMData} ->
+                    send_fsm_update_to_python(State, bomb, FSMData),
+                    State;
                 no_movement_change ->
-                    io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
                     State
             end;
         _ ->
-            io:format("📝 Mnesia write: ~w on table ~w~n", [element(2, Record), Table]),
             State
     end,
     handle_mnesia_update(NewState);
 
-handle_info({mnesia_table_event, {delete, Table, Key, ActivityId}}, State) ->
+handle_info({mnesia_table_event, {delete, Table, Key, _ActivityId}}, State) ->
     NewState = case Table of
         TableName when TableName == gn1_players; TableName == gn2_players; 
                        TableName == gn3_players; TableName == gn4_players ->
-            % Player deletion detected - aka death
+            % Enhanced player death detection
             case extract_player_id_from_key(Key) of
                 {ok, PlayerID} ->
-                    handle_player_death(PlayerID, Table, State);
+                    handle_enhanced_player_death(PlayerID, Table, State);
                 error ->
                     io:format("⚠️ Could not extract player ID from key: ~p~n", [Key]),
                     State
             end;
         _ ->
-            io:format("🗑️ Mnesia delete: ~w from table ~w~n", [Key, Table]),
             State
     end,
     handle_mnesia_update(NewState);
@@ -210,11 +218,11 @@ handle_info({mnesia_table_event, _Event}, State) ->
 
 % Handle Python port messages
 handle_info({Port, {data, Data}}, State) when Port == State#state.python_port ->
-    io:format("🐍 Message from Python: ~p~n", [Data]),
+    io:format("🐍 Message from enhanced Python: ~p~n", [Data]),
     {noreply, State};
 
 handle_info({Port, closed}, State) when Port == State#state.python_port ->
-    io:format("⚠️ Python port closed, attempting to restart...~n"),
+    io:format("⚠️ Enhanced Python port closed, attempting to restart...~n"),
     NewPort = create_python_visualizer_port(),
     {noreply, State#state{python_port = NewPort}};
 
@@ -224,7 +232,7 @@ handle_info(Info, State) ->
 
 %% Cleanup on termination
 terminate(Reason, State) ->
-    io:format("🛑 CN Graphics Server terminating: ~p~n", [Reason]),
+    io:format("🛑 Enhanced CN Graphics Server terminating: ~p~n", [Reason]),
    
     % Close Python port
     if State#state.python_port =/= undefined ->
@@ -247,13 +255,12 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
-%%% Death Detection Functions
+%%% Enhanced Death Detection Functions
 %%%===================================================================
 
 %% Extract player ID from mnesia delete key
 extract_player_id_from_key(Key) ->
     try
-        % Key might be just PlayerID or {PlayerID} or more complex
         case Key of
             PlayerID when is_integer(PlayerID) -> {ok, PlayerID};
             {PlayerID} when is_integer(PlayerID) -> {ok, PlayerID};
@@ -264,11 +271,11 @@ extract_player_id_from_key(Key) ->
         _:_ -> error
     end.
 
-%% Handle player death
-handle_player_death(PlayerID, Table, State) ->
+%% Enhanced player death handling with more details
+handle_enhanced_player_death(PlayerID, Table, State) ->
     CurrentTime = erlang:system_time(millisecond),
     
-    % Get last known state of this player
+    % Get last known state with all timer information
     LastKnownState = maps:get(PlayerID, State#state.last_known_players, undefined),
     
     % Determine which GN this player belonged to based on table name
@@ -280,14 +287,27 @@ handle_player_death(PlayerID, Table, State) ->
         _ -> unknown
     end,
     
-    % Create death record
+    % Create enhanced death record with more information
     DeathRecord = {CurrentTime, LastKnownState, LocalGN},
     NewDeadPlayers = maps:put(PlayerID, DeathRecord, State#state.dead_players),
     
     % Remove from last known players since they're now dead
     NewLastKnown = maps:remove(PlayerID, State#state.last_known_players),
     
-    io:format("💀 Player ~w died! (was on ~w)~n", [PlayerID, LocalGN]),
+    % Enhanced death logging
+    if LastKnownState =/= undefined ->
+        #mnesia_players{
+            position = Position,
+            life = Life,
+            speed = Speed,
+            immunity_timer = ImmunityTimer
+        } = LastKnownState,
+        io:format("💀 Player ~w died! (was on ~w at ~w with ~w life, speed ~w, immunity ~w)~n", 
+                  [PlayerID, LocalGN, Position, Life, Speed, ImmunityTimer]);
+    true ->
+        io:format("💀 Player ~w died! (was on ~w, no last known state)~n", [PlayerID, LocalGN])
+    end,
+    
     io:format("🕐 Death recorded at ~w~n", [CurrentTime]),
     
     State#state{
@@ -296,11 +316,109 @@ handle_player_death(PlayerID, Table, State) ->
     }.
 
 %%%===================================================================
-%%% Enhanced Map Creation with Death Information
+%%% Enhanced Movement and Timer Detection
 %%%===================================================================
 
-%% Create current unified map state from all mnesia tables including death info
-create_current_map_state(State) ->
+%% Enhanced player movement detection with real backend timing
+detect_enhanced_player_movement_change(NewRecord, CurrentMapState) ->
+    #mnesia_players{
+        player_number = PlayerNum,
+        position = [X, Y],
+        direction = Direction,
+        movement = Movement,
+        speed = Speed,
+        movement_timer = MovementTimer,
+        immunity_timer = ImmunityTimer,
+        request_timer = RequestTimer
+    } = NewRecord,
+   
+    % Check if movement field changed from false to true with timer
+    case Movement of
+        true when Direction =/= none, MovementTimer > 0 ->
+            % Movement just started - calculate real duration using backend constants
+            TotalDuration = ?TILE_MOVE - (Speed - 1) * ?MS_REDUCTION,
+            Destination = calculate_destination([X, Y], Direction),
+            PlayerData = #{
+                player_id => PlayerNum,
+                from_pos => [X, Y],
+                to_pos => Destination,
+                direction => Direction,
+                speed => Speed,
+                movement_timer => MovementTimer,
+                total_duration => TotalDuration,
+                immunity_timer => ImmunityTimer,
+                request_timer => RequestTimer,
+                movement_confirmed => true
+            },
+            {movement_started, PlayerData};
+        _ ->
+            % Check for timer updates without movement
+            if MovementTimer > 0 orelse ImmunityTimer > 0 orelse RequestTimer > 0 ->
+                TimerData = #{
+                    player_id => PlayerNum,
+                    movement_timer => MovementTimer,
+                    immunity_timer => ImmunityTimer,
+                    request_timer => RequestTimer,
+                    position => [X, Y],
+                    speed => Speed
+                },
+                {timer_update, TimerData};
+            true ->
+                no_movement_change
+            end
+    end.
+
+%% Enhanced bomb movement detection
+detect_enhanced_bomb_movement_change(NewRecord, CurrentMapState) ->
+    #mnesia_bombs{
+        position = [X, Y],
+        movement = Movement,
+        direction = Direction,
+        type = Type,
+        owner = Owner,
+        radius = Radius,
+        status = Status,
+        ignited = Ignited
+    } = NewRecord,
+   
+    % Check if movement field changed from false to true
+    case Movement of
+        true when Direction =/= none ->
+            % Bomb movement just started (kicked!)
+            Destination = calculate_destination([X, Y], Direction),
+            BombData = #{
+                bomb_id => [X, Y],
+                from_pos => [X, Y],
+                to_pos => Destination,
+                direction => Direction,
+                type => Type,
+                owner => Owner,
+                radius => Radius,
+                status => Status,
+                ignited => Ignited,
+                movement_confirmed => true
+            },
+            {movement_started, BombData};
+        _ ->
+            % Check for FSM state changes
+            FSMData = #{
+                bomb_id => [X, Y],
+                position => [X, Y],
+                type => Type,
+                status => Status,
+                ignited => Ignited,
+                owner => Owner,
+                radius => Radius
+            },
+            {fsm_state_change, FSMData}
+    end.
+
+%%%===================================================================
+%%% Enhanced Map Creation with Full Backend State
+%%%===================================================================
+
+%% Create enhanced unified map state with all backend information
+create_enhanced_map_state(State) ->
     try
         % Initialize empty map
         EmptyMap = create_empty_map(),
@@ -311,104 +429,149 @@ create_current_map_state(State) ->
         % Add powerups
         MapWithPowerups = add_powerups_to_map(MapWithTiles),
        
-        % Add bombs
-        MapWithBombs = add_bombs_to_map(MapWithPowerups),
+        % Add bombs with enhanced FSM information
+        MapWithBombs = add_enhanced_bombs_to_map(MapWithPowerups),
        
-        % Add players
-        MapWithPlayers = add_players_to_map(MapWithBombs),
+        % Add players with full timer information
+        MapWithPlayers = add_enhanced_players_to_map(MapWithBombs),
        
-        % Create enhanced map state with death information
+        % Create enhanced map state with all backend data
         #{
             map => MapWithPlayers,
             dead_players => State#state.dead_players,
-            update_time => erlang:system_time(millisecond)
+            update_time => erlang:system_time(millisecond),
+            backend_timing => #{
+                tile_move => ?TILE_MOVE,
+                ms_reduction => ?MS_REDUCTION,
+                immunity_time => ?IMMUNITY_TIME,
+                request_cooldown => ?REQUEST_COOLDOWN,
+                tick_delay => ?TICK_DELAY
+            }
         }
     catch
         _:Error ->
-            io:format("❌ Error creating map state: ~p~n", [Error]),
+            io:format("❌ Error creating enhanced map state: ~p~n", [Error]),
             #{
                 map => create_empty_map(),
                 dead_players => #{},
-                update_time => erlang:system_time(millisecond)
+                update_time => erlang:system_time(millisecond),
+                backend_timing => #{}
             }
     end.
 
-%%%===================================================================
-%%% Rest of the existing functions (unchanged)
-%%%===================================================================
+%% Add players with enhanced timer and state information
+add_enhanced_players_to_map(Map) ->
+    PlayerTables = [gn1_players, gn2_players, gn3_players, gn4_players],
+    lists:foldl(fun(Table, AccMap) ->
+        add_enhanced_players_from_table(Table, AccMap)
+    end, Map, PlayerTables).
 
-%% [Include all the existing functions from the original file]
-%% Movement detection, bomb handling, map creation, etc.
+%% Add enhanced players from a specific table
+add_enhanced_players_from_table(Table, Map) ->
+    Fun = fun() ->
+        mnesia:select(Table, [{#mnesia_players{_ = '_'}, [], ['$_']}])
+    end,
+   
+    case mnesia:activity(transaction, Fun) of
+        PlayerRecords when is_list(PlayerRecords) ->
+            lists:foldl(fun(PlayerRecord, AccMap) ->
+                update_map_with_enhanced_player(AccMap, PlayerRecord)
+            end, Map, PlayerRecords);
+        Error ->
+            io:format("❌ Error reading player table ~w: ~p~n", [Table, Error]),
+            Map
+    end.
 
-%% Detect player movement changes
-detect_player_movement_change(NewRecord, CurrentMapState) ->
+%% Update map with enhanced player information including all timers
+update_map_with_enhanced_player(Map, PlayerRecord) ->
     #mnesia_players{
-        player_number = PlayerNum,
-        position = [X, Y],
+        position = [X, Y], 
+        player_number = PlayerID,
+        life = Life, 
+        speed = Speed,
         direction = Direction,
         movement = Movement,
-        speed = Speed
-    } = NewRecord,
+        movement_timer = MovementTimer,
+        immunity_timer = ImmunityTimer,
+        request_timer = RequestTimer
+    } = PlayerRecord,
    
-    % Check if movement field changed from false to {true, TimerRef}
-    case Movement of
-        {true, _TimerRef} when Direction =/= none ->
-            % Movement just started - calculate destination
-            Destination = calculate_destination([X, Y], Direction),
-            PlayerData = #{
-                player_id => PlayerNum,
-                from_pos => [X, Y],
-                to_pos => Destination,
-                direction => Direction,
-                speed => Speed,
-                movement_confirmed => true
-            },
-            {movement_started, PlayerData};
-        _ ->
-            no_movement_change
+    if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
+        Row = lists:nth(X + 1, Map),
+        OldCell = lists:nth(Y + 1, Row),
+        
+        % Enhanced player info with all backend state
+        EnhancedPlayerInfo = {
+            PlayerID, Life, Speed, Direction, Movement, 
+            MovementTimer, ImmunityTimer, RequestTimer
+        },
+        
+        NewCell = update_cell_enhanced_player(OldCell, EnhancedPlayerInfo),
+        NewRow = replace_list_element(Row, Y + 1, NewCell),
+        replace_list_element(Map, X + 1, NewRow);
+    true ->
+        io:format("⚠️ Invalid player position: ~w, ~w~n", [X, Y]),
+        Map
     end.
 
-%% Detect bomb movement changes
-detect_bomb_movement_change(NewRecord, CurrentMapState) ->
+%% Add bombs with enhanced FSM state information
+add_enhanced_bombs_to_map(Map) ->
+    BombTables = [gn1_bombs, gn2_bombs, gn3_bombs, gn4_bombs],
+    lists:foldl(fun(Table, AccMap) ->
+        add_enhanced_bombs_from_table(Table, AccMap)
+    end, Map, BombTables).
+
+%% Add enhanced bombs from a specific table
+add_enhanced_bombs_from_table(Table, Map) ->
+    Fun = fun() ->
+        mnesia:select(Table, [{#mnesia_bombs{_ = '_'}, [], ['$_']}])
+    end,
+   
+    case mnesia:activity(transaction, Fun) of
+        BombRecords when is_list(BombRecords) ->
+            lists:foldl(fun(BombRecord, AccMap) ->
+                update_map_with_enhanced_bomb(AccMap, BombRecord)
+            end, Map, BombRecords);
+        Error ->
+            io:format("❌ Error reading bomb table ~w: ~p~n", [Table, Error]),
+            Map
+    end.
+
+%% Update map with enhanced bomb information including FSM state
+update_map_with_enhanced_bomb(Map, BombRecord) ->
     #mnesia_bombs{
-        position = [X, Y],
-        movement = Movement,
-        direction = Direction,
-        type = Type,
+        position = [X, Y], 
+        type = Type, 
+        ignited = Ignited,
+        status = Status, 
+        radius = Radius, 
         owner = Owner,
-        radius = Radius
-    } = NewRecord,
+        movement = Movement,
+        direction = Direction
+    } = BombRecord,
    
-    % Check if movement field changed from false to {true, TimerRef}
-    case Movement of
-        {true, _TimerRef} when Direction =/= none ->
-            % Bomb movement just started (kicked!)
-            Destination = calculate_destination([X, Y], Direction),
-            BombData = #{
-                bomb_id => [X, Y], % Use position as ID for bombs
-                from_pos => [X, Y],
-                to_pos => Destination,
-                direction => Direction,
-                type => Type,
-                owner => Owner,
-                radius => Radius,
-                movement_confirmed => true
-            },
-            {movement_started, BombData};
-        _ ->
-            no_movement_change
+    if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
+        Row = lists:nth(X + 1, Map),
+        OldCell = lists:nth(Y + 1, Row),
+        
+        % Enhanced bomb info with FSM state and movement information
+        EnhancedBombInfo = {
+            Type, Ignited, Status, Radius, Owner, Movement, Direction
+        },
+        
+        NewCell = update_cell_enhanced_bomb(OldCell, EnhancedBombInfo),
+        NewRow = replace_list_element(Row, Y + 1, NewCell),
+        replace_list_element(Map, X + 1, NewRow);
+    true ->
+        io:format("⚠️ Invalid bomb position: ~w, ~w~n", [X, Y]),
+        Map
     end.
 
-%% Calculate destination position
-calculate_destination([X, Y], Direction) ->
-    case Direction of
-        up -> [X, Y-1];
-        down -> [X, Y+1];
-        left -> [X-1, Y];
-        right -> [X+1, Y]
-    end.
+%%%===================================================================
+%%% Enhanced Communication Functions
+%%%===================================================================
 
-%% Send movement confirmation to Python
+%% Send enhanced movement confirmation to Python with real timing
 send_movement_confirmation_to_python(State, EntityType, EntityData) ->
     if State#state.python_port =/= undefined ->
         try
@@ -420,23 +583,86 @@ send_movement_confirmation_to_python(State, EntityType, EntityData) ->
             port_command(State#state.python_port, MsgBinary),
             case EntityType of
                 player ->
-                    io:format("🏃 Player movement confirmation sent for player ~w~n",
-                             [maps:get(player_id, EntityData)]);
+                    PlayerID = maps:get(player_id, EntityData),
+                    Duration = maps:get(total_duration, EntityData),
+                    io:format("🏃 Enhanced player movement confirmation sent for player ~w (duration: ~wms)~n",
+                             [PlayerID, Duration]);
                 bomb ->
-                    io:format("💣 Bomb movement confirmation sent for bomb at ~w~n",
-                             [maps:get(from_pos, EntityData)])
+                    Pos = maps:get(from_pos, EntityData),
+                    io:format("💣 Enhanced bomb movement confirmation sent for bomb at ~w~n", [Pos])
             end
         catch
             _:Error ->
-                io:format("❌ Error sending movement confirmation: ~p~n", [Error])
+                io:format("❌ Error sending enhanced movement confirmation: ~p~n", [Error])
         end;
     true ->
         ok
     end.
 
-%% Handle mnesia updates by recreating map state
+%% Send timer updates to Python
+send_timer_update_to_python(State, EntityType, TimerData) ->
+    if State#state.python_port =/= undefined ->
+        try
+            TimerMsg = [timer_update, #{
+                entity_type => EntityType,
+                timer_data => TimerData
+            }],
+            MsgBinary = term_to_binary(TimerMsg),
+            port_command(State#state.python_port, MsgBinary)
+        catch
+            _:Error ->
+                io:format("❌ Error sending timer update: ~p~n", [Error])
+        end;
+    true ->
+        ok
+    end.
+
+%% Send FSM state updates to Python
+send_fsm_update_to_python(State, EntityType, FSMData) ->
+    if State#state.python_port =/= undefined ->
+        try
+            FSMMsg = [fsm_update, #{
+                entity_type => EntityType,
+                fsm_data => FSMData
+            }],
+            MsgBinary = term_to_binary(FSMMsg),
+            port_command(State#state.python_port, MsgBinary)
+        catch
+            _:Error ->
+                io:format("❌ Error sending FSM update: ~p~n", [Error])
+        end;
+    true ->
+        ok
+    end.
+
+%%%===================================================================
+%%% Enhanced Cell Update Functions
+%%%===================================================================
+
+%% Update cell with enhanced player information
+update_cell_enhanced_player({Tile, Powerup, Bomb, _, Explosion, Special}, EnhancedPlayerInfo) ->
+    {Tile, Powerup, Bomb, EnhancedPlayerInfo, Explosion, Special}.
+
+%% Update cell with enhanced bomb information
+update_cell_enhanced_bomb({Tile, Powerup, _, Player, Explosion, Special}, EnhancedBombInfo) ->
+    {Tile, Powerup, EnhancedBombInfo, Player, Explosion, Special}.
+
+%%%===================================================================
+%%% Existing Helper Functions (Enhanced)
+%%%===================================================================
+
+%% Calculate destination position
+calculate_destination([X, Y], Direction) ->
+    case Direction of
+        up -> [X, Y-1];
+        down -> [X, Y+1];
+        left -> [X-1, Y];
+        right -> [X+1, Y]
+    end.
+
+%% Handle mnesia updates by recreating enhanced map state
 handle_mnesia_update(State) ->
-    NewMapState = create_current_map_state(State),
+    NewMapState = create_enhanced_map_state(State),
     UpdatedState = State#state{current_map_state = NewMapState},
     send_map_to_all_targets(UpdatedState),
     {noreply, UpdatedState}.
@@ -461,7 +687,7 @@ setup_mnesia_subscriptions(Tables) ->
         end
     end, [], Tables).
 
-%% Spawn graphics servers on all GN nodes
+%% Spawn enhanced graphics servers on all GN nodes
 spawn_all_gn_graphics_servers(GNNodes) ->
     lists:foldl(fun(Node, Acc) ->
         case spawn_gn_graphics_server(Node) of
@@ -472,40 +698,40 @@ spawn_all_gn_graphics_servers(GNNodes) ->
         end
     end, [], GNNodes).
 
-%% Spawn a single GN graphics server on the specified node
+%% Spawn a single enhanced GN graphics server on the specified node
 spawn_gn_graphics_server(Node) ->
     try
-        % Spawn the GN graphics server on the remote node
+        % Spawn the enhanced GN graphics server on the remote node
         Pid = rpc:call(Node, gn_graphics_server, start_link, [node()]),
         case Pid of
             {ok, ActualPid} ->
                 link(ActualPid),
-                io:format("✅ GN graphics server started on ~w: ~p~n", [Node, ActualPid]),
+                io:format("✅ Enhanced GN graphics server started on ~w: ~p~n", [Node, ActualPid]),
                 {ok, ActualPid};
             Error ->
-                io:format("❌ Failed to start GN server on ~w: ~p~n", [Node, Error]),
+                io:format("❌ Failed to start enhanced GN server on ~w: ~p~n", [Node, Error]),
                 {error, Error}
         end
     catch
         Error ->
-            io:format("❌ Exception spawning GN server on ~w: ~p~n", [Node, Error]),
+            io:format("❌ Exception spawning enhanced GN server on ~w: ~p~n", [Node, Error]),
             {error, Error}
     end.
 
-%% Create Python visualizer port
+%% Create enhanced Python visualizer port
 create_python_visualizer_port() ->
     try
-        Port = open_port({spawn, "python3 map_live_port.py"},
+        Port = open_port({spawn, "python3 enhanced_map_live_port.py"},
                         [binary, exit_status, {packet, 4}]),
-        io:format("✅ Python port created: ~p~n", [Port]),
+        io:format("✅ Enhanced Python port created: ~p~n", [Port]),
         Port
     catch
         _:Error ->
-            io:format("❌ Failed to create Python port: ~p~n", [Error]),
+            io:format("❌ Failed to create enhanced Python port: ~p~n", [Error]),
             undefined
     end.
 
-%% Create empty 16x16 map with free tiles
+%% Create empty 16x16 map with free tiles (enhanced format)
 create_empty_map() ->
     [[{free, none, none, none, none, none} || _ <- lists:seq(1, ?MAP_SIZE)]
      || _ <- lists:seq(1, ?MAP_SIZE)].
@@ -586,86 +812,6 @@ update_map_with_powerup(Map, PowerupRecord) ->
         Map
     end.
 
-%% Add bombs from all tables
-add_bombs_to_map(Map) ->
-    BombTables = [gn1_bombs, gn2_bombs, gn3_bombs, gn4_bombs],
-    lists:foldl(fun(Table, AccMap) ->
-        add_bombs_from_table(Table, AccMap)
-    end, Map, BombTables).
-
-%% Add bombs from a specific table
-add_bombs_from_table(Table, Map) ->
-    Fun = fun() ->
-        mnesia:select(Table, [{#mnesia_bombs{_ = '_'}, [], ['$_']}])
-    end,
-   
-    case mnesia:activity(transaction, Fun) of
-        BombRecords when is_list(BombRecords) ->
-            lists:foldl(fun(BombRecord, AccMap) ->
-                update_map_with_bomb(AccMap, BombRecord)
-            end, Map, BombRecords);
-        Error ->
-            io:format("❌ Error reading bomb table ~w: ~p~n", [Table, Error]),
-            Map
-    end.
-
-%% Update map with bomb information
-update_map_with_bomb(Map, BombRecord) ->
-    #mnesia_bombs{position = [X, Y], type = Type, ignited = Ignited,
-                  status = Status, radius = Radius, owner = Owner} = BombRecord,
-   
-    if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
-        Row = lists:nth(X + 1, Map),
-        OldCell = lists:nth(Y + 1, Row),
-        BombInfo = {Type, Ignited, Status, Radius, Owner},
-        NewCell = update_cell_bomb(OldCell, BombInfo),
-        NewRow = replace_list_element(Row, Y + 1, NewCell),
-        replace_list_element(Map, X + 1, NewRow);
-    true ->
-        io:format("⚠️ Invalid bomb position: ~w, ~w~n", [X, Y]),
-        Map
-    end.
-
-%% Add players from all tables
-add_players_to_map(Map) ->
-    PlayerTables = [gn1_players, gn2_players, gn3_players, gn4_players],
-    lists:foldl(fun(Table, AccMap) ->
-        add_players_from_table(Table, AccMap)
-    end, Map, PlayerTables).
-
-%% Add players from a specific table
-add_players_from_table(Table, Map) ->
-    Fun = fun() ->
-        mnesia:select(Table, [{#mnesia_players{_ = '_'}, [], ['$_']}])
-    end,
-   
-    case mnesia:activity(transaction, Fun) of
-        PlayerRecords when is_list(PlayerRecords) ->
-            lists:foldl(fun(PlayerRecord, AccMap) ->
-                update_map_with_player(AccMap, PlayerRecord)
-            end, Map, PlayerRecords);
-        Error ->
-            io:format("❌ Error reading player table ~w: ~p~n", [Table, Error]),
-            Map
-    end.
-
-%% Update map with player information
-update_map_with_player(Map, PlayerRecord) ->
-    #mnesia_players{position = [X, Y], player_number = PlayerID,
-                    life = Life, speed = Speed} = PlayerRecord,
-   
-    if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
-        Row = lists:nth(X + 1, Map),
-        OldCell = lists:nth(Y + 1, Row),
-        PlayerInfo = {PlayerID, Life, Speed},
-        NewCell = update_cell_player(OldCell, PlayerInfo),
-        NewRow = replace_list_element(Row, Y + 1, NewCell),
-        replace_list_element(Map, X + 1, NewRow);
-    true ->
-        io:format("⚠️ Invalid player position: ~w, ~w~n", [X, Y]),
-        Map
-    end.
-
 %% Update cell with tile information
 update_cell_tile({_, Powerup, Bomb, Player, Explosion, Special}, TileType, Contains) ->
     % If tile contains a powerup, update powerup field
@@ -676,55 +822,53 @@ update_cell_tile({_, Powerup, Bomb, Player, Explosion, Special}, TileType, Conta
 update_cell_powerup({Tile, _, Bomb, Player, Explosion, Special}, PowerupType) ->
     {Tile, PowerupType, Bomb, Player, Explosion, Special}.
 
-%% Update cell with bomb information
-update_cell_bomb({Tile, Powerup, _, Player, Explosion, Special}, BombInfo) ->
-    {Tile, Powerup, BombInfo, Player, Explosion, Special}.
-
-%% Update cell with player information
-update_cell_player({Tile, Powerup, Bomb, _, Explosion, Special}, PlayerInfo) ->
-    {Tile, Powerup, Bomb, PlayerInfo, Explosion, Special}.
-
 %% Replace element in list at specific position (1-indexed)
 replace_list_element(List, Pos, NewElement) ->
     {Before, [_|After]} = lists:split(Pos - 1, List),
     Before ++ [NewElement] ++ After.
 
-%% Send map to all targets (Python and GN servers)
+%% Send enhanced map to all targets (Python and GN servers)
 send_map_to_all_targets(State) ->
     % Send to Python visualizer
-    send_map_to_python(State),
+    send_enhanced_map_to_python(State),
    
     % Send to GN graphics servers
-    send_map_to_gn_servers(State).
+    send_enhanced_map_to_gn_servers(State).
 
-%% Send map to Python visualizer
-send_map_to_python(State) ->
+%% Send enhanced map to Python visualizer
+send_enhanced_map_to_python(State) ->
     if State#state.python_port =/= undefined andalso
        State#state.current_map_state =/= undefined ->
         try
             % Convert enhanced map state to binary Erlang term
             MapBinary = term_to_binary(State#state.current_map_state),
             port_command(State#state.python_port, MapBinary),
-            io:format("🗺️ Enhanced map (with death info) sent to Python visualizer~n")
+            if State#state.update_counter rem 40 == 0 ->  % Log every 2 seconds
+                io:format("🗺️ Enhanced map (with timers & FSM state) sent to Python visualizer~n");
+            true -> ok
+            end
         catch
             _:Error ->
-                io:format("❌ Error sending to Python: ~p~n", [Error])
+                io:format("❌ Error sending enhanced data to Python: ~p~n", [Error])
         end;
     true ->
-        io:format("⚠️ Python port or map state not ready~n")
+        io:format("⚠️ Enhanced Python port or map state not ready~n")
     end.
 
-%% Send map to all GN graphics servers with death info
-send_map_to_gn_servers(State) ->
+%% Send enhanced map to all GN graphics servers
+send_enhanced_map_to_gn_servers(State) ->
     lists:foreach(fun({Node, Pid}) ->
         if is_pid(Pid) andalso is_process_alive(Pid) ->
             try
-                % Send enhanced map state with death information
+                % Send enhanced map state with full backend information
                 gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                io:format("📡 Enhanced map (with death info) sent to GN server on ~w~n", [Node])
+                if State#state.update_counter rem 40 == 0 ->  % Log every 2 seconds
+                    io:format("📡 Enhanced map (with timers & FSM state) sent to GN server on ~w~n", [Node]);
+                true -> ok
+                end
             catch
                 _:Error ->
-                    io:format("❌ Error sending to GN server on ~w: ~p~n", [Node, Error])
+                    io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
             end;
         true ->
             io:format("⚠️ GN server on ~w not alive~n", [Node])
