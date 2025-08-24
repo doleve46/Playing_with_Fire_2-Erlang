@@ -18,6 +18,7 @@
         get_managing_node_by_coord/2, node_name_to_number/1,
         get_records_at_location/2, interact_with_entity/4,
         handle_player_movement/3, insert_player_movement/2, check_for_obstacles/4,
+        read_and_remove_bomb/2, get_gn_number_by_coord/2,
         read_and_update_coord/3, check_entered_coord/2, update_player_cooldowns/2]).
 
 -import(gn_server, [get_registered_name/1]).
