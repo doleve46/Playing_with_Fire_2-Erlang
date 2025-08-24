@@ -53,20 +53,17 @@
     player_number, % 1/2/3/4
     position, % [X,Y]
     direction, % desired direction movement - none/up/down/left/right
-    movement, % false |{true,TimerRef}
+    movement, % false | true
     
-    % Process info
-    % //request_cooldown = 0,   % milliseconds until next GN request allowed
-    local_gn = default, % which GN (registered name) does the player FSM & IO is physically running on 
-    local_gn_pid = default, % which gn (**PID**) does the player FSM sends all his problems
-    target_gn = default, % Which GN (register name) does the player need to communicate with (in whose quarter is he)
-    io_handler_pid = default,      % I/O Handler PID
+    % Communication
+    local_gn = default,         % which GN (registered name/pid) does the player FSM & IO is physically running on 
+    target_gn = default,        % Which GN (register name/pid) does the player need to communicate with (in whose quarter is he)
+    io_handler_pid = default,   % IO/Bot Handler Pid
     
     % player FSM pid
     pid = default,
 
-    % Connection status
-    disconnected = 0,     % counter to 60 (seconds), then kill process
+    % Player type
     bot = false,         % true/false - is this a bot player
 
     % Stats
@@ -77,6 +74,7 @@
     special_abilities = [], % list of power-ups
 
     bombs_placed = 0,    % currently placed bombs (bombs - bombs_placed = available)
-    immunity_timer = none, % reference to immunity timer
-    last_request_time = 0  % timestamp of last GN request
+    immunity_timer = 0, % Holds time left for immunity - updates every 1sec
+    movement_timer = 0, % holds time left for movement - updates every 250ms (as of now)
+    request_timer = 0   % holds time left for request cooldown - updates upon entry and when over (to 0)
 }).
