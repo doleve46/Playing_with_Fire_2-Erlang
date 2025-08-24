@@ -134,14 +134,15 @@ check_for_obstacles(Coordinate, BuffsList, Initiator_Direction, State = #gn_stat
     interact_with_entity(Entities_at_coord, BuffsList, Initiator_Direction, State).
 
 
-%% @doc starts a timer for halfway of the movement (to update the coordinates).
-%% returns 'ok' unless record not found (not_found). Does not send any ACK messages, that should be done within the 'main' body
+%% @doc Update movement to 'true', set time remainning based on movespeed
+%% time remaining = <Base_time> - (Player_speed - 1) * <MS_REDUCTION>
 insert_player_movement(PlayerNum, Table) ->
     Fun = fun() ->
         case mnesia:read(Table, PlayerNum, sticky_write) of
             [Player_record = #mnesia_players{}] ->
                 Updated_record = Player_record#mnesia_players{
-                    movement = {true, erlang:send_after(?TILE_MOVE div Player_record#mnesia_players.speed, self(), {update_coord, player, PlayerNum})}
+                    movement = true,
+                    movement_timer = ?TILE_MOVE - (Player_record#mnesia_players.speed -1)*?MS_REDUCTION % * Set counter based on movespeed
                     },
                 %% Insert updated record into table
                 mnesia:write(Updated_record),
@@ -326,16 +327,13 @@ handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo
 
 -spec check_entered_coord(#mnesia_players{}, State::#gn_state{}) -> ok.
 check_entered_coord(Player_record, State) ->
-    %% TODO: Check for powerups in new position, if any are found - add their effect to the player's mnesia table entry
-    %% TODO: When a powerup is taken it is sent a a 'pickup(Pid)' command to stop & terminate it.
-    %% TODO: this powerup entry is removed from the mnesia table
-    %% TODO:    (by GN while sending that message / triggered by the termination msg from the powerup process?)
-    %% 
-    %% TODO: Player FSM should be notified of the following powerup changes: max bombs, speed, (?) lives
-    
+    %% Check for powerups in new position, if any are found - add their effect to the player's mnesia table entry
+    %% When a powerup is taken it is sent a a 'pickup(Pid)' command to stop & terminate it.
+    %% TODO: This powerup entry is removed from the mnesia table - triggered by the termination msg from the powerup process.
+    %% Player FSM is notified of the following powerup changes: max bombs, speed, lives
     Fun = fun() ->
         case mnesia:read(State#gn_state.powerups_table_name, Player_record#mnesia_players.position, write) of
-            %% reads any powerups in the position of the playr
+            %% reads any powerups in the position of the player
             [] -> ?NO_POWERUP;
             [?NO_POWERUP] -> ?NO_POWERUP;
             [Found_powerup] -> % a powerup is present at the new position of the player
@@ -349,28 +347,26 @@ check_entered_coord(Player_record, State) ->
         if
             Powerup == ?NO_POWERUP -> ok; % no powerup found in position
             true -> % consume power-up into player, notify player for selected powerups
-            %% todo: add powerup to the player (separate function)
                 consume_powerup(Powerup, Player_record, State#gn_state.players_table_name)
         end.
 
 
 
 consume_powerup(Powerup, Player_record, Players_table) ->
-    %% * Based on current player's powerups, change/update his power in the mnesia table.
-    %% TODO: Notify the player FSM for certain updates
+    %% @doc Based on current player's powerups, change/update his power in the mnesia table.
     Updated_record = case Powerup of
-        %% Powerups that the player FSM should be notified about
+        %% ---- Powerups that the player FSM should be notified about ----
         ?MOVE_SPEED -> % movespeed buff
-            %% TODO: send a message to the Player FSM to notify them
+            player_fsm:notify_power_up(Player_record#mnesia_players.pid, {movespeed, Player_record#mnesia_players.speed + 1}),
             Player_record#mnesia_players{speed = Player_record#mnesia_players.speed + 1};
         ?PLUS_LIFE -> % extra life
-            %% TODO: send a message to the Player FSM to notify them
+            player_fsm:notify_power_up(Player_record#mnesia_players.pid, {life, Player_record#mnesia_players.life + 1}),
             Player_record#mnesia_players{life = Player_record#mnesia_players.life + 1};
         ?PLUS_BOMBS -> % increase max bombs
-            %% TODO: send a message to the Player FSM to notify them
+            player_fsm:notify_power_up(Player_record#mnesia_players.pid, {bombs, Player_record#mnesia_players.bombs + 1}),
             Player_record#mnesia_players{bombs = Player_record#mnesia_players.bombs + 1};
 
-        %% General powerups - no conflict when consuming them
+        %% ---- General powerups - no conflict when consuming them ----
         ?BIGGER_EXPLOSION -> % increase explosion radius
             Player_record#mnesia_players{explosion_radius = Player_record#mnesia_players.explosion_radius + 1};
 

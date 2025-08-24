@@ -14,7 +14,8 @@
 -define(FREEZE_DELAY, 2000). % time added to the counter when a bomb is frozen
 -define(TICK_DELAY, 50). % a small delay, used for very short bomb interactions and io handler polling intervals
 -define(HALFWAY_TILE, 350). % time to complete half the movement - the switching point between tiles
--define(TILE_MOVE, 700). % time to complete a tile movement in normal movespeed (=1)
+-define(TILE_MOVE, 1200). % time to complete a tile movement in normal movespeed (=1)
+-define(MS_REDUCTION, 200). % time reduces by any additional movespeed buff
 -define(MIN_MOVE_REQ_TIME, 800). % minimal overhead time for requesting movement (should be higher than movement itself)
 
 %% Player FSM related definitions

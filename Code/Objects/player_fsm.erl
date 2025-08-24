@@ -511,7 +511,8 @@ handle_gn_response(Response, Data) ->
          {move_result, accepted} ->
             %% Move accepted - player is now moving, cannot move again for X seconds
             %% but can still drop bombs or use other abilities
-            NewData = Data#player_data{movement_cooldown = ?MIN_MOVE_REQ_TIME},
+            NewData = Data#player_data{
+                movement_cooldown = ?TILE_MOVE - ((Data#player_data.speed - 1) * ?MS_REDUCTION)},
             send_io_ack({move_accepted}, NewData), % "release" the io/bot handler to send more requests
             if
                 Data#player_data.immunity_timer == 0 ->

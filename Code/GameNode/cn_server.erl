@@ -32,9 +32,8 @@
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
 
-% Required modules for QLC and Mnesia
+% Required module for QLC
 -include_lib("stdlib/include/qlc.hrl").
--include_lib("mnesia/include/mnesia.hrl").
 
 %% todo: move this record (if it is even necessary) to the .hrl
 -record(gn_data, {
