@@ -42,12 +42,11 @@
 %% else - Send message to player FSM to update his targetGN, update position, direction and movement in record, 
 %%      and request CN to tranfer the player entry to the new GN's table, who at last asks the new GN to check for collisions (*not in this function)
 read_and_update_coord(player, PlayerNum, Table) ->
+    Current_gn_name = get_registered_name(self()),
     Fun = fun() ->
         case mnesia:read(Table, PlayerNum, write) of
             [Player_record = #mnesia_players{}] -> 
-                [New_x, New_y] = calc_new_coordinates(Player_record, Player_record#mnesia_players.direction),
-                Current_gn_name = get_registered_name(self()),
-
+                [New_x, New_y] = calc_new_coordinates(Player_record#mnesia_players.position, Player_record#mnesia_players.direction),
                 %% check if new coordinate fall within current managing GN
                 case get_managing_node_by_coord(New_x,New_y) of
                     Current_gn_name -> % Player is not about to leave current GN's quarter
@@ -57,7 +56,6 @@ read_and_update_coord(player, PlayerNum, Table) ->
                             movement = false,
                             direction = none
                         },
-                        %% TODO: ? should we check for collisions against explosions at this point?
                         mnesia:write(Updated_record),
                         {retain_gn, Player_record}; %% return value to calling function
                     Other_name -> %% destination coordinate is managed by another GN (=Other_name)
@@ -90,14 +88,9 @@ read_player_from_table(PlayerNum, Table) ->
     mnesia:activity(transaction, Fun).
 
 
--spec calc_new_coordinates(Record::#mnesia_players{} | #mnesia_bombs{}, Direction::up|down|left|right) -> list().
-calc_new_coordinates(Record, Direction) ->
-    [X,Y] = case Record of
-        #mnesia_players{} ->
-            Record#mnesia_players.position;
-        #mnesia_bombs{} ->
-            Record#mnesia_bombs.position
-    end,
+-spec calc_new_coordinates(Position::list(), Direction::up|down|left|right) -> list().
+calc_new_coordinates(Position, Direction) ->
+    [X,Y] = Position,
     case Direction of
         up -> [X, Y+1];
         down -> [X, Y-1];
@@ -111,7 +104,7 @@ calc_new_coordinates(Record, Direction) ->
 handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
     %% ? calculate the destination coordinate, find out if the coordinate is within limits of current GN (the one initiating the function call)
     Player_record = read_player_from_table(PlayerNum, State#gn_state.players_table_name),
-    Destination = calc_new_coordinates(Player_record, Direction),
+    Destination = calc_new_coordinates(Player_record#mnesia_players.position, Direction),
     Current_gn_name = get_registered_name(self()),
     case get_managing_node_by_coord(hd(Destination),lists:last(Destination)) of
         Current_gn_name -> % destination coordinate is managed by this GN

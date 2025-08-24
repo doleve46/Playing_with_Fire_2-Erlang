@@ -97,7 +97,7 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
                     %% extracts the player's record from mnesia's player table
                     Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
                     %% Calculate destination coordinates
-                    Destination_coord = req_player_move:calc_new_coordinates(Player, Direction),
+                    Destination_coord = req_player_move:calc_new_coordinates(Player#mnesia_players.position, Direction),
                     gen_server:cast(cn_server,
                         {query_request, get_registered_name(self()), 
                             {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction}})
@@ -151,7 +151,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             %% extracts the player's record from mnesia's player table
             Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
             %% Calculate destination coordinates
-            Destination_coord = req_player_move:calc_new_coordinates(Player, Direction),
+            Destination_coord = req_player_move:calc_new_coordinates(Player#mnesia_players.position, Direction),
 
             case req_player_move:handle_player_movement(PlayerNum, Direction, State) of
                 can_move -> 
