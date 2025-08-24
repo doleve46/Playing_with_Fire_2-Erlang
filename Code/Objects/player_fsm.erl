@@ -455,9 +455,9 @@ handle_input_command(Command, Data) ->
                         {player_message, Request}),
                     case Data#player_data.immunity_timer of
                         0 -> %% we were at idle state, no immunity
-                            {next_state, waiting_gn_response, NewData};
+                            {next_state, waiting_for_response, NewData};
                         _ -> %% we were in immunity_idle state
-                            {next_state, immunity_waiting_gn_response, NewData}
+                            {next_state, immunity_waiting_for_response, NewData}
                     end;
                 {not_ok, Reason} ->
                     %% Operation blocked - send ACK to io/bot handler, keep state, set request cooldown timer
