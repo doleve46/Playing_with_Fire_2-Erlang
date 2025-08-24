@@ -16,7 +16,7 @@
     freeze_bomb/1, kick_bomb/2, answer_move_req/2,damage_taken/1]).
 
 %% gen_statem callbacks
--export([init/1, format_status/2, terminate/3,
+-export([init/1, format_status/1, terminate/3,
     code_change/4, callback_mode/0]).
 
 %% States function
@@ -91,7 +91,8 @@ init([Position, Type, Gn_Pid, Optional]) ->
         regular ->
             UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]};
-        remote -> remote_idle; % TODO
+        remote -> 
+            {ok, remote_idle, StateData}; % TODO: complete implementation
         repeating -> % repeating bomb, w.i.p
             UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]}
@@ -107,16 +108,15 @@ callback_mode() ->
 %% @doc Called (1) whenever sys:get_status/1,2 is called by gen_statem or
 %% (2) when gen_statem terminates abnormally.
 %% This callback is optional.
-format_status(_Opt, [_PDict, _StateName, _State]) ->
-    Status = some_term,
-    Status.
+format_status({_StateName, _State}) ->
+    some_term.
 
 %% @private
 %% @doc This function is called by a gen_statem when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
 %% necessary cleaning up. When it returns, the gen_statem terminates with
 %% Reason. The return value is ignored.
-terminate(normal, _CurrentState, StateData = #bomb_state{}) ->
+terminate(normal, _CurrentState, _StateData) ->
     %% tell local GN the bomb exploded - goes to handle_info
     % StateData#bomb_state.gn_pid ! {bomb_exploded, self()},
     ok;
@@ -184,12 +184,17 @@ armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
     {stop, exploded, StateData};
 
-%% unknown messages - stop the process with an error
-armed(cast, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData};
 
-armed({call, GN}, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
+armed(_Type, _Message, StateData = #bomb_state{}) ->
+    log_unexpected_message(armed, _Type, _Message),
+    {keep_state, StateData}.
+
+%% unknown messages - stop the process with an error
+%armed(cast, _Message, StateData = #bomb_state{}) ->
+%    {stop, unsupported_message_in_state, StateData};
+
+%armed({call, GN}, _Message, StateData = #bomb_state{}) ->
+%    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
 
 %% ~~~~~~~~~ State = active_movement ~~~~~~~~~
 
@@ -291,11 +296,15 @@ active_movement(cast, ignite, StateData = #bomb_state{}) ->
     %% wrong bomb type, ignore it
     {keep_state, StateData};
 
-active_movement(cast, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData};
+active_movement(_Type, _Message, StateData = #bomb_state{}) ->
+    log_unexpected_message(active_movement, _Type, _Message),
+    {keep_state, StateData}.
 
-active_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
+%active_movement(cast, _Message, StateData = #bomb_state{}) ->
+%    {stop, unsupported_message_in_state, StateData};
+
+%active_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
+%    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
 
 %% ~~~~~~~~~ State = delayed_explosion_state ~~~~~~~~~
 %% Throwaway state to ignore everything but state_timeout to explode
@@ -305,10 +314,11 @@ delayed_explosion_state(info, _AnyMessage, StateData = #bomb_state{}) ->
 
 delayed_explosion_state(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData}.
+    {stop, exploded, StateData};
 
-%% todo: add ignoring for other messages (cast,call)? idk
-
+delayed_explosion_state(_Type, _Message, StateData = #bomb_state{}) ->
+    log_unexpected_message(delayed_explosion_state, _Type, _Message),
+    {keep_state, StateData}.
 %% ~~~~~~~~~ State = remote_idle ~~~~~~~~~
 
 remote_idle(cast, freeze, StateData = #bomb_state{}) ->
@@ -344,10 +354,11 @@ remote_idle(cast, ignite, StateData = #bomb_state{}) ->
             {next_state, remote_armed, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]};
         true ->
             {stop, exploded, StateData}
-    end.
+    end;
 
-% todo: add addressing/ignoring for everything not in here? (cast,call,info) idk
-
+remote_idle(_Type, _Message, StateData = #bomb_state{}) ->
+    log_unexpected_message(remote_idle, _Type, _Message),
+    {keep_state, StateData}.
 %% ~~~~~~~~~ State = remote_idle ~~~~~~~~~
 
 remote_armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
@@ -393,12 +404,17 @@ remote_armed(cast, ignite, StateData = #bomb_state{}) ->
     %% Already armed, ignore
     {keep_state, StateData};
 
-%% unknown messages - stop the process with an error
-remote_armed(cast, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData};
 
-remote_armed({call, GN}, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
+remote_armed(_Type, _Message, StateData = #bomb_state{}) ->
+    log_unexpected_message(remote_armed, _Type, _Message),
+    {keep_state, StateData}.
+
+%% unknown messages - stop the process with an error
+%remote_armed(cast, _Message, StateData = #bomb_state{}) ->
+%    {stop, unsupported_message_in_state, StateData};
+
+%remote_armed({call, GN}, _Message, StateData = #bomb_state{}) ->
+%    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
 
 
 %% ~~~~~~~~~ State = remote_idle_movement ~~~~~~~~~
@@ -480,11 +496,17 @@ remote_idle_movement(cast, ignite, StateData = #bomb_state{}) ->
             {next_state, remote_armed_frozen_movement, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]}
     end;
 
-remote_idle_movement(cast, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData};
+%% unknown messages - stop the process with an error
+remote_idle_movement(_Type, _Message, StateData = #bomb_state{}) ->
+    log_unexpected_message(remote_idle_movement, _Type, _Message),
+    {keep_state, StateData}.
 
-remote_idle_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
+
+%remote_idle_movement(cast, _Message, StateData = #bomb_state{}) ->
+%    {stop, unsupported_message_in_state, StateData};
+
+%remote_idle_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
+%    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
 
 %% ~~~~~~~~~ State = remote_armed_frozen_movement ~~~~~~~~~
 
@@ -517,7 +539,8 @@ remote_armed_frozen_movement({call, GN}, {kick, Direction}, StateData = #bomb_st
                         {reply, GN, {Direction, false}}]};
                 true -> % not enough time - do not make request
                     {keep_state, UpdatedData, [{reply, GN, {none, false}}]}
-            end;
+            end
+    end;
 
 remote_armed_frozen_movement(cast, stop_movement, StateData = #bomb_state{}) ->
     %% External stop movement (i.e. player collided into it).
@@ -569,16 +592,17 @@ remote_armed_frozen_movement(cast, damage_taken, StateData = #bomb_state{}) ->
     %% To avoid collision with movement timers - switches to a state which only times-out into explosion
     {next_state, delayed_explosion_state, StateData, [{state_timeout, ?TICK_DELAY, external_explode}]};
 
-remote_armed_frozen_movement(cast, ignite, StateData = #bomb_state{}) ->
+remote_armed_frozen_movement(cast, ignite, _StateData) ->
     %% already armed, ignore this
     {keep_state_and_data};
 
-remote_armed_frozen_movement(cast, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData};
+remote_armed_frozen_movement(_Type, _Message, StateData = #bomb_state{}) ->
+    log_unexpected_message(remote_armed_frozen_movement, _Type, _Message),
+    {keep_state, StateData}.
+    %{stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}; %% * SHOULD BREAK POST-DEBUG
 
-remote_armed_frozen_movement({call, GN}, _Message, StateData = #bomb_state{}) ->
-    {stop, unsupported_message_in_state, StateData, {reply, GN, 'FSM_error'}}.
-
+%remote_armed_frozen_movement(_Any, _Message, StateData = #bomb_state{}) ->
+%    {keep_state, StateData}.
 
 %%%===================================================================
 %%% Internal functions
@@ -620,3 +644,12 @@ calc_opposite_direction(Direction) ->
         left -> right
     end.
     
+%%%===================================================================
+%% Functions existing for debugging
+
+log_unexpected_message(StateName, MsgType, Message) ->
+    {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
+    io:format("[~2..0B:~2..0B:~2..0B]: Unexpected incoming message at state ~p response type ~p command: ~p~n",
+        [Hour, Min, Sec, StateName, MsgType, Message]),
+    error_logger:info_msg("Unexpected incoming message in state ~p: ~p", [StateName, Message]),
+    ok.

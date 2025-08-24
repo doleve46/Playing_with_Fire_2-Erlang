@@ -71,7 +71,7 @@
 start_link(PlayerNumber, GN_Pid, IsBot, IO_pid) ->
     % Spawn player FSM
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
-    gen_statem:start_link({local, ServerName}, ?MODULE, [PlayerNumber, GN_Pid, IsBot, IO_pid], []).
+    gen_statem:start_link({global, ServerName}, ?MODULE, [PlayerNumber, GN_Pid, IsBot, IO_pid], []).
 
 %% @doc Start the game for the player
 start_signal(PlayerPid) ->
