@@ -108,18 +108,22 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
 
         %% Player requesting to place bombs mechanism
         {place_bomb_request, PlayerNum, ThisGN} -> % place bomb request from a player in our quarter
-            case bomb_helper_functions:place_bomb(PlayerNum, State#gn_state.players_table_name) of
-                {bomb_placed} ->
+            case bomb_helper_functions:place_bomb(PlayerNum, State#gn_state.players_table_name, State#gn_state.bombs_table_name) of
+                bomb_placed ->
                     %% bomb was placed successfully, added into mnesia table by helper function
                     %% Notify player FSM of successful placement
                     player_fsm:gn_response(PlayerNum, {bomb_result, accepted});
-                false ->
+                Error ->
                     %% Notify player FSM of failed placement
+                    %% Error logging for debugging
+                    {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
+                    io:format("[~2..0B:~2..0B:~2..0B]: Failed to place bomb for player ~p: ~p~n", [Hour, Min, Sec, PlayerNum, Error]),
+                    error_logger:info_msg("Failed to place bomb for player ~p: ~p", [PlayerNum, Error]),
                     player_fsm:gn_response(PlayerNum, {bomb_result, denied})
             end,
             {noreply, State};
         {place_bomb_request, PlayerNum, TargetGN} -> % place bomb request from a player outside my quarter
-            gen_server:cast(cn_server, {forward_request, TargetGN, {place_bomb_request, PlayerNum, TargetGN}}),
+            gen_server:cast(cn_server, {forward_request, TargetGN, {place_bomb_request, PlayerNum, ThisGN}}),
             {noreply, State};
 
         %% Cooldown updates
@@ -194,8 +198,31 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
 
         {cooldown_update, _ThisGN, UpdateContent} ->
             req_player_move:update_player_cooldowns(UpdateContent, State#gn_state.players_table_name),
+            {noreply, State};
+
+         %% * Player requesting to place bombs
+        {place_bomb_request, PlayerNum, AskingGN} ->
+            case bomb_helper_functions:place_bomb(PlayerNum, State#gn_state.players_table_name, State#gn_state.bombs_table_name) of
+                bomb_placed ->
+                    %% bomb was placed successfully, added into mnesia table by helper function
+                    %% Player is NOT physically no our machine - forward the response through cn server to local gn server
+                    gen_server:cast(cn_server, {forward_request, AskingGN, {bomb_result, accepted}});
+                Error ->
+                    %% Notify player FSM of failed placement
+                    %% Error logging for debugging
+                    {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
+                    io:format("[~2..0B:~2..0B:~2..0B]: Failed to place bomb for player ~p: ~p~n", [Hour, Min, Sec, PlayerNum, Error]),
+                    error_logger:info_msg("Failed to place bomb for player ~p: ~p", [PlayerNum, Error]),
+                    %% Player is NOT physically no our machine - forward the response through cn server to local gn server
+                    gen_server:cast(cn_server, {forward_request, AskingGN, {PlayerNum, bomb_result, denied}})
+            end,
+            {noreply, State};
+
+        %% * An answer from target GN for a bomb placement was forwarded back to us (local GN) - notify player FSM
+        {PlayerNum, bomb_result, Answer} ->
+            player_fsm:gn_response(PlayerNum, {bomb_result, Answer}),
             {noreply, State}
-        
+            
     end;
 
 
