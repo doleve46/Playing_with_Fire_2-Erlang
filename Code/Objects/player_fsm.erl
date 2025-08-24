@@ -595,17 +595,17 @@ handle_gn_response(Response, Data) ->
 handle_tick(CurrentState, Data) ->
     %% Reduce cooldowns, notify GN of significant changes (every 1 sec), switch states if necessary
     %% Fetch Current counters
-    {immunity_cd, request_cd, move_cd} = {Data#player_data.immunity_timer, 
+    {Immunity_cd, Request_cd, Move_cd} = {Data#player_data.immunity_timer, 
                                          Data#player_data.request_cooldown, 
                                          Data#player_data.movement_cooldown},
     %% Update counters
-    Updated_immunityTimer = max(0, immunity_cd - ?TICK_DELAY),
-    Updated_requestCooldown = max(0, request_cd - ?TICK_DELAY),
-    Updated_movementCooldown = max(0, move_cd - ?TICK_DELAY),
-    
+    Updated_immunityTimer = max(0, Immunity_cd - ?TICK_DELAY),
+    Updated_requestCooldown = max(0, Request_cd - ?TICK_DELAY),
+    Updated_movementCooldown = max(0, Move_cd - ?TICK_DELAY),
+
     %% general request cooldown handling
     case Updated_requestCooldown of
-        immunity_cd -> % was at 0, nothing to report or change
+        Immunity_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % cooldown just ended, notify GN
             gen_server:cast(Data#player_data.local_gn, {player_message,
@@ -618,7 +618,7 @@ handle_tick(CurrentState, Data) ->
     end,
     %% Movement request cooldown handling
     case (Updated_movementCooldown rem 200) of
-        move_cd -> % was at 0, nothing to report or change
+        Move_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % Report movement cooldown changes every 200 ms to GN
             gen_server:cast(Data#player_data.local_gn, {player_message,
@@ -637,7 +637,7 @@ handle_tick(CurrentState, Data) ->
     },
     %% immunity handling - this timer is the only one responsible for state changes
     if
-        Updated_immunityTimer == immunity_cd -> % was at 0, nothing to report
+        Updated_immunityTimer == Immunity_cd -> % was at 0, nothing to report
             erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 0 -> % immunity ended, notify GN
@@ -659,6 +659,9 @@ handle_tick(CurrentState, Data) ->
             gen_server:cast(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
+            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            {keep_state, NewData};
+        true -> % still in immunity or was already at 0
             erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
             {keep_state, NewData}
     end.

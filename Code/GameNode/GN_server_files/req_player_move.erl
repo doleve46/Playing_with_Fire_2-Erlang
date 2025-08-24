@@ -13,16 +13,12 @@
 %% ? Because the gn_server file became insanely cluttered, I'm splitting it into different files
 %% ? based on functionality. This file will include all functions relevant to a player requesting movement
 %% * it might also include a bomb requesting movement later on
--export[read_player_from_table/2, calc_new_coordinates/2,
-        update_player_direction/3, handle_player_movement_clearance/3, handle_bomb_movement_clearance/3].
-
-
--export[get_managing_node_by_coord/2, node_name_to_number/1].
--export[get_records_at_location/2, interact_with_entity/4].
--export[handle_player_movement/3, insert_player_movement/2, check_for_obstacles/4].
--export[read_and_update_coord/3].
--export[check_entered_coord/2].
--export[update_player_cooldowns/2].
+-export([read_player_from_table/2, calc_new_coordinates/2,
+        update_player_direction/3, handle_player_movement_clearance/3, handle_bomb_movement_clearance/3,
+        get_managing_node_by_coord/2, node_name_to_number/1,
+        get_records_at_location/2, interact_with_entity/4,
+        handle_player_movement/3, insert_player_movement/2, check_for_obstacles/4,
+        read_and_update_coord/3, check_entered_coord/2, update_player_cooldowns/2]).
 
 -import(gn_server, [get_registered_name/1]).
 
@@ -32,6 +28,7 @@
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
+-include_lib("stdlib/include/qlc.hrl").
 
 %% ? imports for linux:
 %-include_lib("src/clean-repo/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.
@@ -155,13 +152,12 @@ insert_player_movement(PlayerNum, Table) ->
 
 get_records_at_location(Coordinate, State = #gn_state{}) ->
     Fun = fun() ->
-        qlc:eval(qlc:q(
-            qlc:append(
-                [ {tile, T} || T <- mnesia:table(State#gn_state.tiles_table_name), T#mnesia_tiles.position == Coordinate],
-                [ {bomb, B} || B <- mnesia:table(State#gn_state.bombs_table_name), B#mnesia_bombs.position == Coordinate],
-                [ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.position == Coordinate]
-            ))) end,
-        mnesia:activity(read_only, Fun).
+        Tiles = qlc:eval(qlc:q([ {tile, T} || T <- mnesia:table(State#gn_state.tiles_table_name), T#mnesia_tiles.position == Coordinate])),
+        Bombs = qlc:eval(qlc:q([ {bomb, B} || B <- mnesia:table(State#gn_state.bombs_table_name), B#mnesia_bombs.position == Coordinate])),
+        Players = qlc:eval(qlc:q([ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.position == Coordinate])),
+        Tiles ++ Bombs ++ Players
+    end,
+    mnesia:activity(read_only, Fun).
 
 
 -spec interact_with_entity(list(), list(), up|down|left|right, #gn_state{}) -> can_move|cant_move.
@@ -176,38 +172,36 @@ interact_with_entity([H|T], BuffsList, Direction, State, MoveStatus) ->
     case H of
         {tile, _Tile} ->
             %% no buffs help with running into a wall, movement request is denied
-            interact_with_entity(T, BuffsList, Direction, cant_move);
+            interact_with_entity(T, BuffsList, Direction, State, cant_move);
         {bomb, Bomb} ->
             %% check if can kick bombs, freeze them or phased movement, act accordingly
             Relevant_buffs = [Buff || Buff <- BuffsList, lists:member(Buff, [?KICK_BOMB, ?PHASED, ?FREEZE_BOMB])],
             case Relevant_buffs of
                 [] -> 
                     %% no special buffs, can't push bomb, movement is denied
-                    interact_with_entity(T, BuffsList, Direction, cant_move);
+                    interact_with_entity(T, BuffsList, Direction, State, cant_move);
                 [?KICK_BOMB] ->
                     %% kick bomb special buff, tries to initiate a move for the bomb in the movement direction of the player
                     %% ? send message to bomb, prompting it to initiate appropriate movement based on it's own state
                     update_bomb_direction_movement(
                         Bomb, State#gn_state.bombs_table_name, bomb_as_fsm:kick_bomb(Bomb#mnesia_bombs.pid, Direction)
                     ),
-                    interact_with_entity(T, BuffsList, Direction, cant_move);
+                    interact_with_entity(T, BuffsList, Direction, State, cant_move);
                 [?PHASED] ->
                     %% can move through bombs. does not cause the bomb to move, able to keep moving
-                    interact_with_entity(T, BuffsList, Direction, MoveStatus);
+                    interact_with_entity(T, BuffsList, Direction, State, MoveStatus);
                 [?FREEZE_BOMB] ->
                     %% freezes the bomb, cannot move through it
                     %% let the bomb know
                     bomb_as_fsm:freeze_bomb(Bomb#mnesia_bombs.pid),
                     %% update the mnesia table 
                     update_bomb_status(Bomb, State#gn_state.bombs_table_name),
-                    interact_with_entity(T, BuffsList, Direction, cant_move)
-            end,
-            
-            ok;
+                    interact_with_entity(T, BuffsList, Direction, State, cant_move)
+            end;
         {player, _Other_player} ->
             %% design decision: cannot move through other players - same interaction as with a tile
             %% ! need to check if this isn't the player who initiated this - or is it fine 
-            interact_with_entity(T, BuffsList, Direction, cant_move)
+            interact_with_entity(T, BuffsList, Direction, State, cant_move)
     end.
 
 
@@ -225,15 +219,17 @@ update_bomb_direction_movement(Bomb, Bombs_table, ToUpdate) ->
     BombKey = Bomb#mnesia_bombs.position,
     %% Separate handling if only updating direction or direction&movement
     Fun = case ToUpdate of
-        Direction -> % only direction neeeds to be updated
+        {DirectionVal, MovementVal} ->
+            %% Update both direction and movement
+            fun() ->
+                [CurrentRecord] = mnesia:wread({Bombs_table, BombKey}),
+                mnesia:write(Bombs_table, CurrentRecord#mnesia_bombs{direction = DirectionVal, movement = MovementVal}, write)
+            end;
+        DirectionVal ->
+            %% Only direction needs to be updated
             fun() -> 
                 [CurrentRecord] = mnesia:wread({Bombs_table, BombKey}),
-                mnesia:write(Bombs_table, CurrentRecord#mnesia_bombs{direction = Direction}, write)
-            end;
-        {Direction, Movement} ->
-            fun() ->
-            [CurrentRecord] = mnesia:wread({Bombs_table, BombKey}),
-            mnesia:write(Bombs_table, CurrentRecord#mnesia_bombs{direction = Direction, movement = Movement}, write)
+                mnesia:write(Bombs_table, CurrentRecord#mnesia_bombs{direction = DirectionVal}, write)
             end
     end,
     mnesia:activity(transaction, Fun).
@@ -336,7 +332,7 @@ check_entered_coord(Player_record, State) ->
             [?NO_POWERUP] -> ?NO_POWERUP;
             [Found_powerup] -> % a powerup is present at the new position of the player
                 %% remove current powerup from table, send msg to process to terminate
-                mnesia:delete(State#gn_state.powerups_table_name, Found_powerup, write), % remove powerup from table
+                mnesia:delete(State#gn_state.powerups_table_name, Player_record#mnesia_players.position, write), % remove powerup from table
                 powerup:pickup(Found_powerup#mnesia_powerups.pid), % send msg to terminate process
                 Found_powerup#mnesia_powerups.type % returns the powerup (from the transaction)
         end

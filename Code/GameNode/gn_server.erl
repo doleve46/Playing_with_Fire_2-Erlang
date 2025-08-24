@@ -14,13 +14,14 @@
 %% API
 -export([start_link/1]).
 
--export[get_registered_name/1].
+-export([get_registered_name/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
 -include_lib("mnesia_records.hrl").
+-include_lib("stdlib/include/qlc.hrl").
 %%% Linux compatible
 %-include_lib("src/clean-repo/Code/Objects/object_records.hrl").
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
@@ -393,15 +394,16 @@ notify_owner_of_bomb_explosion(OwnerID, State) ->
         none -> %default bomb, no player owner
             ok;
         Pid -> % there's a real player's Pid on the bomb
-            Fun = fun() -> qlc:eval(qlc:q(
-                Result = [ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.pid == Pid]
-            )),
-            case Result of
-                {player, PlayerRecord} -> %% update active bomb count in mnesia table
-                    mnesia:write(PlayerRecord#mnesia_players{bombs_placed = (PlayerRecord#mnesia_players.bombs_placed - 1)});
-                true -> ok
-            end,
-            Result % return list back from function
+            Fun = fun() -> 
+                Result = qlc:eval(qlc:q(
+                    [ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.pid == Pid]
+                )),
+                case Result of
+                    [{player, PlayerRecord}] -> %% update active bomb count in mnesia table
+                        mnesia:write(PlayerRecord#mnesia_players{bombs_placed = (PlayerRecord#mnesia_players.bombs_placed - 1)});
+                    [] -> ok % no player found
+                end,
+                Result % return list back from function
             end, % fun()'s "end"
             {atomic, Result} = mnesia:activity(transaction, Fun),
             case Result of
