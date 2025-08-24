@@ -498,8 +498,7 @@ process_command(Command, Data) ->
         ignite_remote ->
             %% player_fsm doesn't hold information about bomb type, immediately send this to GN to handle there
             %% * Request Form = {ignite_bomb_request, "WhoAmI", "TargetGN"}
-            %% TODO: THIS IS NOT IMPLEMENTED ON THE GN_SERVER SIDE
-            Request = {ignite_bomb_request, Data#player_data.player_number, Data#player_data.target_gn},
+            Request = {ignite_bomb_request, Data#player_data.player_number},
             {ok, Request, Data};
             
         _ ->

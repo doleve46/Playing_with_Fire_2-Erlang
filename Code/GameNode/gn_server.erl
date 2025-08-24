@@ -82,7 +82,7 @@ handle_call(_Request, _From, State = #gn_state{}) ->
 handle_cast({player_message, Request}, State = #gn_state{}) ->
     ThisGN = get_registered_name(self()),
     case Request of
-        %% Player movement request mechanism
+        %% * Player movement request mechanism
         {move_request, PlayerNum, ThisGN , Direction} -> % move request from a player in our quarter
             Move_verdict = req_player_move:handle_player_movement(PlayerNum, Direction, State),
             case Move_verdict of
@@ -106,7 +106,7 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
             gen_server:cast(cn_server, {forward_request, TargetGN, {move_request, player, PlayerNum, Direction}}),
             {noreply, State};
 
-        %% Player requesting to place bombs mechanism
+        %% * Player requesting to place bombs mechanism
         {place_bomb_request, PlayerNum, ThisGN} -> % place bomb request from a player in our quarter
             case bomb_helper_functions:place_bomb(PlayerNum, State#gn_state.players_table_name, State#gn_state.bombs_table_name) of
                 bomb_placed ->
@@ -126,7 +126,14 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
             gen_server:cast(cn_server, {forward_request, TargetGN, {place_bomb_request, PlayerNum, ThisGN}}),
             {noreply, State};
 
-        %% Cooldown updates
+        %% * Player requesting to ignite remote bombs
+        %% Must check if any of his bombs are 'remote' type, and if any of them are - ignite them
+        %% This takes place within cn_server, as the bombs can be across all quarters on theory
+        {ignite_bomb_request, PlayerNum} ->
+            gen_server:cast(cn_server, {query_request, self(), {ignite_bomb_request, PlayerNum}}),
+            {noreply, State};
+
+        %% * Cooldown updates
         {cooldown_update, ThisGN, UpdateContent} ->
             req_player_move:update_player_cooldowns(UpdateContent, State#gn_state.players_table_name),
             {noreply, State};

@@ -120,10 +120,29 @@ handle_cast({query_request, AskingGN, Request}, State) ->
                     erlang:error(record_not_found, [node(), Player_record])
             end,
             {noreply, State};
+
         {handle_bomb_explosion, Coord, Radius} ->
             %% handled in a side function
             %% Calculates affected coordinates, then sends damage_taken messages to all objects impacted
-            bomb_explosion_handler(Coord, Radius)
+            bomb_explosion_handler(Coord, Radius);
+
+        {ignite_bomb_request, PlayerNum} ->
+            RemoteBombs = bomb_helper_functions:find_remote_bombs_for_player(PlayerNum),
+            lists:foreach(fun(BombRecord) ->
+                % Send ignite message to each remote bomb
+                case BombRecord#mnesia_bombs.pid of
+                    Pid when is_pid(Pid) ->
+                        bomb_as_fsm:ignite_bomb(Pid);
+                    _ ->
+                        io:format("Warning: Invalid bomb PID for remote bomb at ~p~n", [BombRecord#mnesia_bombs.position])
+                end
+            end, RemoteBombs),
+            %% Notify Player FSM about the ignition
+            case RemoteBombs of
+                [] -> player_fsm:gn_response(PlayerNum, {ignite_result, denied});
+                _  -> player_fsm:gn_response(PlayerNum, {ignite_result, accepted})
+            end,
+            {noreply, State}
     end;
 
 %% * handles a player transfer from one GN to another

@@ -1,9 +1,10 @@
 -module(bomb_helper_functions).
 
--export([place_bomb/3]).
+-export([place_bomb/3, find_remote_bombs_for_player/1]).
 
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
+-include_lib("stdlib/include/qlc.hrl").
 
 %% @doc Places a bomb for a player at their current position
 %% @param PlayerNum - The player number/ID placing the bomb
@@ -80,3 +81,24 @@ add_bomb_to_table(Record, BombsTableName) ->
         mnesia:write(BombsTableName, Record, write)
     end,
     mnesia:activity(transaction, Fun).
+
+%% @doc Searches all 4 bomb tables for not-ignited remote bombs owned by PlayerNum
+%% @returns List of remote bomb records owned by the player
+find_remote_bombs_for_player(PlayerNum) ->
+    BombTables = [gn1_bombs, gn2_bombs, gn3_bombs, gn4_bombs],
+    Fun = fun() ->
+        lists:foldl(
+            fun(TableName, Acc) ->
+                Query = qlc:q([
+                    Bomb || Bomb <- mnesia:table(TableName),
+                    Bomb#mnesia_bombs.owner =:= PlayerNum,
+                    Bomb#mnesia_bombs.type =:= ?REMOTE_BOMB,
+                    Bomb#mnesia_bombs.ignited =:= false
+                ]),
+                qlc:e(Query) ++ Acc
+            end,
+            [], % Initial accumulator
+            BombTables)
+    end,
+    {atomic, RemoteBombs} = mnesia:activity(transaction, Fun),
+    RemoteBombs.
