@@ -122,7 +122,7 @@ process_bot_action(Action, State) ->
         false ->
             % Send command to player FSM
             case State#bot_state.player_pid of
-                undefined ->
+                none ->
                     io:format("Bot ~p: No player process connected~n", 
                         [State#bot_state.player_number]),
                     {noreply, State};
