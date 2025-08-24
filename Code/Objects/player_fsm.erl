@@ -700,8 +700,8 @@ apply_powerup(Powerup, Data) ->
         {life, X} ->
             Data#player_data{life = Data#player_data.life + X};
         _ -> % powerup not stored on player fsm process
-            ok
-    end, ok.
+            Data
+    end.
 
 
 send_io_ack(Response, Data) ->
