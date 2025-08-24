@@ -3,8 +3,6 @@
 %%% @copyright (C) 2025, <COMPANY>
 %%% @doc
 %%%
-%%% TODO: general things to do when working:
-%%%   - Finish writing consume_powerup (part of check_entered_coord)
 %%% @end
 %%% Created : 16. Jul 2025 08:42
 %%%-------------------------------------------------------------------
@@ -55,16 +53,16 @@ read_and_update_coord(player, PlayerNum, Table) ->
 
                 %% check if new coordinate fall within current managing GN
                 case get_managing_node_by_coord(New_x,New_y) of
-                    Current_gn_name -> % destination coordinate is managed by this GN
-                        %% update position, reset direction and movement
+                    Current_gn_name -> % Player is not about to leave current GN's quarter
+                    %% update position, reset direction and movement
                         Updated_record = Player_record#mnesia_players{
                             position = [New_x, New_y],
                             movement = false,
                             direction = none
                         },
-                        %% ? should we check for collisions at this point? against explosions?
+                        %% TODO: ? should we check for collisions against explosions at this point?
                         mnesia:write(Updated_record),
-                        {same_gn, Player_record}; %% return value to calling function
+                        {retain_gn, Player_record}; %% return value to calling function
                     Other_name -> %% destination coordinate is managed by another GN (=Other_name)
                     %% update position, target_gn name, reset movement and direction
                     %% ask CN to transfer entry between tables
@@ -75,7 +73,7 @@ read_and_update_coord(player, PlayerNum, Table) ->
                             direction = none
                         },
                         mnesia:write(Updated_record),
-                        {switch_gn, Player_record, Current_gn_name, Other_name} %% return value
+                        {switch_gn, Current_gn_name, Other_name} %% return value
                     end;
             [] -> not_found % should cause an error
         end
@@ -316,7 +314,7 @@ handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
     end.
 
 
-handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo
+handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo: implement bomb movement clearance
     %% ! BombNum and Table_name are "unused" for now to remove warnings until I finish this function
     case Answer of
         can_move->
@@ -329,7 +327,7 @@ handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo
 check_entered_coord(Player_record, State) ->
     %% Check for powerups in new position, if any are found - add their effect to the player's mnesia table entry
     %% When a powerup is taken it is sent a a 'pickup(Pid)' command to stop & terminate it.
-    %% TODO: This powerup entry is removed from the mnesia table - triggered by the termination msg from the powerup process.
+    %% This powerup entry is removed from the mnesia table - triggered by the termination msg from the powerup process.
     %% Player FSM is notified of the following powerup changes: max bombs, speed, lives
     Fun = fun() ->
         case mnesia:read(State#gn_state.powerups_table_name, Player_record#mnesia_players.position, write) of
@@ -422,4 +420,11 @@ update_player_cooldowns(Message, Players_table) ->
         end
     end,
     mnesia:activity(interaction, Fun),
+    if
+        NewValue == 0, WhatToUpdate == movement_cooldown_update ->
+            %% A movement just finished. Trigger event for updating coordinate and all that entails
+            self() ! {update_coord, player, PlayerNumber};
+        true ->
+            ok
+    end,
     ok.

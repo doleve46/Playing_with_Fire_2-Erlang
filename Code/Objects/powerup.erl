@@ -18,9 +18,13 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
-% linux compatible
--include_lib("src/clean-repo/Code/common_parameters.hrl").
 -include("object_records.hrl").
+%% linux compatible
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
+
+%% Windows compatible
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+
 
 
 %%%===================================================================
@@ -40,7 +44,7 @@ start_link(Pos_x, Pos_y, Type) ->
 
 
 pickup(Pid) ->
-    gen_server:cast(Pid, stop).
+    gen_server:cast(Pid, pickup).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -66,8 +70,6 @@ init([Position, Type, Node_ID]) ->
     {stop, Reason :: term(), NewState :: #powerup_state{}}).
 handle_call(Request, _From, State = #powerup_state{}) ->
     case Request of
-        pickup -> % pick up power-up, terminate process and return power-up type
-            {stop, State#powerup_state.type, State};
         _ -> % todo: catch-all, don't have any other interaction I can think of for now
             {stop, catchall_clause, State}
     end.
@@ -78,6 +80,9 @@ handle_call(Request, _From, State = #powerup_state{}) ->
     {noreply, NewState :: #powerup_state{}} |
     {noreply, NewState :: #powerup_state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #powerup_state{}}).
+handle_cast(pickup, State = #powerup_state{}) ->
+    {stop, normal, State};
+
 handle_cast(_Request, State = #powerup_state{}) ->
     {noreply, State}.
 

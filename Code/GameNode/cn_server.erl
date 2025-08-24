@@ -148,15 +148,11 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 
-
-                
-
-
 %%%================== handle info ==================
 
 %% @doc Handles failure messages from the monitored processes
 handle_info({'DOWN', Ref, process, Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
-    %% todo: placeholder
+    %% todo: placeholder - deal with failing nodes/processes
     io:format("*CN: monitored process ~w with ref ~w failed, reason:~w~n",[Pid,Ref,Reason]),
     {noreply, Data};
 
@@ -197,13 +193,13 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
     Fun = fun() ->
         %% Read entry from current GN
         case mnesia:read(Current_GN_table, PlayerNum, read) of
-          [Record] ->
+            [Record] ->
                 %% delete from table from the GN we are leaving
                 ok = mnesia:delete(Current_GN_table, Record, write),
                 %% Write the data to the new GN's table
                 mnesia:write(New_GN_table, Record, write);
-        [] ->
-            {error, not_found}
+            [] ->
+                {error, not_found}
         end
     end,
     mnesia:activity(transaction, Fun).

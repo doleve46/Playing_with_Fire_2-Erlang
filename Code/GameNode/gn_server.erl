@@ -183,7 +183,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             req_player_move:handle_player_movement_clearance(PlayerNum, Answer, State#gn_state.players_table_name),
             {noreply, State};
 
-        {movement_clearance, bomb, BombIdentifier, Answer} -> % todo
+        {movement_clearance, bomb, BombIdentifier, Answer} -> % todo: implement bomb movement clearance
             req_player_move:handle_bomb_movement_clearance(BombIdentifier, Answer, State#gn_state.bombs_table_name),
             {noreply, State};
 
@@ -219,7 +219,7 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
 %% * A player came into my quarter of the map - open a timer, let the player FSM know
 handle_cast({incoming_player, PlayerNum}, State) ->
     Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
-    req_player_move:check_entered_coord(Player_record), % TODO - not written yet!
+    req_player_move:check_entered_coord(Player_record),
     {noreply, State};
 
 %% * A tile updates his status (broken/transition to one_hit)
@@ -245,40 +245,24 @@ handle_cast(_Request, State = #gn_state{}) ->
     {stop, Reason :: term(), NewState :: #gn_state{}}).
 
 
-%% * Timer for finishing a movement by the player has expired.
-%% * Checks if the player stays in current GNs boundaries
-%% * If it changes GNs, transfer the players table entry to the new GN, and update the Player FSM of that change
+%% * Timer/counter for player movement has finished
+%% * Checks if the player stays in current GNs boundaries:
+%% *    If it changes GNs, transfer the players table entry to the new GN, and update the Player FSM of that change
 %% * Regardless, checks destination for power-ups/explosions
-%% ! explosions are a tricky thing - for now im not going to do it; 
-%% ! the explosion checks everything in its radius when it explodes and that's it
 handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
         case req_player_move:read_and_update_coord(player, PlayerNum, State#gn_state.players_table_name) of
-            not_found -> % got an error somewhere, crash the process. this is mostly for debugging as of now
-                erlang:error(failure_when_updating_record, [node(), PlayerNum]);
-            {same_gn, Player_record} ->
-                if 
-                    Player_record#mnesia_players.target_gn == Player_record#mnesia_players.local_gn ->
-                        %% player FSM is on the same machine as the GN
-                        req_player_move:check_entered_coord(Player_record, State); % TODO - not written yet!
-                    true -> %% player FSM is on another machine, forward message through CN->local GN
-                        ok 
-                end;
-            {switch_gn, Player_record, Current_GN, New_GN} ->
+            {retain_gn, Player_record} ->
+                req_player_move:check_entered_coord(Player_record, State); %% Player FSM is updated through here
+
+            {switch_gn, Current_GN, New_GN} ->
                 %% transfer records to new GN
                 gen_server:cast(cn_server,
                     {transfer_records, player, PlayerNum, Current_GN, New_GN}),
                 %% Let player FSM know of the GN change
-                Player_local_gn = Player_record#mnesia_players.local_gn,
-                %% Check where Player FSM is physically - current node or someplace else
-                case get_registered_name(self()) of
-                    Player_local_gn -> %% player FSM on this node
-                        player_fsm:update_target_gn(PlayerNum, New_GN);
-                    _ -> %% Player FSM on another node
-                        gen_server:cast(cn_server,
-                            {forward_request, Player_local_gn, 
-                                {new_target_gn, player, PlayerNum, New_GN}})
-                        
-                end
+                player_fsm:update_target_gn(PlayerNum, New_GN);
+
+            _ -> % ! got an error somewhere, crash the process. this is mostly for debugging as of now
+                erlang:error(failure_when_updating_record, [node(), PlayerNum])
         end,
         {noreply, State};
 
@@ -359,9 +343,8 @@ initialize_players(TableName, PlayerIsBot, GN_number) ->
         {ok, FSM_pid} = player_fsm:start_link(GN_number, self(), PlayerIsBot, IO_pid),
         %% Update mnesia record
         UpdatedRecord = PlayerRecord#mnesia_players{
-            local_gn = node(),
-            local_gn_pid = self(),
-            target_gn = node(), % by default starts at his own GN's quarter
+            local_gn = self(),
+            target_gn = self(), % by default starts at his own GN's quarter
             io_handler_pid = IO_pid,
             pid = FSM_pid,
             bot = PlayerIsBot},
