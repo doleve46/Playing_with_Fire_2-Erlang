@@ -3,6 +3,8 @@
 %%% @copyright (C) 2025, <COMPANY>
 %%% @doc
 %%%
+%%% TODO: general things to do when working:
+%%%   - Finish writing consume_powerup (part of check_entered_coord)
 %%% @end
 %%% Created : 16. Jul 2025 08:42
 %%%-------------------------------------------------------------------
@@ -22,6 +24,7 @@
 -export[handle_player_movement/3, insert_player_movement/2, check_for_obstacles/4].
 -export[read_and_update_coord/3].
 -export[check_entered_coord/2].
+-export[update_player_cooldowns/2].
 
 -import(gn_server, [get_registered_name/1]).
 
@@ -30,7 +33,7 @@
 %% ? Imports for windows:
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
 -include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% windows fix
+-include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
 
 %% ? imports for linux:
 %-include_lib("src/clean-repo/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.
@@ -401,7 +404,26 @@ remove_other_buffs(ToRemove, BuffList, NewBuff) ->
     
 
 
-%% TODO: general things to do when working:
-%% 2. Finish writing consume_powerup (part of check_entered_coord)
-%% 3. Re-write Player FSM to our new needs, update its internal player record
-%% 4. Implement bomb explosion mechanism (msg passing, checking 'real' explosion radius, inflicting dmg..
+-spec update_player_cooldowns(Message::tuple(), Players_table::atom()) -> ok.
+update_player_cooldowns(Message, Players_table) ->
+    %% Unpack message content, update accordingly
+    {WhatToUpdate, PlayerNumber, NewValue} = Message,
+    %% * Update the player's cooldowns in the mnesia table.
+    Fun = fun() ->
+        case mnesia:read(Players_table, PlayerNumber) of
+            [PlayerRecord = #mnesia_players{}] ->
+                %% Update the relevant stat
+                UpdatedRecord = case WhatToUpdate of
+                    movement_cooldown_update ->
+                        PlayerRecord#mnesia_players{movement_timer = NewValue};
+                    request_cooldown_update ->
+                        PlayerRecord#mnesia_players{request_timer = NewValue};
+                    immunity_update ->
+                        PlayerRecord#mnesia_players{immunity_timer = NewValue}
+                end,
+                mnesia:write(Players_table, UpdatedRecord, write);
+            [] -> not_found % should never happen
+        end
+    end,
+    mnesia:activity(interaction, Fun),
+    ok.

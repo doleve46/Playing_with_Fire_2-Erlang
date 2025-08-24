@@ -608,8 +608,10 @@ handle_tick(CurrentState, Data) ->
         immunity_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % cooldown just ended, notify GN
-            gen_server:cast(Data#player_data.local_gn, {player_message, 
-                {request_cooldown_update, Data#player_data.player_number, Updated_requestCooldown}
+            gen_server:cast(Data#player_data.local_gn, {player_message,
+                {cooldown_update, Data#player_data.target_gn, 
+                    {request_cooldown_update, Data#player_data.player_number, Updated_requestCooldown}
+                }
             });
         _ -> % still in cooldown (if we want more checkpoints to send we can add them here)
             ok
@@ -619,8 +621,10 @@ handle_tick(CurrentState, Data) ->
         move_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % Report movement cooldown changes every 200 ms to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message, 
-                {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
+            gen_server:cast(Data#player_data.local_gn, {player_message,
+                {cooldown_update, Data#player_data.target_gn,
+                    {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
+                }
             });
         _ -> % still in cooldown (if we want more checkpoints to send we can add them here)
             ok
@@ -637,18 +641,24 @@ handle_tick(CurrentState, Data) ->
             erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 0 -> % immunity ended, notify GN
-            gen_server:cast(Data#player_data.local_gn, {player_message, {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}),
+            gen_server:cast(Data#player_data.local_gn, {player_message,
+                {cooldown_update, Data#player_data.target_gn,
+                    {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
             erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
             case CurrentState of
                 immunity_idle -> {next_state, idle, NewData};
                 immunity_waiting_for_response -> {next_state, waiting_for_response, NewData}
             end;
         Updated_immunityTimer == 1000 -> % 1sec immunity left, report to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message, {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}),
+            gen_server:cast(Data#player_data.local_gn, {player_message,
+                {cooldown_update, Data#player_data.target_gn,
+                    {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
             erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 2000 -> % 2sec immunity left, report to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message, {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}),
+            gen_server:cast(Data#player_data.local_gn, {player_message,
+                {cooldown_update, Data#player_data.target_gn,
+                    {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
             erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
             {keep_state, NewData}
     end.

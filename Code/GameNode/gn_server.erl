@@ -82,12 +82,13 @@ handle_call(_Request, _From, State = #gn_state{}) ->
 handle_cast({player_message, Request}, State = #gn_state{}) ->
     ThisGN = get_registered_name(self()),
     case Request of
+        %% Player movement request mechanism
         {move_request, PlayerNum, ThisGN , Direction} -> % move request from a player in our quarter
             Move_verdict = req_player_move:handle_player_movement(PlayerNum, Direction, State),
             case Move_verdict of
                 can_move ->
                     req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
-                    player_fsm:gn_response(PlayerNum, {move_result, Move_verdict}); %% ? this should be removed later on. Stays here for debugging for now
+                    player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
                 cant_move ->
                     req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
                     player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
@@ -103,6 +104,30 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
             {noreply, State};
         {move_request, PlayerNum, TargetGN, Direction} -> % move request from a player outside my quarter
             gen_server:cast(cn_server, {forward_request, TargetGN, {move_request, player, PlayerNum, Direction}}),
+            {noreply, State};
+
+        %% Player requesting to place bombs mechanism
+        {place_bomb_request, PlayerNum, ThisGN} -> % place bomb request from a player in our quarter
+            case bomb_helper_functions:place_bomb(PlayerNum, State#gn_state.players_table_name) of
+                {bomb_placed} ->
+                    %% bomb was placed successfully, added into mnesia table by helper function
+                    %% Notify player FSM of successful placement
+                    player_fsm:gn_response(PlayerNum, {bomb_result, accepted});
+                false ->
+                    %% Notify player FSM of failed placement
+                    player_fsm:gn_response(PlayerNum, {bomb_result, denied})
+            end,
+            {noreply, State};
+        {place_bomb_request, PlayerNum, TargetGN} -> % place bomb request from a player outside my quarter
+            gen_server:cast(cn_server, {forward_request, TargetGN, {place_bomb_request, PlayerNum, TargetGN}}),
+            {noreply, State};
+
+        %% Cooldown updates
+        {cooldown_update, ThisGN, UpdateContent} ->
+            req_player_move:update_player_cooldowns(UpdateContent, State#gn_state.players_table_name),
+            {noreply, State};
+        {cooldown_update, TargetGN, UpdateContent} ->
+            gen_server:cast(cn_server, {forward_request, TargetGN, {cooldown_update, TargetGN, UpdateContent}}),
             {noreply, State}
     end;
 
@@ -165,8 +190,11 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
         %% * A player has changed coordinates, resulting in a target GN change.
         %% * this message is sent by the previous GN to let the player FSM update his target
         {new_target_gn, player, PlayerNum, New_GN} ->
-            player_fsm:update_target_gn(PlayerNum, New_GN)
-        
+            player_fsm:update_target_gn(PlayerNum, New_GN);
+
+        {cooldown_update, _ThisGN, UpdateContent} ->
+            req_player_move:update_player_cooldowns(UpdateContent, State#gn_state.players_table_name),
+            {noreply, State}
         
     end;
 
