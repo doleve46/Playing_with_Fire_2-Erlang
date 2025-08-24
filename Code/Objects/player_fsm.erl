@@ -615,18 +615,10 @@ handle_tick(CurrentState, Data) ->
             ok
     end,
     %% Movement request cooldown handling
-    case Updated_movementCooldown of
+    case (Updated_movementCooldown rem 200) of
         move_cd -> % was at 0, nothing to report or change
             ok;
-        0 -> % movement cooldown ended, notify GN
-            gen_server:cast(Data#player_data.local_gn, {player_message, 
-                {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
-            });
-        250 -> % reporting to GN at 250ms
-            gen_server:cast(Data#player_data.local_gn, {player_message, 
-                {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
-            });
-        500 -> % reporting to GN at 500ms
+        0 -> % Report movement cooldown changes every 200 ms to GN
             gen_server:cast(Data#player_data.local_gn, {player_message, 
                 {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
             });
