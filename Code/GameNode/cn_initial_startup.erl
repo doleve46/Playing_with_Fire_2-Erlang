@@ -151,6 +151,45 @@ discover_GNs(IP_prefix) ->
             end || X <- lists:seq(3,253)]
         ).
 
+%% Better network discovery using multicast or broadcast
+discover_GNs_improved(IP_prefix) ->
+    %% Option 1: Use epmd to query known nodes on specific IPs
+    PossibleIPs = generate_ip_range(IP_prefix, 3, 253), % skip .1 (usually router)
+    
+    %% Parallel ping with timeout
+    Self = self(),
+    Pids = [spawn(fun() -> ping_ip_for_gns(IP, Self) end) || IP <- PossibleIPs],
+    
+    %% Collect results with timeout
+    collect_gn_discoveries([], length(Pids), 3000). % 3 second timeout
+
+ping_ip_for_gns(IP, ParentPid) ->
+    case net_adm:names(IP) of
+        {ok, Names} ->
+            GNNodes = [list_to_atom(Name ++ "@" ++ IP) || 
+                      {Name, _Port} <- Names,
+                      lists:prefix("GN", Name),
+                      list_to_atom(Name ++ "@" ++ IP) =/= node()],
+            
+            %% Test connectivity
+            ConnectedGNs = [Node || Node <- GNNodes, net_adm:ping(Node) =:= pong],
+            ParentPid ! {gn_discovery, ConnectedGNs};
+        _ ->
+            ParentPid ! {gn_discovery, []}
+    end.
+
+collect_gn_discoveries(Acc, 0, _Timeout) -> lists:flatten(Acc);
+collect_gn_discoveries(Acc, Remaining, Timeout) ->
+    receive
+        {gn_discovery, Nodes} ->
+            collect_gn_discoveries([Nodes | Acc], Remaining - 1, Timeout)
+    after Timeout ->
+        lists:flatten(Acc)
+    end.
+
+generate_ip_range(Prefix, Start, End) ->
+    [Prefix ++ integer_to_list(X) || X <- lists:seq(Start, End)].
+
 
 
 
@@ -270,7 +309,8 @@ create_tables(GN_node, CN_node, Node_number) ->
         {disc_copies, [CN_node]},
         {ram_copies, [GN_node]},
         {record_name, mnesia_players},
-        {type, set}
+        {type, set},
+        {index, [pid]} % allows indexing (searching more easily) by pid field
     ]),
     io:format("CN: full printout of create_tables for node number #~w:~ntiles: ~w~nbombs: ~w~npowerups: ~w~nplayers: ~w~n", 
         [Node_number,Debug1 ,Debug2, Debug3, Debug4]).

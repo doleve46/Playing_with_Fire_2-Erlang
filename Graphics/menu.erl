@@ -1,39 +1,64 @@
 -module(menu).
 -export([start/0, send/2]).
+%% TODO: this file and it's python still need work
+%% Need to close the python and this process ~0.5s after choosing playmode (bot/human)
+%% or the time-to-choose expired.
+%% moreover, I need to look at the python to see if there are any problem and understand
+%% what is going on there.
 
 start() ->
     Port = open_port({spawn, "python3 PWF2_GN_GUI.py"}, [binary, exit_status]),
     send(Port, "show_main_menu"),
-    loop(Port).
+    loop(Port, []).
 
 send(Port, Command) ->
     Port ! {self(), {command, list_to_binary(Command ++ "\n")}}.
 
-loop(Port) ->
+send_to_gn_start(Request) ->
+    gn_start ! {self(), Request}.
+
+loop(Port, Status) ->
     receive
         {Port, {data, Data}} ->
             Message = binary_to_list(Data),
             io:format("GUI replied: ~s~n", [Message]),
-            handle_gui_event(Port, string:trim(Message)),
-            loop(Port);
-        {Port, {exit_status, Status}} ->
-            io:format("GUI exited with status ~p~n", [Status])
+            handle_gui_event(Port, string:trim(Message));
+
+        {Port, {exit_status, StatusMsg}} ->
+            io:format("GUI exited with status ~p~n", [StatusMsg]),
+            send_to_gn_start({exit_clicked}); % simulating crash
+
+        {cn_start, connection_count, Count} when Status==connecting -> %% TODO
+            io:format("Received connection count update: ~p~n", [Count]),
+            send(Port, "update_connection_count:" ++ integer_to_list(Count)),
+            loop(Port, connecting);
+
+        {cn_start, choose_playmode, are_you_bot} ->
+            io:format("All 4 GNs connected! Moving to player choice~n"),
+            send(Port, "show_player_choice"),
+            start_choice_timer(Port),
+            loop(Port, player_choice)
+
     end.
 
 handle_gui_event(Port, "play_clicked") ->
     io:format("User clicked Play — waiting for GN connections...~n"),
     send(Port, "show_loading"),
-    wait_for_gn_connections(Port);
+    send_to_gn_start({play_clicked}),
+    loop(Port, connecting);
     
 handle_gui_event(Port, "exit_clicked") ->
     io:format("User clicked Exit — exiting~n"),
     port_close(Port),
+    send_to_gn_start({exit_clicked}),
+    loop(Port, []); % remove status
     ok;
 
 handle_gui_event(Port, "retry_clicked") ->
     io:format("Retrying — waiting for GN connections again~n"),
     send(Port, "show_loading"),
-    wait_for_gn_connections(Port);
+    send_to_gn_start({play_clicked}),
+    loop(Port, connecting);
 
 handle_gui_event(Port, "return_to_menu") ->
     send(Port, "show_main_menu");
@@ -41,18 +66,21 @@ handle_gui_event(Port, "return_to_menu") ->
 handle_gui_event(Port, "play_game_clicked") ->
     io:format("User chose to play the game~n"),
     send(Port, "show_game_setup"),
+    send_to_gn_start({play_as_human}),
     timer:sleep(3000), % Simulate game setup time
     start_game(Port, false); % false = human player
 
 handle_gui_event(Port, "bot_clicked") ->
     io:format("User chose bot mode~n"),
     send(Port, "show_game_setup"),
+    send_to_gn_start({play_as_bot}),
     timer:sleep(3000), % Simulate game setup time
     start_game(Port, true); % true = bot mode
 
 handle_gui_event(Port, "choice_timeout") ->
     io:format("Player choice timed out — defaulting to bot~n"),
     send(Port, "show_game_setup"),
+    send_to_gn_start({play_as_bot}),
     timer:sleep(3000),
     start_game(Port, true); % default to bot
 
@@ -77,10 +105,10 @@ wait_for_gn_connections(Port) ->
         end
     end).
 
-%% Start 60-second timer for player choice
+%% Start 20-second timer for player choice
 start_choice_timer(Port) ->
     spawn(fun() ->
-        timer:sleep(60000), % 60 seconds
+        timer:sleep(20000), % 20 seconds
         send(Port, "choice_timeout")
     end).
 
@@ -88,7 +116,9 @@ start_choice_timer(Port) ->
 start_game(Port, IsBotMode) ->
     io:format("Starting game (Bot mode: ~p)...~n", [IsBotMode]),
     send(Port, "start_game"),
-    
+    %% TODO: the graphics are opened through another channel, this process & it's python
+    %% TODO:    should just close down.
+
     %% Start graphics servers and close menu
     spawn(fun() ->
         timer:sleep(2000), % Give the user a moment to see the "starting" message

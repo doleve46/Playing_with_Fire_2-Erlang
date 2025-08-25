@@ -6,6 +6,7 @@
 %% They spawn from within their respective node, and have a locally-registered name "cn_server_graphics".
 %% This Process tries to monitor al 4 of them - when he is successful he sends a 'ready' 
 %% message to cn_server, and proceed to work as before.
+%% TODO: Need to verify that a python port is created through cn_graphics and gn_graphics, and is responsive and works as intended.
 %%% ------------------------------------------------------------------------------------------------------
 %% API
 -export([start_link/1, get_current_map/0]).
@@ -123,6 +124,8 @@ handle_info(create_python_port, State) ->
     % Send initial state
     send_map_to_all_targets(UpdatedState),
     io:format("✅ Enhanced Python port created and initial map sent~n"),
+    %% Send ready message to cn_server
+    cn_server ! {graphics_ready, self()},
     {noreply, UpdatedState};
 
 handle_info(periodic_update, State) ->
