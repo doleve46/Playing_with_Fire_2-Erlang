@@ -6,10 +6,10 @@
 %% They spawn from within their respective node, and have a locally-registered name "cn_server_graphics".
 %% This Process tries to monitor al 4 of them - when he is successful he sends a 'ready' 
 %% message to cn_server, and proceed to work as before.
-%% Added explosion visualization support with automatic cleanup.
+%% Added explosion visualization support with direct function call interface.
 %%% ------------------------------------------------------------------------------------------------------
 %% API
--export([start_link/1, get_current_map/0]).
+-export([start_link/1, get_current_map/0, show_explosion/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -48,7 +48,20 @@ start_link(GNNodes) ->
 %% Get current map state
 -spec get_current_map() -> term().
 get_current_map() ->
-    gen_server:call(?MODULE, get_current_map).
+    gen_server:call({global, ?MODULE}, get_current_map).
+
+%% Direct function to show explosions - called directly from cn_server
+-spec show_explosion(list()) -> ok.
+show_explosion(Coordinates) ->
+    Timestamp = erlang:system_time(millisecond),
+    ExpiryTime = Timestamp + ?EXPLOSION_DISPLAY_TIME,
+    
+    io:format("💥 Direct explosion call: ~w coordinates will display for ~wms~n", 
+              [length(Coordinates), ?EXPLOSION_DISPLAY_TIME]),
+    
+    %% Add explosions directly to the server state
+    gen_server:cast({global, ?MODULE}, {add_explosions_direct, Coordinates, ExpiryTime}),
+    ok.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -97,17 +110,12 @@ handle_cast(force_update, State) ->
     send_map_to_all_targets(UpdatedState),
     {noreply, UpdatedState};
 
-%% Handle explosion events from cn_server
-handle_cast({explosion_event, Coordinates, Timestamp}, State) ->
-    ExpiryTime = Timestamp + ?EXPLOSION_DISPLAY_TIME,
-    
+%% Handle direct explosion additions
+handle_cast({add_explosions_direct, Coordinates, ExpiryTime}, State) ->
     %% Add all explosion coordinates with expiry time
     NewExplosions = lists:foldl(fun(Coord, AccMap) ->
         maps:put(Coord, ExpiryTime, AccMap)
     end, State#state.active_explosions, Coordinates),
-    
-    io:format("💥 Explosion event: ~w coordinates will display for ~wms~n", 
-              [length(Coordinates), ?EXPLOSION_DISPLAY_TIME]),
     
     %% Force immediate map update to show explosions
     NewState = State#state{active_explosions = NewExplosions},
