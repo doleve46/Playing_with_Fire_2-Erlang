@@ -47,9 +47,11 @@ init([CNNode]) ->
         local_gn_name = LocalGN,
         local_player_ids = LocalPlayerIDs
     },
+     %% trap exits
+    process_flag(trap_exit, true),
     
-    % Monitor the CN node
-    monitor_node(CNNode, true),
+    % Monitors ALL nodes in the cluster for connection up/down (message of the form {nodeup, Node} | {nodedown, Node}
+    net_kernel:monitor_nodes(true),
     
     % Create Python port after a short delay
     erlang:send_after(50, self(), create_python_port),
@@ -212,10 +214,12 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
 
 handle_info({nodedown, Node}, State) when Node == State#state.cn_node ->
     io:format("⚠️ CN node ~w went down~n", [Node]),
+    %% TODO: show something on screen for this time? add a variable in the state record that stops all timers?
     {noreply, State};
 
 handle_info({nodeup, Node}, State) when Node == State#state.cn_node ->
     io:format("✅ CN node ~w came back up~n", [Node]),
+    %% TODO: going back up mechanism - should request a full map, return all timers back to normal.
     {noreply, State};
 
 handle_info(Info, State) ->
