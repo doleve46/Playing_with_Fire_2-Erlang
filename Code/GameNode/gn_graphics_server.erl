@@ -1,5 +1,6 @@
 -module(gn_graphics_server).
 -behaviour(gen_server).
+%% TODO: Need to verify that a python port is created through cn_graphics and gn_graphics, and is responsive and works as intended.
 
 %% API
 -export([start_link/1]).
