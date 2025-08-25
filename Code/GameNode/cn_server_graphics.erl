@@ -1,6 +1,12 @@
 -module(cn_server_graphics).
 -behaviour(gen_server).
-
+%%% ------------------------------------------------------------------------------------------------------
+%%% DOLEV - CHANGES MADE:
+%% The CN server graphics does NOT spawn the GN graphics servers anymore.
+%% They spawn from within their respective node, and have a locally-registered name "cn_server_graphics".
+%% This Process tries to monitor al 4 of them - when he is successful he sends a 'ready' 
+%% message to cn_server, and proceed to work as before.
+%%% ------------------------------------------------------------------------------------------------------
 %% API
 -export([start_link/1, get_current_map/0]).
 
@@ -34,7 +40,7 @@
 %% Starts the central graphics server
 -spec start_link(list()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(GNNodes) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [GNNodes], []).
+    gen_server:start_link({global, ?MODULE}, ?MODULE, [GNNodes], []).
 
 %% Get current map state
 -spec get_current_map() -> term().
@@ -55,18 +61,21 @@ init([GNNodes]) ->
     % Set up mnesia subscriptions
     erlang:send(self(), setup_subscriptions),
    
-    % Spawn GN graphics servers
-    erlang:send_after(30, self(), spawn_gn_servers),
+    % Monitoring of gn graphics servers
+    erlang:send_after(?TICK_DELAY, self(), monitor_gn_graphics_servers),
    
     % Create Python port
     erlang:send(self(), create_python_port),
    
     % Start periodic updates (faster for better timer sync)
-    erlang:send_after(?TICK_DELAY, self(), periodic_update),
+    erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
    
     % Clean up dead players periodically
     erlang:send_after(5000, self(), cleanup_dead_players),
-   
+    
+    %% trap exits
+    process_flag(trap_exit, true),
+    
     io:format("✅ Enhanced CN Graphics Server initialized~n"),
     {ok, State}.
 
@@ -96,11 +105,11 @@ handle_info(setup_subscriptions, State) ->
     io:format("✅ Subscribed to tables: ~p~n", [SubscribedTables]),
     {noreply, State#state{subscribed_tables = SubscribedTables}};
 
-handle_info(spawn_gn_servers, State) ->
-    io:format("🚀 Spawning enhanced GN graphics servers...~n"),
-    GNServers = spawn_all_gn_graphics_servers(State#state.gn_nodes),
-    io:format("✅ Spawned enhanced GN graphics servers: ~p~n", [length(GNServers)]),
-    {noreply, State#state{gn_graphics_servers = GNServers}};
+handle_info(monitor_gn_graphics_servers, State) ->
+    io:format("🚀 Attempting to monitor all GN graphics servers...~n"),
+    ReferencesList = monitor_gn_graphics_servers(State#state.gn_nodes),
+    io:format("✅ Monitoring was successful!: ~p~n", [length(GNServers)]),
+    {noreply, State#state{gn_graphics_servers = ReferencesList}};
 
 handle_info(create_python_port, State) ->
     io:format("🐍 Creating enhanced Python port...~n"),
@@ -225,6 +234,10 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
     io:format("⚠️ Enhanced Python port closed, attempting to restart...~n"),
     NewPort = create_python_visualizer_port(),
     {noreply, State#state{python_port = NewPort}};
+
+handle_info({'DOWN', MonitorRef, process, RemotePid, noconnection}, State) ->
+    %% TODO: deal with GN graphics servers disconnecting.
+    {noreply, State};
 
 handle_info(Info, State) ->
     io:format("ℹ️ Unexpected message: ~p~n", [Info]),
@@ -688,35 +701,49 @@ setup_mnesia_subscriptions(Tables) ->
     end, [], Tables).
 
 %% Spawn enhanced graphics servers on all GN nodes
-spawn_all_gn_graphics_servers(GNNodes) ->
-    lists:foldl(fun(Node, Acc) ->
-        case spawn_gn_graphics_server(Node) of
-            {ok, Pid} -> [{Node, Pid} | Acc];
-            {error, Reason} ->
-                io:format("❌ Failed to spawn GN server on ~w: ~p~n", [Node, Reason]),
-                Acc
-        end
-    end, [], GNNodes).
+-spec monitor_gn_graphics_servers(GNNodes::list()) -> [{ref(), atom()}].
+monitor_gn_graphics_servers(GNNodes)->
+    %% TODO: Try to monitor all graphics processes, then wait for several seconds to see if we
+    %% receive any failed connection messages - {'DOWN', Ref, process, NonExistentPid, noproc}
+    %% if we did receive them - try to monitor them again.
+    %% We get out of this function when all processes are successfully monitored
+    RefsList = attempt_gn_graphics_monitoring(NodeList),
+    gn_monitoring_receive_loop(RefsList, []).
 
-%% Spawn a single enhanced GN graphics server on the specified node
-spawn_gn_graphics_server(Node) ->
-    try
-        % Spawn the enhanced GN graphics server on the remote node
-        Pid = rpc:call(Node, gn_graphics_server, start_link, [node()]),
-        case Pid of
-            {ok, ActualPid} ->
-                link(ActualPid),
-                io:format("✅ Enhanced GN graphics server started on ~w: ~p~n", [Node, ActualPid]),
-                {ok, ActualPid};
-            Error ->
-                io:format("❌ Failed to start enhanced GN server on ~w: ~p~n", [Node, Error]),
-                {error, Error}
-        end
-    catch
-        Error ->
-            io:format("❌ Exception spawning enhanced GN server on ~w: ~p~n", [Node, Error]),
-            {error, Error}
+gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
+    receive
+        {'DOWN', Ref, process, _Pid, noproc} ->
+            case lists:keyfind(Ref, 1, RefsList) of
+                false -> % unkonwn message - unsure what to do with it
+                    io:format("❌ *Unknown monitoring failure message received:~n~w~n",[{'DOWN', Ref, process, _Pid, noproc}]),
+                    gn_monitoring_receive_loop(RefsList, ServersNotFound);
+                {_, NodeName} -> % a monitoring to NodeName has failed - add to failed servers
+                    io:format("❌ *A monitoring request has failed on node ~w. Accumulating before retrying..~n",[NodeName])
+                    gn_monitoring_receive_loop(lists:keydelete(Ref, 1, RefsList), [NodeName | ServersNotFound];
+        AnythingElse -> % re-send to self in 5 seconds
+            erlang:send_after(5000, self(), AnythingElse),
+            gn_monitoring_receive_loop(RefsList, ServersNotFound)
+     after 1500 % timeout is 1.5sec
+        if
+            length(ServersNotFound) =!= 0 ->
+                io:format("❌ Failed to monitor ~p servers. The following were not monitored:~w~n", [length(ServersNotFound), ServersNotFound]),
+                NewRefs = monitor_gn_graphics_servers(ServersNotFound),
+                NewRefs ++ RefsList;
+            true -> % every server was successfully monitored
+                io:format("✅ All GN graphics server were monitored successfully!~n"),
+                RefsList
+         end
     end.
+        
+
+attempt_gn_graphics_monitoring(NodeList) ->
+    RefsList = lists:map(fun(Node) ->
+        Ref = erlang:monitor(process, {Node, gn_server_graphics}),
+        io:format("Sent request to monitor process ~w~n", [Node]),
+        {Ref, Node} end, NodeList),
+    timer:sleep(1000), % wait for 1 second before looking at the messages we receieved
+    RefsList.
+
 
 %% Create enhanced Python visualizer port
 create_python_visualizer_port() ->
