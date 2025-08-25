@@ -43,6 +43,8 @@ COLORS = {
     'TEXT_SHADOW': (0, 0, 0),
     'TEXT_CYAN': (100, 255, 255),
     'TEXT_ORANGE': (255, 165, 0),
+    'TEXT_GREY': (120, 120, 120),  # New color for dead players
+    'TEXT_RED': (200, 50, 50),     # New color for death indicators
 
     # Enhanced brick walls
     'BRICK_TOP': (180, 90, 45),
@@ -75,6 +77,14 @@ COLORS = {
     'SKIN': (255, 220, 180),
     'SKIN_SHADOW': (230, 195, 155),
 
+    # Dead player colors (greyed out versions)
+    'PLAYER_1_DEAD': (60, 80, 120),
+    'PLAYER_2_DEAD': (120, 60, 70),
+    'PLAYER_3_DEAD': (60, 100, 80),
+    'PLAYER_4_DEAD': (120, 100, 60),
+    'SKIN_DEAD': (150, 130, 110),
+    'SKIN_SHADOW_DEAD': (130, 110, 90),
+
     # Glowing power-ups
     'POWERUP_GLOW': (255, 255, 150),
     'POWERUP_CORE': (255, 215, 0),
@@ -101,7 +111,7 @@ class CompleteGameVisualizer:
         initial_width = min(WINDOW_WIDTH, 900)
         initial_height = min(WINDOW_HEIGHT, 700)
         self.screen = pygame.display.set_mode((initial_width, initial_height), pygame.RESIZABLE)
-        pygame.display.set_caption("🎮 Playing with Fire 2")
+        pygame.display.set_caption("🎮 Playing with Fire 2 - Enhanced with Death Detection")
         self.clock = pygame.time.Clock()
 
         # Current window dimensions
@@ -140,6 +150,10 @@ class CompleteGameVisualizer:
         # Complete game state tracking for animations
         self.previous_game_state = None
         self.current_game_state = self.get_fallback_game_state()
+        
+        # Death tracking - NEW
+        self.dead_players = {}  # PlayerID -> {death_time, last_known_state, local_gn}
+        self.death_animations = {}  # PlayerID -> animation data
 
         # Animation systems
         self.player_animations = {}  # Player movement animations
@@ -160,7 +174,7 @@ class CompleteGameVisualizer:
         # Virtual surface for full layout
         self.virtual_surface = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
 
-        print("🎮 Game Visualizer initialized")
+        print("🎮 Game Visualizer initialized with death detection")
         print("⏳ Waiting for initial map from map_generator...")
 
     def read_port_data(self):
@@ -216,7 +230,7 @@ class CompleteGameVisualizer:
             return None
 
     def handle_port_data(self, packets):
-        """Handle received packets from Erlang port"""
+        """Handle received packets from Erlang port with enhanced data structure"""
         for packet in packets:
             decoded_data = self.decode_erlang_data(packet)
             if decoded_data:
@@ -236,9 +250,114 @@ class CompleteGameVisualizer:
                         self.map_initialized = True
                         print("✅ Initial map loaded! Now listening for cn_graphics_server updates...")
                 else:
-                    # Subsequent data from cn_graphics_server
-                    print("🔄 Received update from cn_graphics_server")
+                    # Subsequent data from cn_graphics_server (now enhanced with death info)
+                    print("🔄 Received enhanced update from cn_graphics_server")
                     self.process_map_update(decoded_data)
+
+    def process_initial_map(self, map_data):
+        """Process initial map from map_generator"""
+        try:
+            # Handle both old format (direct grid) and new format (enhanced structure)
+            if isinstance(map_data, dict) and 'map' in map_data:
+                # New enhanced format with death information
+                grid_data = map_data['map']
+                self.dead_players = map_data.get('dead_players', {})
+                print(f"📊 Enhanced map data received with {len(self.dead_players)} dead players")
+            else:
+                # Old format - just the grid
+                grid_data = map_data
+                self.dead_players = {}
+            
+            # Parse the map data into game state
+            game_state = self.parse_complete_game_state(grid_data)
+            if game_state:
+                self.current_game_state = game_state
+                self.update_death_info()
+                return True
+            return False
+        except Exception as e:
+            print(f"❌ Error processing initial map: {e}")
+            return False
+
+    def process_map_update(self, update_data):
+        """Process real-time update from cn_graphics_server with death information"""
+        try:
+            # Store previous state for animation detection
+            self.previous_game_state = self.current_game_state.copy() if self.current_game_state else None
+
+            # Handle enhanced data structure
+            if isinstance(update_data, dict) and 'map' in update_data:
+                # New enhanced format with death information
+                grid_data = update_data['map']
+                new_dead_players = update_data.get('dead_players', {})
+                
+                # Check for newly dead players
+                for player_id, death_info in new_dead_players.items():
+                    if player_id not in self.dead_players:
+                        print(f"💀 New death detected: Player {player_id}")
+                        self.create_death_animation(player_id, death_info)
+                
+                self.dead_players = new_dead_players
+            else:
+                # Old format - just the grid
+                grid_data = update_data
+
+            # Parse new state
+            new_game_state = self.parse_complete_game_state(grid_data)
+            if new_game_state:
+                self.current_game_state = new_game_state
+                self.update_death_info()
+
+                # Detect changes for animations
+                if self.previous_game_state:
+                    self.detect_complete_game_changes(self.previous_game_state, new_game_state)
+
+                return True
+            return False
+        except Exception as e:
+            print(f"❌ Error processing map update: {e}")
+            return False
+
+    def create_death_animation(self, player_id, death_info):
+        """Create death animation for a player"""
+        death_time, last_known_state, local_gn = death_info
+        
+        # Create death effect
+        self.death_animations[player_id] = {
+            'start_time': self.time,
+            'duration': 3.0,  # 3 second death animation
+            'death_time': death_time,
+            'last_known_state': last_known_state,
+            'local_gn': local_gn,
+            'active': True
+        }
+        
+        # Add visual effects
+        if last_known_state:
+            # Extract position from last known state
+            pos = getattr(last_known_state, 'position', [0, 0])
+            x, y = pos if isinstance(pos, list) and len(pos) >= 2 else [0, 0]
+            self.game_effects.append({
+                'type': 'player_death',
+                'player_id': player_id,
+                'x': x, 'y': y,
+                'start_time': self.time,
+                'duration': 2.0,
+                'active': True
+            })
+
+    def update_death_info(self):
+        """Update death animations and clean up expired ones"""
+        current_time = self.time
+        
+        # Remove expired death animations
+        expired_deaths = []
+        for player_id, anim in self.death_animations.items():
+            if current_time - anim['start_time'] > anim['duration']:
+                expired_deaths.append(player_id)
+        
+        for player_id in expired_deaths:
+            del self.death_animations[player_id]
 
     def handle_movement_confirmation(self, confirmation_data):
         """Handle immediate movement confirmation for players and bombs"""
@@ -339,40 +458,6 @@ class CompleteGameVisualizer:
             'active': True
         })
 
-    def process_initial_map(self, map_data):
-        """Process initial map from map_generator"""
-        try:
-            # Parse the map data into game state
-            game_state = self.parse_complete_game_state(map_data)
-            if game_state:
-                self.current_game_state = game_state
-                return True
-            return False
-        except Exception as e:
-            print(f"❌ Error processing initial map: {e}")
-            return False
-
-    def process_map_update(self, update_data):
-        """Process real-time update from cn_graphics_server"""
-        try:
-            # Store previous state for animation detection
-            self.previous_game_state = self.current_game_state.copy() if self.current_game_state else None
-
-            # Parse new state
-            new_game_state = self.parse_complete_game_state(update_data)
-            if new_game_state:
-                self.current_game_state = new_game_state
-
-                # Detect changes for animations
-                if self.previous_game_state:
-                    self.detect_complete_game_changes(self.previous_game_state, new_game_state)
-
-                return True
-            return False
-        except Exception as e:
-            print(f"❌ Error processing map update: {e}")
-            return False
-
     def handle_window_resize(self, new_width, new_height):
         """Handle window resizing"""
         self.current_width = max(new_width, MIN_WINDOW_WIDTH)
@@ -430,7 +515,7 @@ class CompleteGameVisualizer:
                         if bomb_data:
                             game_state['bombs'].append(bomb_data)
 
-                    # Parse player information - ENHANCED to include speed
+                    # Parse player information - include speed
                     if player_info != 'none':
                         player_data = self.parse_player_info(player_info, x, y)
                         if player_data:
@@ -443,7 +528,7 @@ class CompleteGameVisualizer:
                             game_state['explosions'].append(explosion_data)
 
         print(
-            f"✅ Game state loaded - Players: {len(game_state['players'])}, Bombs: {len(game_state['bombs'])}, Explosions: {len(game_state['explosions'])}")
+            f"✅ Game state loaded - Players: {len(game_state['players'])}, Bombs: {len(game_state['bombs'])}, Explosions: {len(game_state['explosions'])}, Dead: {len(self.dead_players)}")
         return game_state
 
     def parse_bomb_info(self, bomb_info, x, y):
@@ -494,7 +579,7 @@ class CompleteGameVisualizer:
                     'last_update': self.time
                 }
             elif isinstance(player_info, tuple) and len(player_info) >= 2:
-                # Complex player info: (player_id, health, speed) - ENHANCED!
+                # Complex player info: (player_id, health, speed)
                 player_id = player_info[0]
                 health = int(player_info[1]) if len(player_info) > 1 and str(player_info[1]).isdigit() else 3
                 speed = int(player_info[2]) if len(player_info) > 2 and str(player_info[2]).isdigit() else 1
@@ -674,7 +759,7 @@ class CompleteGameVisualizer:
                     self.create_powerup_spawn_animation(x, y, new_powerup)
                     print(f"🎁 Power-up '{new_powerup}' spawned at ({x}, {y})")
 
-    # Animation Creation Methods - ENHANCED
+    # Animation Creation Methods
     def create_detailed_walking_animation(self, player_id, old_pos, new_pos, direction, speed=1):
         """Enhanced walking animation with direction, speed, and footsteps"""
         # Don't overwrite confirmed animations
@@ -1359,7 +1444,7 @@ class CompleteGameVisualizer:
             self.draw_speed_indicator(surface, center_x, center_y + 30, speed)
 
     def draw_speed_indicator(self, surface, x, y, speed):
-        """Draw speed boost indicator - NEW!"""
+        """Draw speed boost indicator"""
         # Speed arrows
         for i in range(min(speed - 1, 3)):  # Max 3 arrows
             arrow_x = x + (i - 1) * 8
@@ -1483,7 +1568,18 @@ class CompleteGameVisualizer:
         pygame.draw.polygon(surface, star_color, points)
         pygame.draw.polygon(surface, (255, 255, 255), points, 1)
 
-    # NEW Effect Drawing Methods
+    def draw_all_game_effects(self, surface):
+        """Draw all active game effects including new bomb and speed effects"""
+        for effect in self.game_effects:
+            if effect.get('type') == 'bomb_kick':
+                self.draw_bomb_kick_effect(surface, effect)
+            elif effect.get('type') == 'speed_boost':
+                self.draw_speed_boost_effect(surface, effect)
+            elif effect.get('type') == 'dust_cloud':
+                self.draw_dust_cloud_effect(surface, effect)
+            elif effect.get('type') == 'healing':
+                self.draw_healing_effect(surface, effect)
+
     def draw_speed_boost_effect(self, surface, effect):
         """Draw speed boost effect"""
         elapsed = self.time - effect['start_time']
@@ -1541,7 +1637,7 @@ class CompleteGameVisualizer:
             for angle in range(0, 360, 45):
                 end_x = center_x + int(burst_size * math.cos(math.radians(angle)))
                 end_y = center_y + int(burst_size * math.sin(math.radians(angle)))
-                pygame.draw.line(surface, (255, 200, 100, alpha),
+                pygame.draw.line(surface, (255, 200, 100),
                                  (center_x, center_y), (end_x, end_y), 3)
 
         # Direction indicator
@@ -1557,7 +1653,198 @@ class CompleteGameVisualizer:
             # Arrow head
             pygame.draw.circle(surface, (255, 255, 100), (arrow_end_x, arrow_end_y), 4)
 
-    # Explosion drawing methods
+    def draw_dust_cloud_effect(self, surface, effect):
+        """Draw dust cloud from player movement"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+
+        # Expanding dust cloud
+        cloud_size = int(progress * 30)
+        alpha = int(60 * (1 - progress))
+
+        if cloud_size > 0 and alpha > 0:
+            dust_surf = pygame.Surface((cloud_size * 2, cloud_size * 2), pygame.SRCALPHA)
+            pygame.draw.circle(dust_surf, (200, 180, 150, alpha),
+                               (cloud_size, cloud_size), cloud_size)
+            surface.blit(dust_surf, (center_x - cloud_size, center_y - cloud_size))
+
+    def draw_healing_effect(self, surface, effect):
+        """Draw healing effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+
+        # Rising green sparkles
+        for i in range(5):
+            sparkle_y = center_y - int(progress * 60) - i * 12
+            sparkle_x = center_x + int(math.sin(self.time * 4 + i) * 15)
+
+            if sparkle_y > center_y - 80:
+                alpha = int(200 * (1 - progress))
+                sparkle_size = 3
+                pygame.draw.circle(surface, (100, 255, 100),
+                                   (sparkle_x, sparkle_y), sparkle_size)
+
+    # Custom icon drawing
+    def draw_custom_icon(self, surface, icon_type, center_x, center_y, size, color):
+        """Icons for power-ups"""
+        if icon_type == "lightning":
+            points = [
+                (center_x - size // 3, center_y - size // 2),
+                (center_x + size // 6, center_y - size // 4),
+                (center_x - size // 6, center_y),
+                (center_x + size // 3, center_y + size // 2),
+                (center_x - size // 6, center_y + size // 4),
+                (center_x + size // 6, center_y)
+            ]
+            pygame.draw.polygon(surface, color, points)
+
+        elif icon_type == "remote":
+            pygame.draw.rect(surface, color, (center_x - size // 3, center_y - size // 2, size // 1.5, size))
+            pygame.draw.circle(surface, (255, 100, 100), (center_x - size // 6, center_y - size // 4), 3)
+            pygame.draw.circle(surface, (100, 255, 100), (center_x + size // 6, center_y - size // 4), 3)
+            pygame.draw.line(surface, color, (center_x, center_y - size // 2), (center_x, center_y - size), 2)
+
+        elif icon_type == "factory":
+            pygame.draw.circle(surface, color, (center_x - size // 6, center_y), size // 2)
+            pygame.draw.line(surface, color, (center_x - size // 6, center_y - size // 2),
+                             (center_x - size // 3, center_y - size), 2)
+            pygame.draw.circle(surface, (255, 200, 0), (center_x - size // 3, center_y - size), 2)
+            pygame.draw.circle(surface, color, (center_x + size // 4, center_y + size // 6), size // 4)
+            pygame.draw.line(surface, color, (center_x + size // 4, center_y + size // 6 - size // 4),
+                             (center_x + size // 6, center_y - size // 3), 1)
+            pygame.draw.circle(surface, (255, 200, 0), (center_x + size // 6, center_y - size // 3), 1)
+
+        elif icon_type == "boot":
+            pygame.draw.line(surface, color, (center_x - size // 3, center_y - size // 4),
+                             (center_x, center_y + size // 4), 8)
+            pygame.draw.line(surface, color, (center_x, center_y + size // 4),
+                             (center_x + size // 2, center_y + size // 6), 6)
+            pygame.draw.ellipse(surface, color, (center_x + size // 3, center_y, size // 1.5, size // 3))
+            for i in range(3):
+                line_x = center_x + size // 2 + i * 6
+                pygame.draw.line(surface, (*color[:3], 150), (line_x, center_y + size // 8),
+                                 (line_x + 8, center_y + size // 8), 2)
+
+        elif icon_type == "ghost":
+            pygame.draw.circle(surface, color, (center_x, center_y - size // 4), size // 2)
+            pygame.draw.rect(surface, color, (center_x - size // 2, center_y - size // 4, size, size // 2))
+            wave_points = []
+            for i in range(5):
+                x = center_x - size // 2 + i * (size // 4)
+                y = center_y + size // 4 + (5 if i % 2 == 0 else -5)
+                wave_points.append((x, y))
+            if len(wave_points) > 2:
+                pygame.draw.polygon(surface, color, [(center_x - size // 2, center_y + size // 4)] + wave_points + [
+                    (center_x + size // 2, center_y + size // 4)])
+
+        elif icon_type == "bomb":
+            pygame.draw.circle(surface, color, (center_x, center_y), size // 2)
+            pygame.draw.line(surface, color, (center_x, center_y - size // 2), (center_x - size // 4, center_y - size),
+                             3)
+            pygame.draw.circle(surface, (255, 200, 0), (center_x - size // 4, center_y - size), 3)
+
+        elif icon_type == "explosion":
+            for i in range(8):
+                angle = i * math.pi / 4
+                x = center_x + int(size // 2 * math.cos(angle))
+                y = center_y + int(size // 2 * math.sin(angle))
+                pygame.draw.line(surface, color, (center_x, center_y), (x, y), 3)
+                pygame.draw.circle(surface, color, (x, y), 3)
+            pygame.draw.circle(surface, color, (center_x, center_y), size // 4)
+
+        elif icon_type == "heart":
+            pygame.draw.circle(surface, color, (center_x - size // 4, center_y - size // 6), size // 3)
+            pygame.draw.circle(surface, color, (center_x + size // 4, center_y - size // 6), size // 3)
+            points = [
+                (center_x - size // 2, center_y),
+                (center_x + size // 2, center_y),
+                (center_x, center_y + size // 2)
+            ]
+            pygame.draw.polygon(surface, color, points)
+
+        elif icon_type == "freeze":
+            pygame.draw.line(surface, color, (center_x, center_y - size // 2), (center_x, center_y + size // 2), 3)
+            pygame.draw.line(surface, color, (center_x - size // 2, center_y), (center_x + size // 2, center_y), 3)
+            pygame.draw.line(surface, color, (center_x - size // 3, center_y - size // 3),
+                             (center_x + size // 3, center_y + size // 3), 3)
+            pygame.draw.line(surface, color, (center_x - size // 3, center_y + size // 3),
+                             (center_x + size // 3, center_y - size // 3), 3)
+
+    def draw_enhanced_map(self):
+        """Draw the complete enhanced map with all animations"""
+        # Apply camera shake
+        shake_x = int(random.random() * self.camera_shake * 10) if self.camera_shake > 0 else 0
+        shake_y = int(random.random() * self.camera_shake * 10) if self.camera_shake > 0 else 0
+
+        self.map_surface.fill(COLORS['BACKGROUND'])
+
+        # Update animations
+        self.time += 1 / FPS
+        self.powerup_pulse += 1 / FPS
+        self.update_all_animations()
+        self.update_death_info()  # Update death animations
+
+        # Draw tiles with shake offset
+        for x in range(MAP_SIZE):
+            for y in range(MAP_SIZE):
+                pixel_x = y * TILE_SIZE + shake_x
+                pixel_y = x * TILE_SIZE + shake_y
+
+                tile_type = self.current_game_state['tiles'][x][y]
+                powerup = self.current_game_state['powerups'][x][y]
+                has_powerup = powerup != "none"
+
+                # Draw floor
+                if tile_type != 2:
+                    self.draw_enhanced_floor(self.map_surface, pixel_x, pixel_y)
+
+                # Draw objects
+                if tile_type == 1:  # BREAKABLE
+                    self.draw_enhanced_wooden_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
+                elif tile_type == 2:  # UNBREAKABLE
+                    self.draw_enhanced_brick_wall(self.map_surface, pixel_x, pixel_y)
+                elif tile_type == 3:  # STRONG
+                    self.draw_enhanced_metal_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
+
+                # Selection highlight
+                if self.selected_tile == (x, y):
+                    highlight_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    pygame.draw.rect(highlight_surf, COLORS['SELECTION'], (0, 0, TILE_SIZE, TILE_SIZE))
+                    self.map_surface.blit(highlight_surf, (pixel_x, pixel_y))
+
+        # Draw bombs
+        for bomb in self.current_game_state['bombs']:
+            pixel_x = bomb['y'] * TILE_SIZE + shake_x
+            pixel_y = bomb['x'] * TILE_SIZE + shake_y
+            self.draw_animated_bomb(self.map_surface, pixel_x, pixel_y, bomb)
+
+        # Draw players
+        for player in self.current_game_state['players']:
+            pixel_x = player['y'] * TILE_SIZE + shake_x
+            pixel_y = player['x'] * TILE_SIZE + shake_y
+            self.draw_enhanced_player_with_effects(self.map_surface, pixel_x, pixel_y, player)
+
+        # Draw all active explosions
+        for explosion in self.explosion_animations:
+            self.draw_explosion_effect(self.map_surface, explosion)
+
+        # Draw all active game effects
+        self.draw_all_game_effects(self.map_surface)
+
+        # Draw power-up animations
+        for powerup_anim in self.powerup_animations:
+            if powerup_anim['type'] == 'pickup':
+                self.draw_powerup_pickup_effect(self.map_surface, powerup_anim)
+
+        # Blit map to virtual surface at the right position
+        self.virtual_surface.blit(self.map_surface, (MAP_OFFSET_X, MAP_OFFSET_Y))
+
     def draw_explosion_effect(self, surface, explosion):
         """Draw various types of explosion effects"""
         elapsed = self.time - explosion['start_time']
@@ -1657,7 +1944,6 @@ class CompleteGameVisualizer:
 
             surface.blit(explosion_surf, (center_x - actual_size, center_y - actual_size))
 
-    # Effect drawing methods
     def draw_powerup_pickup_effect(self, surface, animation):
         """Draw power-up pickup animation"""
         elapsed = self.time - animation['start_time']
@@ -1679,214 +1965,8 @@ class CompleteGameVisualizer:
                 pygame.draw.circle(sparkle_surf, color, (sparkle_size, sparkle_size), sparkle_size)
                 surface.blit(sparkle_surf, (sparkle_x - sparkle_size, sparkle_y - sparkle_size))
 
-    def draw_dust_cloud_effect(self, surface, effect):
-        """Draw dust cloud from player movement"""
-        elapsed = self.time - effect['start_time']
-        progress = elapsed / effect['duration']
-
-        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
-
-        # Expanding dust cloud
-        cloud_size = int(progress * 30)
-        alpha = int(60 * (1 - progress))
-
-        if cloud_size > 0 and alpha > 0:
-            dust_surf = pygame.Surface((cloud_size * 2, cloud_size * 2), pygame.SRCALPHA)
-            pygame.draw.circle(dust_surf, (200, 180, 150, alpha),
-                               (cloud_size, cloud_size), cloud_size)
-            surface.blit(dust_surf, (center_x - cloud_size, center_y - cloud_size))
-
-    def draw_healing_effect(self, surface, effect):
-        """Draw healing effect"""
-        elapsed = self.time - effect['start_time']
-        progress = elapsed / effect['duration']
-
-        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
-
-        # Rising green sparkles
-        for i in range(5):
-            sparkle_y = center_y - int(progress * 60) - i * 12
-            sparkle_x = center_x + int(math.sin(self.time * 4 + i) * 15)
-
-            if sparkle_y > center_y - 80:
-                alpha = int(200 * (1 - progress))
-                sparkle_size = 3
-                pygame.draw.circle(surface, (100, 255, 100, alpha),
-                                   (sparkle_x, sparkle_y), sparkle_size)
-
-    # ENHANCED: Draw all game effects
-    def draw_all_game_effects(self, surface):
-        """Draw all active game effects including new bomb and speed effects"""
-        for effect in self.game_effects:
-            if effect.get('type') == 'bomb_kick':
-                self.draw_bomb_kick_effect(surface, effect)
-            elif effect.get('type') == 'speed_boost':
-                self.draw_speed_boost_effect(surface, effect)
-            elif effect.get('type') == 'dust_cloud':
-                self.draw_dust_cloud_effect(surface, effect)
-            elif effect.get('type') == 'healing':
-                self.draw_healing_effect(surface, effect)
-            # Add other effects as needed
-
-    # Custom icon drawing
-    def draw_custom_icon(self, surface, icon_type, center_x, center_y, size, color):
-        """Icons for power-ups"""
-        if icon_type == "lightning":
-            points = [
-                (center_x - size // 3, center_y - size // 2),
-                (center_x + size // 6, center_y - size // 4),
-                (center_x - size // 6, center_y),
-                (center_x + size // 3, center_y + size // 2),
-                (center_x - size // 6, center_y + size // 4),
-                (center_x + size // 6, center_y)
-            ]
-            pygame.draw.polygon(surface, color, points)
-
-        elif icon_type == "remote":
-            pygame.draw.rect(surface, color, (center_x - size // 3, center_y - size // 2, size // 1.5, size))
-            pygame.draw.circle(surface, (255, 100, 100), (center_x - size // 6, center_y - size // 4), 3)
-            pygame.draw.circle(surface, (100, 255, 100), (center_x + size // 6, center_y - size // 4), 3)
-            pygame.draw.line(surface, color, (center_x, center_y - size // 2), (center_x, center_y - size), 2)
-
-        elif icon_type == "factory":
-            pygame.draw.circle(surface, color, (center_x - size // 6, center_y), size // 2)
-            pygame.draw.line(surface, color, (center_x - size // 6, center_y - size // 2),
-                             (center_x - size // 3, center_y - size), 2)
-            pygame.draw.circle(surface, (255, 200, 0), (center_x - size // 3, center_y - size), 2)
-            pygame.draw.circle(surface, color, (center_x + size // 4, center_y + size // 6), size // 4)
-            pygame.draw.line(surface, color, (center_x + size // 4, center_y + size // 6 - size // 4),
-                             (center_x + size // 6, center_y - size // 3), 1)
-            pygame.draw.circle(surface, (255, 200, 0), (center_x + size // 6, center_y - size // 3), 1)
-
-        elif icon_type == "boot":
-            pygame.draw.line(surface, color, (center_x - size // 3, center_y - size // 4),
-                             (center_x, center_y + size // 4), 8)
-            pygame.draw.line(surface, color, (center_x, center_y + size // 4),
-                             (center_x + size // 2, center_y + size // 6), 6)
-            pygame.draw.ellipse(surface, color, (center_x + size // 3, center_y, size // 1.5, size // 3))
-            for i in range(3):
-                line_x = center_x + size // 2 + i * 6
-                pygame.draw.line(surface, (*color[:3], 150), (line_x, center_y + size // 8),
-                                 (line_x + 8, center_y + size // 8), 2)
-
-        elif icon_type == "ghost":
-            pygame.draw.circle(surface, color, (center_x, center_y - size // 4), size // 2)
-            pygame.draw.rect(surface, color, (center_x - size // 2, center_y - size // 4, size, size // 2))
-            wave_points = []
-            for i in range(5):
-                x = center_x - size // 2 + i * (size // 4)
-                y = center_y + size // 4 + (5 if i % 2 == 0 else -5)
-                wave_points.append((x, y))
-            if len(wave_points) > 2:
-                pygame.draw.polygon(surface, color, [(center_x - size // 2, center_y + size // 4)] + wave_points + [
-                    (center_x + size // 2, center_y + size // 4)])
-
-        elif icon_type == "bomb":
-            pygame.draw.circle(surface, color, (center_x, center_y), size // 2)
-            pygame.draw.line(surface, color, (center_x, center_y - size // 2), (center_x - size // 4, center_y - size),
-                             3)
-            pygame.draw.circle(surface, (255, 200, 0), (center_x - size // 4, center_y - size), 3)
-
-        elif icon_type == "explosion":
-            for i in range(8):
-                angle = i * math.pi / 4
-                x = center_x + int(size // 2 * math.cos(angle))
-                y = center_y + int(size // 2 * math.sin(angle))
-                pygame.draw.line(surface, color, (center_x, center_y), (x, y), 3)
-                pygame.draw.circle(surface, color, (x, y), 3)
-            pygame.draw.circle(surface, color, (center_x, center_y), size // 4)
-
-        elif icon_type == "heart":
-            pygame.draw.circle(surface, color, (center_x - size // 4, center_y - size // 6), size // 3)
-            pygame.draw.circle(surface, color, (center_x + size // 4, center_y - size // 6), size // 3)
-            points = [
-                (center_x - size // 2, center_y),
-                (center_x + size // 2, center_y),
-                (center_x, center_y + size // 2)
-            ]
-            pygame.draw.polygon(surface, color, points)
-
-        elif icon_type == "freeze":
-            pygame.draw.line(surface, color, (center_x, center_y - size // 2), (center_x, center_y + size // 2), 3)
-            pygame.draw.line(surface, color, (center_x - size // 2, center_y), (center_x + size // 2, center_y), 3)
-            pygame.draw.line(surface, color, (center_x - size // 3, center_y - size // 3),
-                             (center_x + size // 3, center_y + size // 3), 3)
-            pygame.draw.line(surface, color, (center_x - size // 3, center_y + size // 3),
-                             (center_x + size // 3, center_y - size // 3), 3)
-
-    # Main drawing methods
-    def draw_enhanced_map(self):
-        """Draw the complete enhanced map with all animations"""
-        # Apply camera shake
-        shake_x = int(random.random() * self.camera_shake * 10) if self.camera_shake > 0 else 0
-        shake_y = int(random.random() * self.camera_shake * 10) if self.camera_shake > 0 else 0
-
-        self.map_surface.fill(COLORS['BACKGROUND'])
-
-        # Update animations
-        self.time += 1 / FPS
-        self.powerup_pulse += 1 / FPS
-        self.update_all_animations()
-
-        # Draw tiles with shake offset
-        for x in range(MAP_SIZE):
-            for y in range(MAP_SIZE):
-                pixel_x = y * TILE_SIZE + shake_x
-                pixel_y = x * TILE_SIZE + shake_y
-
-                tile_type = self.current_game_state['tiles'][x][y]
-                powerup = self.current_game_state['powerups'][x][y]
-                has_powerup = powerup != "none"
-
-                # Draw floor
-                if tile_type != 2:
-                    self.draw_enhanced_floor(self.map_surface, pixel_x, pixel_y)
-
-                # Draw objects
-                if tile_type == 1:  # BREAKABLE
-                    self.draw_enhanced_wooden_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
-                elif tile_type == 2:  # UNBREAKABLE
-                    self.draw_enhanced_brick_wall(self.map_surface, pixel_x, pixel_y)
-                elif tile_type == 3:  # STRONG
-                    self.draw_enhanced_metal_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
-
-                # Selection highlight
-                if self.selected_tile == (x, y):
-                    highlight_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-                    pygame.draw.rect(highlight_surf, COLORS['SELECTION'], (0, 0, TILE_SIZE, TILE_SIZE))
-                    self.map_surface.blit(highlight_surf, (pixel_x, pixel_y))
-
-        # Draw bombs
-        for bomb in self.current_game_state['bombs']:
-            pixel_x = bomb['y'] * TILE_SIZE + shake_x
-            pixel_y = bomb['x'] * TILE_SIZE + shake_y
-            self.draw_animated_bomb(self.map_surface, pixel_x, pixel_y, bomb)
-
-        # Draw players
-        for player in self.current_game_state['players']:
-            pixel_x = player['y'] * TILE_SIZE + shake_x
-            pixel_y = player['x'] * TILE_SIZE + shake_y
-            self.draw_enhanced_player_with_effects(self.map_surface, pixel_x, pixel_y, player)
-
-        # Draw all active explosions
-        for explosion in self.explosion_animations:
-            self.draw_explosion_effect(self.map_surface, explosion)
-
-        # Draw all active game effects (ENHANCED)
-        self.draw_all_game_effects(self.map_surface)
-
-        # Draw power-up animations
-        for powerup_anim in self.powerup_animations:
-            if powerup_anim['type'] == 'pickup':
-                self.draw_powerup_pickup_effect(self.map_surface, powerup_anim)
-
-        # Blit map to virtual surface at the right position
-        self.virtual_surface.blit(self.map_surface, (MAP_OFFSET_X, MAP_OFFSET_Y))
-
     def draw_player_stats_panel(self):
-        """Draw player statistics panel on the left side"""
+        """Draw player statistics panel on the left side with death detection"""
         self.player_panel_surface.fill(COLORS['UI_BACKGROUND'])
 
         # Panel title
@@ -1913,13 +1993,36 @@ class CompleteGameVisualizer:
         self.virtual_surface.blit(self.player_panel_surface, (0, MAP_OFFSET_Y))
 
     def draw_single_player_stats(self, surface, player_id, y_pos, height, player_data):
-        """Draw individual player statistics with live speed data"""
+        """Draw individual player statistics with death detection"""
         stats = self.player_stats[player_id]
-        player_color = stats['color']
+        
+        # Check if player is dead - NEW DEATH DETECTION
+        is_dead = player_id in self.dead_players
+        has_death_animation = player_id in self.death_animations
+        
+        # Choose colors based on death status
+        if is_dead:
+            player_colors = {
+                1: COLORS['PLAYER_1_DEAD'], 2: COLORS['PLAYER_2_DEAD'],
+                3: COLORS['PLAYER_3_DEAD'], 4: COLORS['PLAYER_4_DEAD']
+            }
+            text_color = COLORS['TEXT_GREY']
+            status_text = "💀 DEAD"
+            status_color = COLORS['TEXT_RED']
+        else:
+            player_colors = {
+                1: COLORS['PLAYER_1'], 2: COLORS['PLAYER_2'],
+                3: COLORS['PLAYER_3'], 4: COLORS['PLAYER_4']
+            }
+            text_color = COLORS['TEXT_WHITE']
+            status_text = "✅ ALIVE" if player_data else "⏳ WAITING"
+            status_color = COLORS['TEXT_CYAN'] if player_data else COLORS['TEXT_ORANGE']
 
-        # Player background with gradient
+        player_color = player_colors.get(player_id, COLORS['PLAYER_1'])
+
+        # Player background with gradient (dimmed if dead)
         bg_rect = pygame.Rect(10, y_pos, PLAYER_PANEL_WIDTH - 20, height - 10)
-        bg_alpha = int(40 + 20 * math.sin(self.time * 2 + player_id))
+        bg_alpha = int((20 if is_dead else 40) + 15 * math.sin(self.time * 2 + player_id))
         bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
 
         # Create gradient background
@@ -1931,93 +2034,187 @@ class CompleteGameVisualizer:
 
         surface.blit(bg_surf, (bg_rect.x, bg_rect.y))
 
-        # Player avatar (mini player drawing)
+        # Player avatar (mini player drawing) - greyed if dead
         avatar_x = 25
         avatar_y = y_pos + 10
-        self.draw_mini_player(surface, avatar_x, avatar_y, player_id, scale=0.6)
+        death_scale = 0.5 if is_dead else 1.0
+        self.draw_mini_player(surface, avatar_x, avatar_y, player_id, scale=death_scale)
 
-        # Player ID
+        # Player ID and status
         player_text = f"PLAYER {player_id}"
-        player_surface = self.small_font.render(player_text, True, COLORS['TEXT_WHITE'])
+        player_surface = self.small_font.render(player_text, True, text_color)
         surface.blit(player_surface, (avatar_x - 15, avatar_y + 25))
+        
+        # Status indicator
+        status_surface = self.small_font.render(status_text, True, status_color)
+        surface.blit(status_surface, (avatar_x - 15, avatar_y + 40))
 
         # Statistics with visual elements
         stats_start_y = y_pos + 10
         stat_height = 18
 
-        # Life - Draw hearts (use live data if available)
-        current_health = player_data['health'] if player_data else stats['life']
+        # Life - Draw hearts (use live data if available, last known if dead)
+        if is_dead and player_id in self.dead_players:
+            death_time, last_known_state, local_gn = self.dead_players[player_id]
+            if last_known_state:
+                # Extract health from last known state
+                current_health = getattr(last_known_state, 'life', 0)
+            else:
+                current_health = 0
+        else:
+            current_health = player_data['health'] if player_data else stats['life']
+            
         life_text = "Life:"
-        life_surface = self.small_font.render(life_text, True, (255, 100, 120))
+        life_color = COLORS['TEXT_GREY'] if is_dead else (255, 100, 120)
+        life_surface = self.small_font.render(life_text, True, life_color)
         surface.blit(life_surface, (80, stats_start_y))
 
-        # Draw hearts for life count
+        # Draw hearts for life count (greyed if dead)
         heart_start_x = 115
-        for i in range(current_health):
+        heart_color = (100, 50, 60) if is_dead else (255, 100, 120)
+        for i in range(max(current_health, 0)):
             heart_x = heart_start_x + i * 12
-            self.draw_mini_heart(surface, heart_x, stats_start_y + 4, (255, 100, 120))
+            self.draw_mini_heart(surface, heart_x, stats_start_y + 4, heart_color)
 
-        # Speed - ENHANCED with live data and visual indicator
-        current_speed = player_data.get('speed', stats['speed']) if player_data else stats['speed']
+        # Speed - with live data and visual indicator (greyed if dead)
+        if is_dead and player_id in self.dead_players:
+            death_time, last_known_state, local_gn = self.dead_players[player_id]
+            if last_known_state:
+                current_speed = getattr(last_known_state, 'speed', 1)
+            else:
+                current_speed = 1
+        else:
+            current_speed = player_data.get('speed', stats['speed']) if player_data else stats['speed']
+            
         speed_text = f"Speed: {current_speed}"
-        speed_color = COLORS['TEXT_CYAN'] if current_speed == 1 else (100, 255, 100)  # Green if boosted
+        if is_dead:
+            speed_color = COLORS['TEXT_GREY']
+        else:
+            speed_color = COLORS['TEXT_CYAN'] if current_speed == 1 else (100, 255, 100)
         speed_surface = self.small_font.render(speed_text, True, speed_color)
         surface.blit(speed_surface, (80, stats_start_y + stat_height))
 
-        # Add speed boost indicator
+        # Add speed boost indicator (dimmed if dead)
         if current_speed > 1:
             boost_level = current_speed - 1
-            for i in range(min(boost_level, 3)):  # Max 3 arrows
+            for i in range(min(boost_level, 3)):
                 arrow_x = 160 + i * 8
                 arrow_y = stats_start_y + stat_height + 6
-                self.draw_mini_speed_arrow(surface, arrow_x, arrow_y)
+                if is_dead:
+                    self.draw_mini_speed_arrow_dead(surface, arrow_x, arrow_y)
+                else:
+                    self.draw_mini_speed_arrow(surface, arrow_x, arrow_y)
 
-        # Bombs - Draw bomb icons
+        # Bombs - Draw bomb icons (greyed if dead)
         bombs_text = "Bombs:"
-        bombs_surface = self.small_font.render(bombs_text, True, (255, 150, 100))
+        bombs_color = COLORS['TEXT_GREY'] if is_dead else (255, 150, 100)
+        bombs_surface = self.small_font.render(bombs_text, True, bombs_color)
         surface.blit(bombs_surface, (80, stats_start_y + stat_height * 2))
 
         # Draw bombs for bomb count
         bomb_start_x = 125
+        bomb_color = (120, 75, 50) if is_dead else (255, 150, 100)
         for i in range(stats['bombs']):
             bomb_x = bomb_start_x + i * 12
-            self.draw_mini_bomb(surface, bomb_x, stats_start_y + stat_height * 2 + 4, (255, 150, 100))
+            self.draw_mini_bomb(surface, bomb_x, stats_start_y + stat_height * 2 + 4, bomb_color)
 
-        # Explosion radius
+        # Explosion radius (greyed if dead)
         radius_text = f"Radius: {stats['explosion_radius']}"
-        radius_surface = self.small_font.render(radius_text, True, (255, 200, 0))
+        radius_color = COLORS['TEXT_GREY'] if is_dead else (255, 200, 0)
+        radius_surface = self.small_font.render(radius_text, True, radius_color)
         surface.blit(radius_surface, (80, stats_start_y + stat_height * 3))
 
-        # Special abilities with actual powerup icons
+        # Special abilities with actual powerup icons (greyed if dead)
         abilities_text = "Abilities:"
-        abilities_surface = self.small_font.render(abilities_text, True, COLORS['TEXT_WHITE'])
+        abilities_color = COLORS['TEXT_GREY'] if is_dead else COLORS['TEXT_WHITE']
+        abilities_surface = self.small_font.render(abilities_text, True, abilities_color)
         surface.blit(abilities_surface, (80, stats_start_y + stat_height * 4))
 
         # Filter to only show special abilities
         special_only_abilities = [ability for ability in stats['special_abilities']
                                   if ability in ['plus_bombs', 'repeat_bombs', 'phased', 'freeze_bomb', 'kick_bomb']]
 
-        # Draw ability icons with proper powerup icons
+        # Draw ability icons with proper powerup icons (greyed if dead)
         ability_x = 85
         ability_y = stats_start_y + stat_height * 5 + 8
-        for i, ability in enumerate(special_only_abilities[:3]):  # Max 3 abilities shown
-            icon_x = ability_x + i * 20  # Slightly closer spacing
-            # Make sure icons stay within the player's area
+        for i, ability in enumerate(special_only_abilities[:3]):
+            icon_x = ability_x + i * 20
             if icon_x + 12 < PLAYER_PANEL_WIDTH - 20:
-                self.draw_ability_powerup_icon(surface, icon_x, ability_y, ability)
+                self.draw_ability_powerup_icon(surface, icon_x, ability_y, ability, is_dead)
+
+        # Death animation overlay
+        if has_death_animation:
+            death_anim = self.death_animations[player_id]
+            elapsed = self.time - death_anim['start_time']
+            progress = elapsed / death_anim['duration']
+            
+            # Flashing red overlay
+            if progress < 1.0:
+                flash_intensity = int(100 * (1 - progress) * math.sin(elapsed * 10))
+                if flash_intensity > 0:
+                    overlay_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+                    pygame.draw.rect(overlay_surf, (255, 0, 0, flash_intensity), 
+                                   (0, 0, bg_rect.width, bg_rect.height))
+                    surface.blit(overlay_surf, (bg_rect.x, bg_rect.y))
+
+    def draw_mini_speed_arrow_dead(self, surface, x, y):
+        """Draw a greyed out speed arrow for dead players"""
+        arrow_points = [
+            (x - 2, y + 2),
+            (x, y - 1),
+            (x + 2, y + 2),
+            (x, y + 1)
+        ]
+        pygame.draw.polygon(surface, (100, 100, 50), arrow_points)
+        pygame.draw.polygon(surface, (80, 80, 40), arrow_points, 1)
+
+    def draw_mini_speed_arrow(self, surface, x, y):
+        """Draw a small speed arrow"""
+        arrow_points = [
+            (x - 2, y + 2),
+            (x, y - 1),
+            (x + 2, y + 2),
+            (x, y + 1)
+        ]
+        pygame.draw.polygon(surface, (255, 255, 100), arrow_points)
+        pygame.draw.polygon(surface, (255, 200, 0), arrow_points, 1)
+
+    def draw_ability_powerup_icon(self, surface, x, y, ability, is_dead=False):
+        """Draw proper powerup icons for abilities with death state"""
+        size = 12
+
+        ability_icon_map = {
+            'kick_bomb': ('boot', (255, 100, 255) if not is_dead else (120, 50, 120)),
+            'plus_bombs': ('factory', (255, 150, 100) if not is_dead else (120, 75, 50)),
+            'phased': ('ghost', (200, 200, 255) if not is_dead else (100, 100, 120)),
+            'freeze_bomb': ('freeze', (150, 200, 255) if not is_dead else (75, 100, 120)),
+            'repeat_bombs': ('factory', COLORS['TEXT_GOLD'] if not is_dead else COLORS['TEXT_GREY']),
+        }
+
+        if ability in ability_icon_map:
+            icon_type, color = ability_icon_map[ability]
+            icon_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            self.draw_custom_icon(icon_surf, icon_type, size, size, size, color)
+            surface.blit(icon_surf, (x - size, y - size))
 
     def draw_mini_player(self, surface, x, y, player_num, scale=1.0):
-        """Draw a mini version of the player character"""
-        player_colors = {
-            1: COLORS['PLAYER_1'], 2: COLORS['PLAYER_2'],
-            3: COLORS['PLAYER_3'], 4: COLORS['PLAYER_4']
-        }
+        """Draw a mini version of the player character with death state"""
+        if scale < 1.0:  # Dead player
+            player_colors = {
+                1: COLORS['PLAYER_1_DEAD'], 2: COLORS['PLAYER_2_DEAD'],
+                3: COLORS['PLAYER_3_DEAD'], 4: COLORS['PLAYER_4_DEAD']
+            }
+            skin_color = COLORS['SKIN_DEAD']
+            skin_shadow_color = COLORS['SKIN_SHADOW_DEAD']
+        else:  # Alive player
+            player_colors = {
+                1: COLORS['PLAYER_1'], 2: COLORS['PLAYER_2'],
+                3: COLORS['PLAYER_3'], 4: COLORS['PLAYER_4']
+            }
+            skin_color = COLORS['SKIN']
+            skin_shadow_color = COLORS['SKIN_SHADOW']
+
         outfit_color = player_colors.get(player_num, COLORS['PLAYER_1'])
-
-        # Apply scale to colors for dead players
-        if scale < 1.0:
-            outfit_color = tuple(int(c * scale) for c in outfit_color)
-
         size = int(16 * scale)
 
         # Body
@@ -2027,19 +2224,27 @@ class CompleteGameVisualizer:
 
         # Head
         head_y = y - size // 2
-        skin_color = tuple(int(c * scale) for c in COLORS['SKIN'])
+        pygame.draw.circle(surface, skin_shadow_color, (x + 1, head_y + 1), size // 2)
         pygame.draw.circle(surface, skin_color, (x, head_y), size // 2)
         pygame.draw.circle(surface, tuple(max(0, c - 30) for c in skin_color), (x, head_y), size // 2, 1)
 
-        # Simple face
-        eye_color = (0, 0, 0) if scale > 0.8 else (100, 100, 100)
-        pygame.draw.circle(surface, eye_color, (x - size // 4, head_y - 2), 1)
-        pygame.draw.circle(surface, eye_color, (x + size // 4, head_y - 2), 1)
+        # Simple face (X eyes if dead)
+        if scale < 1.0:  # Dead
+            # Draw X eyes
+            pygame.draw.line(surface, (100, 100, 100), (x - 4, head_y - 4), (x - 2, head_y - 2), 2)
+            pygame.draw.line(surface, (100, 100, 100), (x - 2, head_y - 4), (x - 4, head_y - 2), 2)
+            pygame.draw.line(surface, (100, 100, 100), (x + 2, head_y - 4), (x + 4, head_y - 2), 2)
+            pygame.draw.line(surface, (100, 100, 100), (x + 4, head_y - 4), (x + 2, head_y - 2), 2)
+        else:  # Alive
+            eye_color = (0, 0, 0)
+            pygame.draw.circle(surface, eye_color, (x - size // 4, head_y - 2), 1)
+            pygame.draw.circle(surface, eye_color, (x + size // 4, head_y - 2), 1)
 
         # Player number badge
         badge_surf = pygame.Surface((12, 8), pygame.SRCALPHA)
-        badge_alpha = int(200 * scale)
-        pygame.draw.rect(badge_surf, (255, 255, 255, badge_alpha), (0, 0, 12, 8))
+        badge_alpha = int(200 * scale) if scale >= 1.0 else 100
+        badge_bg_color = (255, 255, 255, badge_alpha) if scale >= 1.0 else (150, 150, 150, badge_alpha)
+        pygame.draw.rect(badge_surf, badge_bg_color, (0, 0, 12, 8))
         pygame.draw.rect(badge_surf, (0, 0, 0), (0, 0, 12, 8), 1)
 
         num_text = self.small_font.render(str(player_num), True, (0, 0, 0))
@@ -2059,35 +2264,6 @@ class CompleteGameVisualizer:
         pygame.draw.circle(surface, color, (x, y + 2), 3)
         pygame.draw.line(surface, color, (x, y - 1), (x - 2, y - 3), 1)
         pygame.draw.circle(surface, (255, 200, 0), (x - 2, y - 3), 1)
-
-    def draw_mini_speed_arrow(self, surface, x, y):
-        """Draw a small speed arrow"""
-        arrow_points = [
-            (x - 2, y + 2),
-            (x, y - 1),
-            (x + 2, y + 2),
-            (x, y + 1)
-        ]
-        pygame.draw.polygon(surface, (255, 255, 100), arrow_points)
-        pygame.draw.polygon(surface, (255, 200, 0), arrow_points, 1)
-
-    def draw_ability_powerup_icon(self, surface, x, y, ability):
-        """Draw proper powerup icons for abilities"""
-        size = 12
-
-        ability_icon_map = {
-            'kick_bomb': ('boot', (255, 100, 255)),
-            'plus_bombs': ('factory', (255, 150, 100)),
-            'phased': ('ghost', (200, 200, 255)),
-            'freeze_bomb': ('freeze', (150, 200, 255)),
-            'repeat_bombs': ('factory', COLORS['TEXT_GOLD']),
-        }
-
-        if ability in ability_icon_map:
-            icon_type, color = ability_icon_map[ability]
-            icon_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
-            self.draw_custom_icon(icon_surf, icon_type, size, size, size, color)
-            surface.blit(icon_surf, (x - size, y - size))
 
     def draw_powerups_panel(self):
         """Draw power-ups panel below the map"""
@@ -2230,12 +2406,13 @@ class CompleteGameVisualizer:
         return True
 
     def run(self):
-        """Main game loop with Erlang port communication"""
-        print("🎮 Playing with Fire 2 - Live Game Viewer Started!")
-        print("🔌 Reading from Erlang ports:")
+        """Main game loop with Erlang port communication and death detection"""
+        print("🎮 Playing with Fire 2 - Live Game Viewer with Death Detection Started!")
+        print("📡 Reading enhanced data from Erlang ports:")
         print("   1️⃣ Initial map from map_generator")
-        print("   2️⃣ Real-time updates from cn_graphics_server")
+        print("   2️⃣ Real-time updates from cn_graphics_server (with death info)")
         print("   3️⃣ ENHANCED: Immediate movement confirmations for smooth animations")
+        print("   💀 Dead players displayed in grey in left panel")
         print("🖱️ Click tiles to inspect | ESC to exit")
 
         running = True
@@ -2274,12 +2451,13 @@ class CompleteGameVisualizer:
                 y_offset = (self.current_height - scaled_surface.get_height()) // 2
                 self.screen.blit(scaled_surface, (max(0, x_offset), max(0, y_offset)))
 
-                # Display connection status
+                # Display connection status with death count
                 if self.waiting_for_initial_map:
                     status_text = "⏳ Waiting for initial map..."
                     color = COLORS['TEXT_ORANGE']
                 else:
-                    status_text = "🔄 Live updates active (with movement confirmations)"
+                    dead_count = len(self.dead_players)
+                    status_text = f"🔄 Live updates active (with death detection) | Dead players: {dead_count}"
                     color = COLORS['TEXT_CYAN']
 
                 status_surface = self.small_font.render(status_text, True, color)
@@ -2289,12 +2467,12 @@ class CompleteGameVisualizer:
                 # Show waiting screen
                 self.screen.fill(COLORS['BACKGROUND'])
 
-                waiting_text = "⏳ Waiting for initial map from map_generator..."
+                waiting_text = "⏳ Waiting for enhanced map from map_generator..."
                 text_surface = self.font.render(waiting_text, True, COLORS['TEXT_WHITE'])
                 text_rect = text_surface.get_rect(center=(self.current_width // 2, self.current_height // 2))
                 self.screen.blit(text_surface, text_rect)
 
-                instruction_text = "Make sure map_generator:start_grid_port() is called first"
+                instruction_text = "Enhanced CN server will send death detection data automatically"
                 inst_surface = self.small_font.render(instruction_text, True, COLORS['TEXT_CYAN'])
                 inst_rect = inst_surface.get_rect(center=(self.current_width // 2, self.current_height // 2 + 30))
                 self.screen.blit(inst_surface, inst_rect)

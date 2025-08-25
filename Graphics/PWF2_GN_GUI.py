@@ -144,22 +144,13 @@ def show_loading():
 # Show loading animation
 def show_waiting(count):
     global dot_count, dot_timer
-    draw_screen_template("Connecting to Game Servers")
+    draw_screen_template("")
 
     if pygame.time.get_ticks() - dot_timer > 500:
         dot_count = (dot_count % 3) + 1
         dot_timer = pygame.time.get_ticks()
 
-    status_text = f"Waiting for connections: {count}/4" + "." * dot_count
-    draw_text(status_text, SCREEN_HEIGHT // 2, size=36, color=WHITE)
-
-    # Show connection status visually
-    for i in range(4):
-        x = SCREEN_WIDTH // 2 - 150 + i * 100
-        y = SCREEN_HEIGHT // 2 + 80
-        color = GREEN if i < count else GRAY
-        pygame.draw.circle(screen, color, (x, y), 20)
-        draw_text(f"GN{i + 1}", y + 40, center=False, size=24, color=WHITE)
+    draw_text("Connecting to server" + "." * dot_count, SCREEN_HEIGHT // 2, size=40, color=WHITE)
 
 # Show a bomb icon to indicate game mode
 def show_player_choice(mouse_pos):
