@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 
 -module(tile_helper_functions).
--author(dolev).
+-author("dolev").
 
 %% * it might also include a bomb requesting movement later on
 -export([break_tile/2, update_to_one_hit/2]).
