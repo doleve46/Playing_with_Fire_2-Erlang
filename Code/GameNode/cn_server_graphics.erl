@@ -16,7 +16,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -include("mnesia_records.hrl").
--include("common_parameters.hrl").
+-include("../common_parameters.hrl").
 
 -define(MAP_SIZE, 16).
 -define(DEATH_DISPLAY_TIME, 10000). % Show dead players for 10 seconds
@@ -186,11 +186,12 @@ handle_info(periodic_update, State) ->
                  (State#state.update_counter rem 2 == 0), % Every 2nd update = every 100ms
    
     if ShouldSend ->
-        send_map_to_all_targets(UpdatedState);
+        send_map_to_all_targets(UpdatedState),
         % Only log every 20th update to reduce spam
-        if State#state.update_counter rem 20 == 0 ->
-            io:format("🔄 Enhanced periodic update #~w sent~n", [UpdatedState#state.update_counter]);
-        true -> ok
+        case State#state.update_counter rem 20 == 0 of
+            true ->
+                io:format("🔄 Enhanced periodic update #~w sent~n", [UpdatedState#state.update_counter]);
+            false -> ok
         end;
     true -> ok
     end,
@@ -316,9 +317,10 @@ terminate(Reason, State) ->
    
     % Terminate GN graphics servers
     lists:foreach(fun({_Node, Pid}) ->
-        if is_pid(Pid) andalso is_process_alive(Pid) ->
-            exit(Pid, shutdown);
-        true -> ok
+        case is_pid(Pid) andalso is_process_alive(Pid) of
+            true ->
+                exit(Pid, shutdown);
+            false -> ok
         end
     end, State#state.gn_graphics_servers),
    
@@ -791,7 +793,7 @@ setup_mnesia_subscriptions(Tables) ->
     end, [], Tables).
 
 %% Monitor enhanced graphics servers on all GN nodes
--spec monitor_gn_graphics_servers(GNNodes::list()) -> [{ref(), atom()}].
+-spec monitor_gn_graphics_servers(GNNodes::list()) -> [{reference(), atom()}].
 monitor_gn_graphics_servers(GNNodes)->
     RefsList = attempt_gn_graphics_monitoring(GNNodes),
     gn_monitoring_receive_loop(RefsList, []).
@@ -810,13 +812,13 @@ gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
         AnythingElse -> % re-send to self in 5 seconds
             erlang:send_after(5000, self(), AnythingElse),
             gn_monitoring_receive_loop(RefsList, ServersNotFound)
-     after 1500 % timeout is 1.5sec
-        if
-            length(ServersNotFound) =/= 0 ->
+     after 1500 -> % timeout is 1.5sec
+        case length(ServersNotFound) =/= 0 of
+            true ->
                 io:format("❌ Failed to monitor ~p servers. The following were not monitored:~w~n", [length(ServersNotFound), ServersNotFound]),
                 NewRefs = monitor_gn_graphics_servers(ServersNotFound),
                 NewRefs ++ RefsList;
-            true -> % every server was successfully monitored
+            false -> % every server was successfully monitored
                 io:format("✅ All GN graphics server were monitored successfully!~n"),
                 RefsList
          end
@@ -971,20 +973,22 @@ send_enhanced_map_to_python(State) ->
 %% Send enhanced map to all GN graphics servers
 send_enhanced_map_to_gn_servers(State) ->
     lists:foreach(fun({Node, Pid}) ->
-        if is_pid(Pid) andalso is_process_alive(Pid) ->
-            try
-                % Send enhanced map state with full backend information
-                gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                if State#state.update_counter rem 40 == 0 ->  % Log every 2 seconds
-                    ExplosionCount = maps:size(State#state.active_explosions),
-                    io:format("📡 Enhanced map (with timers, FSM state & ~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
-                true -> ok
-                end
+        case is_pid(Pid) andalso is_process_alive(Pid) of
+            true ->
+                try
+                    % Send enhanced map state with full backend information
+                    gen_server:cast(Pid, {map_update, State#state.current_map_state}),
+                    case State#state.update_counter rem 40 == 0 of  % Log every 2 seconds
+                        true ->
+                            ExplosionCount = maps:size(State#state.active_explosions),
+                            io:format("📡 Enhanced map (with timers, FSM state & ~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
+                        false -> ok
+                    end
             catch
                 _:Error ->
                     io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
             end;
-        true ->
+        false ->
             io:format("⚠️ GN server on ~w not alive~n", [Node])
         end
     end, State#state.gn_graphics_servers).

@@ -19,9 +19,9 @@
 
 %%% ===========================================================================
 %% ? Imports for windows:
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl"). %% windows fix
+-include("../../common_parameters.hrl").
+-include("../mnesia_records.hrl").
+-include("../../Objects/object_records.hrl"). %% windows fix
 
 %% ? imports for linux:
 %-include_lib("src/clean-repo/Code/Objects/object_records.hrl"). %% This should work for compiling under rebar3.

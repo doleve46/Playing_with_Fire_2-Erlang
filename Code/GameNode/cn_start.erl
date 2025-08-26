@@ -27,6 +27,7 @@
 cn_bootstrap(IP_prefix) ->
     %% Discover all GNs in the local network
     GN_list = discover_GNs(IP_prefix),
+    io:format("Discovered GN nodes: ~p~n", [GN_list]),
     spawn(cn_start, start, [GN_list]). % spawn cn_start process
 
 %% @doc Attempting to communicate with all possible IPs in the local network, returning a the GNs in the network (nodes called GNx@192.168.1.Y )
@@ -89,7 +90,7 @@ generate_ip_range(Prefix, Start, End) ->
 %%%                     CN startup process
 %%% This section contains all the code for the cn_startup process
 %% --------------------------------------------------------------
-start(GN_list) ->
+start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     %% register process globally
     global:register_name(cn_start, self()),
     %% Enter loop for initial connections from GNs
@@ -106,8 +107,8 @@ start(GN_list) ->
     mnesia:create_schema(AllNodes), % mnesia start-up requirement
     rpc:multicall(AllNodes, application, start, [mnesia]), % Starts mnesia on all nodes
     TableNamesList = lists:map(fun(X) ->
-            create_tables(lists:nth(X, NodeList), node(), X)
-        end, lists:seq(1,length(NodeList))),
+            create_tables(lists:nth(X, ConnectedNodeNames), node(), X)
+        end, lists:seq(1,length(ConnectedNodeNames))),
     %% Create map
     Map = map_generator:test_generation(), % ! this is a temporary call - should be something else
     %% Load map into mnesia - in parallel processes
@@ -148,7 +149,7 @@ initial_connections_loop(Count, ListOfNodeNames) ->
     receive
         {_From, NodeName, connect_request} ->
             io:format("GN connected: ~p~n", [NodeName]),
-            Ref = erlang:monitor(process, _From), % monitor the requesting process
+            _Ref = erlang:monitor(process, _From), % monitor the requesting process
             NewList = [NodeName | ListOfNodeNames],
             broadcast_current_connections(Count + 1, NewList),
             initial_connections_loop(Count + 1, NewList);
@@ -158,7 +159,7 @@ initial_connections_loop(Count, ListOfNodeNames) ->
             NewList = lists:delete(NodeName, ListOfNodeNames),
             broadcast_current_connections(Count+1, NewList),
             initial_connections_loop(Count+1, NewList);
-        {'DOWN', Ref, process, Pid, _Reason} = Msg ->  % Monitored process closed unexpectedly
+        {'DOWN', _Ref, process, Pid, _Reason} = Msg ->  % Monitored process closed unexpectedly
             io:format("Received DOWN from process ~p, hosted on node:~w~n
                         Full message:~w~n", [Pid, node(Pid), Msg]),
             case lists:member(node(Pid), ListOfNodeNames) of

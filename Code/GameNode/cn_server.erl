@@ -29,9 +29,9 @@
 %% Linux compatible
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %-include_lib("src/clean-repo/Code/Objects/object_records.hrl").
-%% Windows compatible
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+%% Windows compatible - Fixed relative paths
+-include("../Objects/object_records.hrl").
+-include("../common_parameters.hrl").
 
 % Required module for QLC
 -include_lib("stdlib/include/qlc.hrl").
@@ -177,7 +177,7 @@ handle_info({graphics_ready, _GraphicsPid}, State) ->
     %% Notify all GN servers to start the game
     lists:foreach(fun(#gn_data{pid = Pid}) ->
         Pid ! start_game
-    end, State#gn_data),
+    end, State),
     {noreply, State};
 
 %% @doc Handles failure messages from the monitored processes
@@ -237,7 +237,8 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
 bomb_explosion_handler(Coord, Radius) ->
     {atomic, ResultList} = calculate_explosion_reach(Coord, Radius),
     %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
-    %% todo: ResultList can be passed to the graphics server so it knows where to show an explosion
+    %% ResultList can be passed to the graphics server so it knows where to show an explosion
+    cn_server_graphics:show_explosion(ResultList),
     %% Sends inflict_damage messages to all objects affected by the explosion
     notify_affected_objects(ResultList).
 

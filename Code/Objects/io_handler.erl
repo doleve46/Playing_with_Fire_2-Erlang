@@ -20,7 +20,7 @@
 %% linux compatible
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %% windows compatible
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+-include("../common_parameters.hrl").
 
 
 -record(io_state, {
