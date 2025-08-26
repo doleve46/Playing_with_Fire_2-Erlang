@@ -160,8 +160,7 @@ initial_connections_loop(Count, ListOfNodeNames) ->
             broadcast_current_connections(Count+1, NewList),
             initial_connections_loop(Count+1, NewList);
         {'DOWN', _Ref, process, Pid, _Reason} = Msg ->  % Monitored process closed unexpectedly
-            io:format("Received DOWN from process ~p, hosted on node:~w~n
-                        Full message:~w~n", [Pid, node(Pid), Msg]),
+            io:format("Received DOWN from process ~p, hosted on node:~w~nFull message:~w~n", [Pid, node(Pid), Msg]),
             case lists:member(node(Pid), ListOfNodeNames) of
                 false ->
                     %% caught a 'DOWN' from someone who already disconnected from me, ignore it
