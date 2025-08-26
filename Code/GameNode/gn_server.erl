@@ -25,9 +25,9 @@
 %%% Linux compatible
 %-include_lib("src/clean-repo/Code/Objects/object_records.hrl").
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
-%%% Windows compatible
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+%%% Windows compatible - Fixed relative paths
+-include("../Objects/object_records.hrl").
+-include("../common_parameters.hrl").
 
 %%%===================================================================
 %%% API
@@ -311,6 +311,11 @@ handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
     %% Update player's active bombs count, let playerFSM know.
     notify_owner_of_bomb_explosion(Record#mnesia_bombs.owner, State);
         
+%% * Handle start-of-game message from CN - pass it to player_fsm to "unlock" it
+handle_info(start_game, State) ->
+    PlayerNumber = req_player_move:node_name_to_number(node()),
+    player_fsm:start_signal(list_to_atom("player_" ++ integer_to_list(PlayerNumber))),
+    {noreply, State};
 
 %% * default, catch-all and ignore
 handle_info(_Info, State = #gn_state{}) ->

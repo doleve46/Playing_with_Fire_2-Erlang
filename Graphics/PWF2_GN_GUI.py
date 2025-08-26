@@ -141,7 +141,7 @@ def show_loading():
 
     draw_text("Connecting to server" + "." * dot_count, SCREEN_HEIGHT // 2, size=40)
 
-# Show loading animation
+# Show loading animation with connection count
 def show_waiting(count):
     global dot_count, dot_timer
     draw_screen_template("")
@@ -150,7 +150,8 @@ def show_waiting(count):
         dot_count = (dot_count % 3) + 1
         dot_timer = pygame.time.get_ticks()
 
-    draw_text("Connecting to server" + "." * dot_count, SCREEN_HEIGHT // 2, size=40, color=WHITE)
+    draw_text("Connecting to server" + "." * dot_count, SCREEN_HEIGHT // 2 - 30, size=40, color=WHITE)
+    draw_text(f"Awaiting players to connect. Currently {count}/4 connected", SCREEN_HEIGHT // 2 + 20, size=32, color=WHITE)
 
 # Show a bomb icon to indicate game mode
 def show_player_choice(mouse_pos):
@@ -160,9 +161,9 @@ def show_player_choice(mouse_pos):
 
     draw_screen_template("Choose Your Mode")
 
-    # Calculate remaining time
+    # Calculate remaining time (match Erlang's 20-second timer)
     elapsed = time.time() - choice_timer_start
-    remaining = max(0, 60 - int(elapsed))
+    remaining = max(0, 20 - int(elapsed))
 
     # Show timer
     timer_color = RED if remaining <= 10 else WHITE
@@ -220,6 +221,9 @@ def listen_for_commands():
         for line in sys.stdin:
             cmd = line.strip()
             if cmd.startswith("show_waiting:"):
+                waiting_count = int(cmd.split(":")[1])
+                current_screen = "show_waiting"
+            elif cmd.startswith("update_connection_count:"):
                 waiting_count = int(cmd.split(":")[1])
                 current_screen = "show_waiting"
             elif cmd == "show_player_choice":

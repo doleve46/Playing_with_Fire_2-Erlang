@@ -2,8 +2,8 @@
 
 -export([place_bomb/3, find_remote_bombs_for_player/1]).
 
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
+-include("../../common_parameters.hrl").
+-include("../mnesia_records.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 
 %% @doc Places a bomb for a player at their current position

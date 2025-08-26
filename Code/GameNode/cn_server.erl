@@ -2,7 +2,8 @@
 %%% @author dolev
 %%% @copyright (C) 2025, <COMPANY>
 %%% @doc
-%%%
+%%% No longer starts the gn_servers. 
+%%% Instead links to them in a similar manner to the graphics setup
 %%% @end
 %%% Created : 13. Jul 2025 23:41
 %%%-------------------------------------------------------------------
@@ -28,17 +29,15 @@
 %% Linux compatible
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %-include_lib("src/clean-repo/Code/Objects/object_records.hrl").
-%% Windows compatible
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+%% Windows compatible - Fixed relative paths
+-include("../Objects/object_records.hrl").
+-include("../common_parameters.hrl").
 
 % Required module for QLC
 -include_lib("stdlib/include/qlc.hrl").
 
-%% todo: move this record (if it is even necessary) to the .hrl
 -record(gn_data, {
     pid,
-    ref,
     tiles,
     bombs,
     powerups,
@@ -63,32 +62,16 @@ start_link(GN_playmode_list) ->
 %% "named" (records in the list are named, [Gn1_names, Gn2_names, ...] ): Gn2_names#gn_data.players
 init([GN_playmode_list]) -> % [ {GN_number, Answer, NodeID} , {..} ]
     process_flag(trap_exit, true), % set to trap exits of GNs
-    GN_pids_list = lists:map(fun({Number, Answer, NodeID}) -> 
-        {ok, Pid} = rpc:call(NodeID, gn_server, start_link, [{Number, Answer}], 20000),
-        %% now monitor the GN from the CN_server
-        Ref = erlang:monitor(process, Pid),
-        {Pid, Ref} % return the Pid and Ref
-        end, GN_playmode_list), %* there's a timeout of 20 seconds if the connection fails
-    CN_data = lists:map(
-        fun(Index) -> 
-            Individual_table_names = generate_table_names(Index),
-            {PidA, RefA} = lists:nth(Index, GN_pids_list),
-            #gn_data{
-                pid = PidA,
-                ref = RefA,
-                tiles = lists:hd(Individual_table_names),
-                bombs = lists:nth(2, Individual_table_names),
-                powerups = lists:nth(3, Individual_table_names),
-                players = lists:last(Individual_table_names)
-            }
-        end, lists:seq(1,4)),
+    %% Attempt to monitor the processes right after initialization
+    erlang:send_after(0, self(), {monitor_GNs, GN_playmode_list}),
+
+    CN_data = none, %! initialize WITHOUT any data
     {ok, CN_data}.
 
 %%%================== handle call ==================
 %% @doc 
 handle_call(_Request, _From, State) ->
     {reply, ignored, State}.
-
 
 %%%================== handle cast ==================
 
@@ -168,6 +151,33 @@ handle_cast(_Msg, State) ->
 
 
 %%%================== handle info ==================
+%% @doc Initialization of GN_data - sets up the links to all gn_servers
+handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
+    GN_pids_list = link_GNs_loop(lists:seq(1, length(GN_playmode_list))),
+    CN_data = lists:map(
+        fun(Index) -> 
+            Individual_table_names = generate_table_names(Index),
+            PidA = lists:nth(Index, GN_pids_list),
+            #gn_data{
+                pid = PidA,
+                tiles = lists:hd(Individual_table_names),
+                bombs = lists:nth(2, Individual_table_names),
+                powerups = lists:nth(3, Individual_table_names),
+                players = lists:last(Individual_table_names)
+            }
+        end, lists:seq(1,4)),
+    io:format("Successfully linked to all gn_servers ~w~n", [GN_pids_list]),
+    %% Store the CN data in the state
+    {noreply, CN_data};
+
+%% @doc Receiving ready message from cn_server_graphics
+handle_info({graphics_ready, _GraphicsPid}, State) ->
+    io:format("Graphics server is ready~n"),
+    %% Notify all GN servers to start the game
+    lists:foreach(fun(#gn_data{pid = Pid}) ->
+        Pid ! start_game
+    end, State),
+    {noreply, State};
 
 %% @doc Handles failure messages from the monitored processes
 handle_info({'DOWN', Ref, process, Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
@@ -226,7 +236,8 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
 bomb_explosion_handler(Coord, Radius) ->
     {atomic, ResultList} = calculate_explosion_reach(Coord, Radius),
     %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
-    %% todo: ResultList can be passed to the graphics server so it knows where to show an explosion
+    %% ResultList can be passed to the graphics server so it knows where to show an explosion
+    cn_server_graphics:show_explosion(lists:flatten(ResultList)),
     %% Sends inflict_damage messages to all objects affected by the explosion
     notify_affected_objects(ResultList).
 
@@ -344,4 +355,36 @@ find_in_player_tables(Pid, [Table| T]) ->
             mnesia:write(Table, UpdatedRecord, write),
             {table_updated, Record};
         [] -> find_in_player_tables(Pid, T)
+    end.
+
+
+%% Functions used to link the game nodes
+link_GNs_loop(NodeNumbers) ->
+    io:format("Attempt to link to all gn_servers..~n"),
+    Pids = lists:map(fun(NodeNum) ->
+       GN_server_name = list_to_atom("gn" ++ integer_to_list(NodeNum) ++ "_server"),
+       link_with_retry(GN_server_name, 0)
+    end, NodeNumbers),
+    Pids. % return list of linked PIDs
+
+link_with_retry(GN_server_name, RetryCount) when RetryCount > 4 ->
+    erlang:error({link_failed_after_retries, GN_server_name, RetryCount});
+link_with_retry(GN_server_name, RetryCount) ->
+    Pid = whereis(GN_server_name),
+    case Pid of
+        undefined ->
+            io:format("Process ~p not found, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+            timer:sleep(500),
+            link_with_retry(GN_server_name, RetryCount + 1);
+        _ ->
+            try
+                link(Pid),
+                io:format("Successfully linked to ~p~n", [GN_server_name]),
+                Pid
+            catch
+                _:_ ->
+                    io:format("Failed to link to ~p, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+                    timer:sleep(500),
+                    link_with_retry(GN_server_name, RetryCount + 1)
+            end
     end.

@@ -6,18 +6,21 @@
 %% They spawn from within their respective node, and have a locally-registered name "cn_server_graphics".
 %% This Process tries to monitor al 4 of them - when he is successful he sends a 'ready' 
 %% message to cn_server, and proceed to work as before.
+%% Added explosion visualization support with direct function call interface.
+%% TODO: Need to verify that a python port is created through cn_graphics and gn_graphics, and is responsive and works as intended.
 %%% ------------------------------------------------------------------------------------------------------
 %% API
--export([start_link/1, get_current_map/0]).
+-export([start_link/1, get_current_map/0, show_explosion/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -include("mnesia_records.hrl").
--include("common_parameters.hrl").
+-include("../common_parameters.hrl").
 
 -define(MAP_SIZE, 16).
 -define(DEATH_DISPLAY_TIME, 10000). % Show dead players for 10 seconds
+-define(EXPLOSION_DISPLAY_TIME, 1000). % Show explosions for 1 second
 
 -record(state, {
     gn_graphics_servers = [],     % List of {Node, Pid} for GN graphics servers
@@ -30,7 +33,8 @@
     bomb_movements = #{},         % Track active bomb movements
     dead_players = #{},           % Track recently deceased players: PlayerID => {DeathTime, LastKnownState, LocalGN}
     last_known_players = #{},     % Track last known player states for death detection
-    timer_subscribers = #{}       % Track timer update subscriptions
+    timer_subscribers = #{},      % Track timer update subscriptions
+    active_explosions = #{}       % Track active explosions: Coord => ExpiryTime
 }).
 
 %%%===================================================================
@@ -46,6 +50,17 @@ start_link(GNNodes) ->
 -spec get_current_map() -> term().
 get_current_map() ->
     gen_server:call(?MODULE, get_current_map).
+
+%% Direct function to show explosions - called directly from cn_server
+-spec show_explosion(list()) -> ok.
+show_explosion(Coordinates) ->
+    
+    io:format("💥 Direct explosion call: ~w coordinates will display for ~wms~n", 
+              [length(Coordinates), ?EXPLOSION_DISPLAY_TIME]),
+    
+    %% Add explosions directly to the server state
+    gen_server:cast(?MODULE, {add_explosions_direct, Coordinates}),
+    ok.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -70,8 +85,8 @@ init([GNNodes]) ->
     % Start periodic updates (faster for better timer sync)
     erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
    
-    % Clean up dead players periodically
-    erlang:send_after(5000, self(), cleanup_dead_players),
+    % Clean up dead players and explosions periodically
+    erlang:send_after(5000, self(), cleanup_expired_elements),
     
     %% trap exits
     process_flag(trap_exit, true),
@@ -94,6 +109,23 @@ handle_cast(force_update, State) ->
     send_map_to_all_targets(UpdatedState),
     {noreply, UpdatedState};
 
+%% Handle direct explosion additions
+handle_cast({add_explosions_direct, Coordinates}, State) ->
+    %% Add all explosion coordinates with expiration time
+    Timestamp = erlang:system_time(millisecond),
+    ExpiryTime = Timestamp + ?EXPLOSION_DISPLAY_TIME,
+    NewExplosions = lists:foldl(fun(Coord, AccMap) ->
+        maps:put(Coord, ExpiryTime, AccMap)
+    end, State#state.active_explosions, Coordinates),
+    
+    %% Force immediate map update to show explosions
+    NewState = State#state{active_explosions = NewExplosions},
+    UpdatedMapState = create_enhanced_map_state(NewState),
+    FinalState = NewState#state{current_map_state = UpdatedMapState},
+    send_map_to_all_targets(FinalState),
+    
+    {noreply, FinalState};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -108,7 +140,7 @@ handle_info(setup_subscriptions, State) ->
 handle_info(monitor_gn_graphics_servers, State) ->
     io:format("🚀 Attempting to monitor all GN graphics servers...~n"),
     ReferencesList = monitor_gn_graphics_servers(State#state.gn_nodes),
-    io:format("✅ Monitoring was successful!: ~p~n", [length(GNServers)]),
+    io:format("✅ Monitoring was successful!: ~p~n", [length(ReferencesList)]),
     {noreply, State#state{gn_graphics_servers = ReferencesList}};
 
 handle_info(create_python_port, State) ->
@@ -123,14 +155,30 @@ handle_info(create_python_port, State) ->
     % Send initial state
     send_map_to_all_targets(UpdatedState),
     io:format("✅ Enhanced Python port created and initial map sent~n"),
+    %% Send ready message to cn_server
+    cn_server ! {graphics_ready, self()},
     {noreply, UpdatedState};
 
 handle_info(periodic_update, State) ->
+    CurrentTime = erlang:system_time(millisecond),
+    
+    % Clean up expired explosions
+    NewExplosions = maps:filter(fun(_Coord, ExpiryTime) ->
+        CurrentTime < ExpiryTime
+    end, State#state.active_explosions),
+    
+    CleanedExplosions = maps:size(State#state.active_explosions) - maps:size(NewExplosions),
+    if CleanedExplosions > 0 ->
+        io:format("💨 Cleaned up ~w expired explosions~n", [CleanedExplosions]);
+    true -> ok
+    end,
+    
     % Enhanced periodic update every TICK_DELAY milliseconds for better timer sync
-    NewMapState = create_enhanced_map_state(State),
+    NewMapState = create_enhanced_map_state(State#state{active_explosions = NewExplosions}),
     UpdatedState = State#state{
         current_map_state = NewMapState,
-        update_counter = State#state.update_counter + 1
+        update_counter = State#state.update_counter + 1,
+        active_explosions = NewExplosions
     },
    
     % Send more frequently for real-time timer updates
@@ -138,11 +186,12 @@ handle_info(periodic_update, State) ->
                  (State#state.update_counter rem 2 == 0), % Every 2nd update = every 100ms
    
     if ShouldSend ->
-        send_map_to_all_targets(UpdatedState);
+        send_map_to_all_targets(UpdatedState),
         % Only log every 20th update to reduce spam
-        if State#state.update_counter rem 20 == 0 ->
-            io:format("🔄 Enhanced periodic update #~w sent~n", [UpdatedState#state.update_counter]);
-        true -> ok
+        case State#state.update_counter rem 20 == 0 of
+            true ->
+                io:format("🔄 Enhanced periodic update #~w sent~n", [UpdatedState#state.update_counter]);
+            false -> ok
         end;
     true -> ok
     end,
@@ -151,22 +200,35 @@ handle_info(periodic_update, State) ->
     erlang:send_after(?TICK_DELAY, self(), periodic_update),
     {noreply, UpdatedState};
 
-handle_info(cleanup_dead_players, State) ->
-    % Remove dead players that have been shown long enough
+handle_info(cleanup_expired_elements, State) ->
     CurrentTime = erlang:system_time(millisecond),
+    
+    % Remove dead players that have been shown long enough
     NewDeadPlayers = maps:filter(fun(_PlayerID, {DeathTime, _LastState, _LocalGN}) ->
         CurrentTime - DeathTime < ?DEATH_DISPLAY_TIME
     end, State#state.dead_players),
     
-    CleanedCount = maps:size(State#state.dead_players) - maps:size(NewDeadPlayers),
-    if CleanedCount > 0 ->
-        io:format("🧹 Cleaned up ~w expired dead players~n", [CleanedCount]);
+    % Remove expired explosions
+    NewExplosions = maps:filter(fun(_Coord, ExpiryTime) ->
+        CurrentTime < ExpiryTime
+    end, State#state.active_explosions),
+    
+    CleanedDeaths = maps:size(State#state.dead_players) - maps:size(NewDeadPlayers),
+    CleanedExplosions = maps:size(State#state.active_explosions) - maps:size(NewExplosions),
+    
+    if CleanedDeaths > 0 ->
+        io:format("🧹 Cleaned up ~w expired dead players~n", [CleanedDeaths]);
+    true -> ok
+    end,
+    
+    if CleanedExplosions > 0 ->
+        io:format("💨 Cleaned up ~w expired explosions~n", [CleanedExplosions]);
     true -> ok
     end,
     
     % Schedule next cleanup
-    erlang:send_after(5000, self(), cleanup_dead_players),
-    {noreply, State#state{dead_players = NewDeadPlayers}};
+    erlang:send_after(5000, self(), cleanup_expired_elements),
+    {noreply, State#state{dead_players = NewDeadPlayers, active_explosions = NewExplosions}};
 
 % Enhanced mnesia table event handling with real-time timer tracking
 handle_info({mnesia_table_event, {write, Table, Record, _ActivityId}}, State) ->
@@ -255,9 +317,10 @@ terminate(Reason, State) ->
    
     % Terminate GN graphics servers
     lists:foreach(fun({_Node, Pid}) ->
-        if is_pid(Pid) andalso is_process_alive(Pid) ->
-            exit(Pid, shutdown);
-        true -> ok
+        case is_pid(Pid) andalso is_process_alive(Pid) of
+            true ->
+                exit(Pid, shutdown);
+            false -> ok
         end
     end, State#state.gn_graphics_servers),
    
@@ -427,10 +490,10 @@ detect_enhanced_bomb_movement_change(NewRecord, CurrentMapState) ->
     end.
 
 %%%===================================================================
-%%% Enhanced Map Creation with Full Backend State
+%%% Enhanced Map Creation with Full Backend State and Explosions
 %%%===================================================================
 
-%% Create enhanced unified map state with all backend information
+%% Create enhanced unified map state with all backend information including explosions
 create_enhanced_map_state(State) ->
     try
         % Initialize empty map
@@ -447,18 +510,23 @@ create_enhanced_map_state(State) ->
        
         % Add players with full timer information
         MapWithPlayers = add_enhanced_players_to_map(MapWithBombs),
+        
+        % Add explosions to map
+        MapWithExplosions = add_explosions_to_map(MapWithPlayers, State#state.active_explosions),
        
         % Create enhanced map state with all backend data
         #{
-            map => MapWithPlayers,
+            map => MapWithExplosions,
             dead_players => State#state.dead_players,
             update_time => erlang:system_time(millisecond),
+            active_explosions => State#state.active_explosions,
             backend_timing => #{
                 tile_move => ?TILE_MOVE,
                 ms_reduction => ?MS_REDUCTION,
                 immunity_time => ?IMMUNITY_TIME,
                 request_cooldown => ?REQUEST_COOLDOWN,
-                tick_delay => ?TICK_DELAY
+                tick_delay => ?TICK_DELAY,
+                explosion_display_time => ?EXPLOSION_DISPLAY_TIME
             }
         }
     catch
@@ -468,8 +536,28 @@ create_enhanced_map_state(State) ->
                 map => create_empty_map(),
                 dead_players => #{},
                 update_time => erlang:system_time(millisecond),
+                active_explosions => #{},
                 backend_timing => #{}
             }
+    end.
+
+%% Add explosions to the map
+add_explosions_to_map(Map, ActiveExplosions) ->
+    maps:fold(fun([X, Y], _ExpiryTime, AccMap) ->
+        update_map_with_explosion(AccMap, X, Y)
+    end, Map, ActiveExplosions).
+
+%% Update map cell with explosion
+update_map_with_explosion(Map, X, Y) ->
+    if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
+        Row = lists:nth(X + 1, Map),
+        OldCell = lists:nth(Y + 1, Row),
+        NewCell = update_cell_explosion(OldCell, explosion),
+        NewRow = replace_list_element(Row, Y + 1, NewCell),
+        replace_list_element(Map, X + 1, NewRow);
+    true ->
+        io:format("⚠️ Invalid explosion position: ~w, ~w~n", [X, Y]),
+        Map
     end.
 
 %% Add players with enhanced timer and state information
@@ -660,6 +748,10 @@ update_cell_enhanced_player({Tile, Powerup, Bomb, _, Explosion, Special}, Enhanc
 update_cell_enhanced_bomb({Tile, Powerup, _, Player, Explosion, Special}, EnhancedBombInfo) ->
     {Tile, Powerup, EnhancedBombInfo, Player, Explosion, Special}.
 
+%% Update cell with explosion information
+update_cell_explosion({Tile, Powerup, Bomb, Player, _, Special}, ExplosionInfo) ->
+    {Tile, Powerup, Bomb, Player, ExplosionInfo, Special}.
+
 %%%===================================================================
 %%% Existing Helper Functions (Enhanced)
 %%%===================================================================
@@ -700,50 +792,45 @@ setup_mnesia_subscriptions(Tables) ->
         end
     end, [], Tables).
 
-%% Spawn enhanced graphics servers on all GN nodes
--spec monitor_gn_graphics_servers(GNNodes::list()) -> [{ref(), atom()}].
+%% Monitor enhanced graphics servers on all GN nodes
+-spec monitor_gn_graphics_servers(GNNodes::list()) -> [{reference(), atom()}].
 monitor_gn_graphics_servers(GNNodes)->
-    %% TODO: Try to monitor all graphics processes, then wait for several seconds to see if we
-    %% receive any failed connection messages - {'DOWN', Ref, process, NonExistentPid, noproc}
-    %% if we did receive them - try to monitor them again.
-    %% We get out of this function when all processes are successfully monitored
-    RefsList = attempt_gn_graphics_monitoring(NodeList),
+    RefsList = attempt_gn_graphics_monitoring(GNNodes),
     gn_monitoring_receive_loop(RefsList, []).
 
 gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
     receive
         {'DOWN', Ref, process, _Pid, noproc} ->
             case lists:keyfind(Ref, 1, RefsList) of
-                false -> % unkonwn message - unsure what to do with it
+                false -> % unknown message - unsure what to do with it
                     io:format("❌ *Unknown monitoring failure message received:~n~w~n",[{'DOWN', Ref, process, _Pid, noproc}]),
                     gn_monitoring_receive_loop(RefsList, ServersNotFound);
                 {_, NodeName} -> % a monitoring to NodeName has failed - add to failed servers
-                    io:format("❌ *A monitoring request has failed on node ~w. Accumulating before retrying..~n",[NodeName])
-                    gn_monitoring_receive_loop(lists:keydelete(Ref, 1, RefsList), [NodeName | ServersNotFound];
+                    io:format("❌ *A monitoring request has failed on node ~w. Accumulating before retrying..~n",[NodeName]),
+                    gn_monitoring_receive_loop(lists:keydelete(Ref, 1, RefsList), [NodeName | ServersNotFound])
+            end;
         AnythingElse -> % re-send to self in 5 seconds
             erlang:send_after(5000, self(), AnythingElse),
             gn_monitoring_receive_loop(RefsList, ServersNotFound)
-     after 1500 % timeout is 1.5sec
-        if
-            length(ServersNotFound) =!= 0 ->
+     after 1500 -> % timeout is 1.5sec
+        case length(ServersNotFound) =/= 0 of
+            true ->
                 io:format("❌ Failed to monitor ~p servers. The following were not monitored:~w~n", [length(ServersNotFound), ServersNotFound]),
                 NewRefs = monitor_gn_graphics_servers(ServersNotFound),
                 NewRefs ++ RefsList;
-            true -> % every server was successfully monitored
+            false -> % every server was successfully monitored
                 io:format("✅ All GN graphics server were monitored successfully!~n"),
                 RefsList
          end
     end.
-        
 
 attempt_gn_graphics_monitoring(NodeList) ->
     RefsList = lists:map(fun(Node) ->
-        Ref = erlang:monitor(process, {Node, gn_server_graphics}),
+        Ref = erlang:monitor(process, {gn_graphics_server, Node}),
         io:format("Sent request to monitor process ~w~n", [Node]),
         {Ref, Node} end, NodeList),
-    timer:sleep(1000), % wait for 1 second before looking at the messages we receieved
+    timer:sleep(1000), % wait for 1 second before looking at the messages we received
     RefsList.
-
 
 %% Create enhanced Python visualizer port
 create_python_visualizer_port() ->
@@ -871,7 +958,8 @@ send_enhanced_map_to_python(State) ->
             MapBinary = term_to_binary(State#state.current_map_state),
             port_command(State#state.python_port, MapBinary),
             if State#state.update_counter rem 40 == 0 ->  % Log every 2 seconds
-                io:format("🗺️ Enhanced map (with timers & FSM state) sent to Python visualizer~n");
+                ExplosionCount = maps:size(State#state.active_explosions),
+                io:format("🗺️ Enhanced map (with timers, FSM state & ~w explosions) sent to Python visualizer~n", [ExplosionCount]);
             true -> ok
             end
         catch
@@ -885,19 +973,22 @@ send_enhanced_map_to_python(State) ->
 %% Send enhanced map to all GN graphics servers
 send_enhanced_map_to_gn_servers(State) ->
     lists:foreach(fun({Node, Pid}) ->
-        if is_pid(Pid) andalso is_process_alive(Pid) ->
-            try
-                % Send enhanced map state with full backend information
-                gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                if State#state.update_counter rem 40 == 0 ->  % Log every 2 seconds
-                    io:format("📡 Enhanced map (with timers & FSM state) sent to GN server on ~w~n", [Node]);
-                true -> ok
-                end
+        case is_pid(Pid) andalso is_process_alive(Pid) of
+            true ->
+                try
+                    % Send enhanced map state with full backend information
+                    gen_server:cast(Pid, {map_update, State#state.current_map_state}),
+                    case State#state.update_counter rem 40 == 0 of  % Log every 2 seconds
+                        true ->
+                            ExplosionCount = maps:size(State#state.active_explosions),
+                            io:format("📡 Enhanced map (with timers, FSM state & ~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
+                        false -> ok
+                    end
             catch
                 _:Error ->
                     io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
             end;
-        true ->
+        false ->
             io:format("⚠️ GN server on ~w not alive~n", [Node])
         end
     end, State#state.gn_graphics_servers).
