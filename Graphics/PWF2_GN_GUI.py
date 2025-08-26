@@ -39,10 +39,26 @@ choice_timer_start = 0
 
 # Load images 
 try:
-    logo_img = pygame.image.load("assets/logo.png").convert_alpha()
-    bomb_img = pygame.image.load("assets/bomb.png").convert_alpha()
-except:
-    # Create placeholder images if files don't exist
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    assets_dir = os.path.join(script_dir, "assets")
+    
+    # Load images using absolute paths
+    logo_path = os.path.join(assets_dir, "logo.png")
+    bomb_path = os.path.join(assets_dir, "bomb.png")
+    
+    logo_img = pygame.image.load(logo_path).convert_alpha() if os.path.exists(logo_path) else None
+    bomb_img = pygame.image.load(bomb_path).convert_alpha() if os.path.exists(bomb_path) else None
+    
+    # If either image failed to load, create placeholders
+    if not logo_img:
+        logo_img = pygame.Surface((200, 100))
+        logo_img.fill(BLUE)
+    if not bomb_img:
+        bomb_img = pygame.Surface((32, 32))
+        bomb_img.fill(RED)
+except Exception as e:
+    print(f"Error loading assets: {e}", file=sys.stderr)
     logo_img = pygame.Surface((200, 100))
     logo_img.fill(BLUE)
     bomb_img = pygame.Surface((32, 32))
@@ -281,10 +297,13 @@ def main():
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for label, rect in buttons:
                     if rect.collidepoint(event.pos):
-                        send_event(label)
                         if label == "exit_clicked":
-                            pygame.quit()
+                            send_event(label)
                             running = False
+                            pygame.quit()
+                            sys.exit(0)
+                        else:
+                            send_event(label)
 
         pygame.display.flip()
         clock.tick(60)

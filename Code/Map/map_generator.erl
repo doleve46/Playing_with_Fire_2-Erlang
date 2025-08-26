@@ -603,7 +603,7 @@ visualize_map(Grid) ->
             Char = case {TileType, BombType, PlayerID} of
                 {_, ?NORMAL_BOMB, _} -> " B";        % Bomb takes priority
                 {_, ?REMOTE_BOMB, _} -> " R";        % Remote bomb
-                {_, ?FREEZE_BOMB_ITEM, _} -> " F";   % Freeze bomb
+                {_, ?FREEZE_BOMB, _} -> " F";   % Freeze bomb
                 {_, _, ?PLAYER_1} -> " 1";           % Player 1
                 {_, _, ?PLAYER_2} -> " 2";           % Player 2
                 {_, _, ?PLAYER_3} -> " 3";           % Player 3

@@ -56,22 +56,22 @@ gn_receive_loop(Menu_Pid) ->
 handle_menu_request({play_clicked}, Menu_Pid) ->
     io:format("GN_start received play_clicked request~n"),
     %% Forward the request to the cn_server
-    {cn_start} ! {self(), node(), connect_request},
+    cn_start ! {self(), node(), connect_request},
     gn_receive_loop(Menu_Pid);
-handle_menu_request({exit_clicked}, Menu_Pid) ->
+handle_menu_request({exit_clicked}, _Menu_Pid) ->
     io:format("GN_start received exit_clicked request~n"),
     %% Forward the request to the cn_server
-    {cn_start} ! {self(), node(), disconnect_request},
-    gn_receive_loop(Menu_Pid);
+    cn_start ! {self(), node(), disconnect_request},
+    gn_receive_loop(_Menu_Pid);
 handle_menu_request({play_as_human}, _Menu_Pid) ->
     io:format("GN_start received play_as_human request~n"),
     %% Forward the request to the cn_server
-    {cn_start} ! {self(), playmode, false},
+    cn_start ! {self(), playmode, false},
     false; % leave the loop
 handle_menu_request({play_as_bot}, _Menu_Pid) ->
     io:format("GN_start received play_as_bot request~n"),
     %% Forward the request to the cn_server
-    {cn_start} ! {self(), playmode, true},
+    cn_start ! {self(), playmode, true},
     true; % leave the loop
 handle_menu_request(Unknown, Menu_Pid) ->
     io:format("GN_start received unknown menu request: ~p~n", [Unknown]),
