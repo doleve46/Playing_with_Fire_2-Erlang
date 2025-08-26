@@ -38,7 +38,7 @@ discover_GNs(IP_prefix) ->
             case net_adm:names(IP_prefix ++ integer_to_list(X)) of % asks each IP for all nodes he operates
                 {ok, Names} -> % IP responded with a lists of his erlang nodes
                     %% filter only nodes of our GNs
-                    [NodeName || {Name, _Port} <- Names, NodeNameStr = Name ++ "@" ++ "Prefix" ++ integer_to_list(X), % reconstruct the node name
+                    [NodeName || {Name, _Port} <- Names, NodeNameStr = Name ++ "@" ++ IP_prefix ++ integer_to_list(X), % reconstruct the node name
                 lists:any(fun(Y) -> lists:prefix(Y, NodeNameStr) end, Looking_for),
                 NodeName = list_to_atom(NodeNameStr),
                 NodeName =/= node(), % not my own node
