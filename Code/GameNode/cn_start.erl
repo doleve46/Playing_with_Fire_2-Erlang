@@ -157,8 +157,8 @@ initial_connections_loop(Count, ListOfNodeNames) ->
             io:format("GN disconnected: ~p~n", [NodeName]),
             %% No monitor reference to demonitor since we don't store it
             NewList = lists:delete(NodeName, ListOfNodeNames),
-            broadcast_current_connections(Count+1, NewList),
-            initial_connections_loop(Count+1, NewList);
+            broadcast_current_connections(Count-1, NewList),
+            initial_connections_loop(Count-1, NewList);
         {'DOWN', _Ref, process, Pid, _Reason} = Msg ->  % Monitored process closed unexpectedly
             io:format("Received DOWN from process ~p, hosted on node:~w~nFull message:~w~n", [Pid, node(Pid), Msg]),
             case lists:member(node(Pid), ListOfNodeNames) of
