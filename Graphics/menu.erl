@@ -1,15 +1,10 @@
 -module(menu).
--export([start/0, send/2]).
-%% TODO: this file and it's python still need work
-%% Need to close the python and this process ~0.5s after choosing playmode (bot/human)
-%% or the time-to-choose expired.
-%% moreover, I need to look at the python to see if there are any problem and understand
-%% what is going on there.
+-export([start/0, send/2, send_to_gn_start/1]).
 
 start() ->
     Port = open_port({spawn, "python3 PWF2_GN_GUI.py"}, [binary, exit_status]),
     send(Port, "show_main_menu"),
-    loop(Port, []).
+    loop(Port, idle).
 
 send(Port, Command) ->
     Port ! {self(), {command, list_to_binary(Command ++ "\n")}}.
@@ -22,7 +17,11 @@ loop(Port, Status) ->
         {Port, {data, Data}} ->
             Message = binary_to_list(Data),
             io:format("GUI replied: ~s~n", [Message]),
-            handle_gui_event(Port, string:trim(Message));
+            NewStatus = handle_gui_event(Port, string:trim(Message), Status),
+            case NewStatus of
+                terminate -> ok; % Process should end
+                _ -> loop(Port, NewStatus) % Continue with new status
+            end;
 
         {Port, {exit_status, StatusMsg}} ->
             io:format("GUI exited with status ~p~n", [StatusMsg]),
@@ -41,51 +40,73 @@ loop(Port, Status) ->
 
     end.
 
-handle_gui_event(Port, "play_clicked") ->
+handle_gui_event(Port, "play_clicked", _Status) ->
     io:format("User clicked Play — waiting for GN connections...~n"),
-    send(Port, "show_loading"),
+    send(Port, "show_waiting:0"),
     send_to_gn_start({play_clicked}),
-    loop(Port, connecting);
+    connecting;
     
-handle_gui_event(Port, "exit_clicked") ->
+handle_gui_event(Port, "exit_clicked", _Status) ->
     io:format("User clicked Exit — exiting~n"),
-    port_close(Port),
     send_to_gn_start({exit_clicked}),
-    loop(Port, []); % remove status
-    ok;
+    port_close(Port),
+    terminate;
 
-handle_gui_event(Port, "retry_clicked") ->
+handle_gui_event(Port, "retry_clicked", _Status) ->
     io:format("Retrying — waiting for GN connections again~n"),
-    send(Port, "show_loading"),
+    send(Port, "show_waiting:0"),
     send_to_gn_start({play_clicked}),
-    loop(Port, connecting);
+    connecting;
 
-handle_gui_event(Port, "return_to_menu") ->
-    send(Port, "show_main_menu");
+handle_gui_event(Port, "return_to_menu", _Status) ->
+    send(Port, "show_main_menu"),
+    idle;
 
-handle_gui_event(Port, "play_game_clicked") ->
+handle_gui_event(Port, "play_game_clicked", _Status) ->
     io:format("User chose to play the game~n"),
     send(Port, "show_game_setup"),
     send_to_gn_start({play_as_human}),
     timer:sleep(3000), % Simulate game setup time
-    start_game(Port, false); % false = human player
+    start_game(Port, false), % false = human player
+    %% Close port and process 1 second after playmode selection
+    spawn(fun() ->
+        timer:sleep(1000),
+        port_close(Port),
+        exit(normal)
+    end),
+    terminate;
 
-handle_gui_event(Port, "bot_clicked") ->
+handle_gui_event(Port, "bot_clicked", _Status) ->
     io:format("User chose bot mode~n"),
     send(Port, "show_game_setup"),
     send_to_gn_start({play_as_bot}),
     timer:sleep(3000), % Simulate game setup time
-    start_game(Port, true); % true = bot mode
+    start_game(Port, true), % true = bot mode
+    %% Implement TODO: Close port and process after playmode selection
+    spawn(fun() ->
+        timer:sleep(1000),
+        port_close(Port),
+        exit(normal)
+    end),
+    terminate;
 
-handle_gui_event(Port, "choice_timeout") ->
+handle_gui_event(Port, "choice_timeout", _Status) ->
     io:format("Player choice timed out — defaulting to bot~n"),
     send(Port, "show_game_setup"),
     send_to_gn_start({play_as_bot}),
     timer:sleep(3000),
-    start_game(Port, true); % default to bot
+    start_game(Port, true), % default to bot
+    %% Implement TODO: Close port and process after timeout
+    spawn(fun() ->
+        timer:sleep(1000),
+        port_close(Port),
+        exit(normal)
+    end),
+    terminate;
 
-handle_gui_event(_, Unknown) ->
-    io:format("Unhandled message: ~p~n", [Unknown]).
+handle_gui_event(_, Unknown, Status) ->
+    io:format("Unhandled message: ~p~n", [Unknown]),
+    Status. % Return current status unchanged
 
 %% Wait for all GN connections (CN already started)
 wait_for_gn_connections(Port) ->
