@@ -153,7 +153,7 @@ handle_cast(_Msg, State) ->
 %%%================== handle info ==================
 %% @doc Initialization of GN_data - sets up the links to all gn_servers
 handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
-    GN_pids_list = link_GNs_loop(list:seq(1, length(GN_playmode_list))),
+    GN_pids_list = link_GNs_loop(lists:seq(1, length(GN_playmode_list))),
     CN_data = lists:map(
         fun(Index) -> 
             Individual_table_names = generate_table_names(Index),
