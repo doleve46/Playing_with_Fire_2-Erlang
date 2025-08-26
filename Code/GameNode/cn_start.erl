@@ -11,7 +11,7 @@
 
 %% API
 -export([cn_bootstrap/1, discover_GNs/1, discover_GNs_improved/1]).
--export([start/1, initial_mnesia_load/1]).
+-export([start/1, initial_mnesia_load/2]).
 
 %% ! NOTE: when terminating, need to use application:stop(mnesia)
 %% ! NOTE: for super-massive debugging use sys:trace(Pid, true).

@@ -2,7 +2,10 @@
 -export([start/0, send/2, send_to_gn_start/1]).
 
 start() ->
-    Port = open_port({spawn, "python3 PWF2_GN_GUI.py"}, [binary, exit_status]),
+    % Get the current directory
+    {ok, Cwd} = file:get_cwd(),
+    GuiPath = filename:join([Cwd, "src", "Graphics", "PWF2_GN_GUI.py"]),
+    Port = open_port({spawn, "python3 " ++ GuiPath}, [{cd, filename:dirname(GuiPath)}, binary, exit_status]),
     send(Port, "show_main_menu"),
     loop(Port, idle).
 
