@@ -103,7 +103,19 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     %% * From this point until the game actually starts, the GNs shouldn't be able to disconnect/crash.
     %% Initialize mnesia
     AllNodes = [node()] ++ ConnectedNodeNames,
-    application:set_env(mnesia, dir, "/home/dolev/Documents/mnesia_files"), % ! Change directory based on PC running on, critical for CN
+    %% ? OLD VERSION - WORKED
+    %application:set_env(mnesia, dir, "/home/dolev/Documents/mnesia_files"), % ! Change directory based on PC running on, critical for CN
+    %% Set flexible mnesia directory for Ubuntu deployment
+    MnesiaDir = filename:join([os:getenv("HOME"), "Desktop", "dolev_mnesia_files"]),
+    case filelib:ensure_dir(filename:join(MnesiaDir, "dummy")) of
+        ok -> 
+            application:set_env(mnesia, dir, MnesiaDir),
+            io:format("Mnesia directory set to: ~s~n", [MnesiaDir]);
+        {error, Reason} ->
+            io:format("Failed to create mnesia directory ~s: ~p~n", [MnesiaDir, Reason]),
+            error({mnesia_dir_creation_failed, Reason})
+    end,
+    
     mnesia:create_schema(AllNodes), % mnesia start-up requirement
     rpc:multicall(AllNodes, application, start, [mnesia]), % Starts mnesia on all nodes
     TableNamesList = lists:map(fun(X) ->
