@@ -180,7 +180,7 @@ convert_input_to_command(Input) ->
         q -> {ok, ignite_remote};   % 'q' for remote bomb ignition
         
         % Control commands
-        escape -> {ok, quit};  % Escape to quit
+        %escape -> {ok, quit};  % Escape to quit
         %% TODO: This is not implemented or supported at the moment - do we even allow to quit?
         
         _ -> invalid_input

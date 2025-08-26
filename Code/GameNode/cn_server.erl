@@ -36,7 +36,6 @@
 % Required module for QLC
 -include_lib("stdlib/include/qlc.hrl").
 
-%% todo: move this record (if it is even necessary) to the .hrl
 -record(gn_data, {
     pid,
     tiles,

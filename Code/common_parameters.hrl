@@ -26,9 +26,7 @@
 -define(MAX_ACTION_DELAY, 800).  % Maximum delay between bot actions (ms)
 -define(BOMB_PROBABILITY, 0.15). % Base probability of dropping bomb vs moving
 
-%%% ================== Naming from map generator ==================
-%% todo: There's a copy of them in the map_generator.erl for now. later on it should be removed and also reference this
-
+%%% ================== Naming Conventions ==================
 %% Tile type definitions
 -define(FREE, free).
 -define(BREAKABLE, breakable).

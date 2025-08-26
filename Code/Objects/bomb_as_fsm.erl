@@ -174,7 +174,7 @@ armed(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
         denied -> % movement denied
             {keep_state, StateData#bomb_state{direction = none}};
         {approved_switch_gn, _NewGN} -> % movement approved, need to switch GNs
-            {keep_state_and_data} % TODO: not implemented yet
+            {keep_state_and_data} % TODO: not implemented yet - bombs' movement support was stopped for now
     end;
 
 armed(cast, damage_taken, StateData = #bomb_state{}) ->
@@ -289,7 +289,7 @@ active_movement(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
             TempTime = calc_new_explode_delay(StateData),
             {next_state, armed, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode}]};
         {approved_switch_gn, _NewGN} -> % movement approved, need to switch GNs
-            {keep_state_and_data} % TODO: not implemented yet
+            {keep_state_and_data} % TODO: not implemented yet -  bombs' movement support was stopped for now
     end;
 
 active_movement(cast, damage_taken, StateData = #bomb_state{}) ->
@@ -345,7 +345,7 @@ remote_idle(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
         denied -> % movement denied
             {keep_state, StateData#bomb_state{direction = none}};
         {approved_switch_gn, _NewGN} -> % movement approved, need to switch GNs
-            {keep_state_and_data} % TODO: not implemented yet
+            {keep_state_and_data} % TODO: not implemented yet -  bombs' movement support was stopped for now
     end;
 
 remote_idle(cast, damage_taken, StateData = #bomb_state{}) ->
@@ -398,7 +398,7 @@ remote_armed(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
         denied -> % movement denied
             {keep_state, StateData#bomb_state{direction = none}};
         {approved_switch_gn, _NewGN} -> % movement approved, need to switch GNs
-            {keep_state_and_data} % TODO: not implemented yet
+            {keep_state_and_data} % TODO: not implemented yet -  bombs' movement support was stopped for now
     end;
 
 remote_armed(cast, damage_taken, StateData = #bomb_state{}) ->
@@ -482,7 +482,7 @@ remote_idle_movement(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) 
             UpdatedData = StateData#bomb_state{movement = false, direction = none},
             {next_state, remote_idle, UpdatedData};
         {approved_switch_gn, _NewGN} -> % movement approved, need to switch GNs
-            {keep_state_and_data} % TODO: not implemented yet
+            {keep_state_and_data} % TODO: not implemented yet -  bombs' movement support was stopped for now
     end;
 
 remote_idle_movement(cast, damage_taken, StateData = #bomb_state{}) ->
@@ -589,7 +589,7 @@ remote_armed_frozen_movement(cast, {reply_move_req, Answer}, StateData = #bomb_s
             UpdatedData = StateData#bomb_state{movement = false, direction = none},
             {next_state, remote_armed, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode}]};
         {approved_switch_gn, _NewGN} -> % movement approved, need to switch GNs
-            {keep_state_and_data} % TODO: not implemented yet
+            {keep_state_and_data} % TODO: not implemented yet -  bombs' movement support was stopped for now
     end;
 
 remote_armed_frozen_movement(cast, damage_taken, StateData = #bomb_state{}) ->

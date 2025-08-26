@@ -236,7 +236,7 @@ idle(cast, {update_target_gn, NewGN}, Data) ->
 
 idle(cast, {notify_power_up, PowerUp}, Data) ->
     %% Notify player FSM about relevant power-ups gathered
-    NewData = apply_powerup(PowerUp, Data), % TODO
+    NewData = apply_powerup(PowerUp, Data),
     {keep_state, NewData};
 
 idle(Type, Event, Data) ->

@@ -3,37 +3,10 @@
 -export([generate_map/0, generate_map/1, generate_map_with_powerups/0, generate_map_with_powerups/1,
          visualize_map/1, get_cell_at/3, export_map/2, test_generation/0]).
 
-%% Tile type definitions (now atoms)
--define(FREE, free).
--define(BREAKABLE, breakable).
--define(UNBREAKABLE, unbreakable).
--define(STRONG, strong).
--define(PLAYER_START, player_start).
-
-%% Power-up definitions (atoms)
--define(NO_POWERUP, none).
--define(MOVE_SPEED, move_speed).
--define(REMOTE_IGNITION, remote_ignition).
--define(REPEAT_BOMBS, repeat_bombs).
--define(KICK_BOMB, kick_bomb).
--define(PHASED, phased).
--define(PLUS_BOMBS, plus_bombs).
--define(BIGGER_EXPLOSION, bigger_explosion).
--define(PLUS_LIFE, plus_life).
--define(FREEZE_BOMB, freeze_bomb).
-
-%% Bomb type definitions (atoms)
--define(NO_BOMB, none).
--define(NORMAL_BOMB, normal_bomb).
--define(REMOTE_BOMB, remote_bomb).
--define(FREEZE_BOMB_ITEM, freeze_bomb_item).
-
-%% Player ID definitions (atoms)
--define(NO_PLAYER, none).
--define(PLAYER_1, player_1).
--define(PLAYER_2, player_2).
--define(PLAYER_3, player_3).
--define(PLAYER_4, player_4).
+%% linux compatible
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
+%% Windows compatible
+-include("../common_parameters.hrl").
 
 -define(MAP_SIZE, 16).
 

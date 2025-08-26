@@ -27,7 +27,7 @@ loop(Port, Status) ->
             io:format("GUI exited with status ~p~n", [StatusMsg]),
             send_to_gn_start({exit_clicked}); % simulating crash
 
-        {cn_start, connection_count, Count} when Status==connecting -> %% TODO
+        {cn_start, connection_count, Count} when Status==connecting ->
             io:format("Received connection count update: ~p~n", [Count]),
             send(Port, "update_connection_count:" ++ integer_to_list(Count)),
             loop(Port, connecting);
@@ -80,7 +80,7 @@ handle_gui_event(Port, "bot_clicked", _Status) ->
     send(Port, "show_game_setup"),
     send_to_gn_start({play_as_bot}),
     timer:sleep(3000), % Simulate game setup time
-    %% Implement TODO: Close port and process after playmode selection
+    %% Close port and process after playmode selection
     spawn(fun() ->
         timer:sleep(1000),
         port_close(Port),
@@ -93,7 +93,7 @@ handle_gui_event(Port, "choice_timeout", _Status) ->
     send(Port, "show_game_setup"),
     send_to_gn_start({play_as_bot}),
     timer:sleep(3000),
-    %% Implement TODO: Close port and process after timeout
+    %% Close port and process after timeout
     spawn(fun() ->
         timer:sleep(1000),
         port_close(Port),
