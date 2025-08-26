@@ -7,6 +7,7 @@
 %% This Process tries to monitor al 4 of them - when he is successful he sends a 'ready' 
 %% message to cn_server, and proceed to work as before.
 %% Added explosion visualization support with direct function call interface.
+%% TODO: Need to verify that a python port is created through cn_graphics and gn_graphics, and is responsive and works as intended.
 %%% ------------------------------------------------------------------------------------------------------
 %% API
 -export([start_link/1, get_current_map/0, show_explosion/1]).
@@ -48,19 +49,17 @@ start_link(GNNodes) ->
 %% Get current map state
 -spec get_current_map() -> term().
 get_current_map() ->
-    gen_server:call({global, ?MODULE}, get_current_map).
+    gen_server:call(?MODULE, get_current_map).
 
 %% Direct function to show explosions - called directly from cn_server
 -spec show_explosion(list()) -> ok.
 show_explosion(Coordinates) ->
-    Timestamp = erlang:system_time(millisecond),
-    ExpiryTime = Timestamp + ?EXPLOSION_DISPLAY_TIME,
     
     io:format("💥 Direct explosion call: ~w coordinates will display for ~wms~n", 
               [length(Coordinates), ?EXPLOSION_DISPLAY_TIME]),
     
     %% Add explosions directly to the server state
-    gen_server:cast({global, ?MODULE}, {add_explosions_direct, Coordinates, ExpiryTime}),
+    gen_server:cast(?MODULE, {add_explosions_direct, Coordinates}),
     ok.
 
 %%%===================================================================
@@ -111,8 +110,10 @@ handle_cast(force_update, State) ->
     {noreply, UpdatedState};
 
 %% Handle direct explosion additions
-handle_cast({add_explosions_direct, Coordinates, ExpiryTime}, State) ->
-    %% Add all explosion coordinates with expiry time
+handle_cast({add_explosions_direct, Coordinates}, State) ->
+    %% Add all explosion coordinates with expiration time
+    Timestamp = erlang:system_time(millisecond),
+    ExpiryTime = Timestamp + ?EXPLOSION_DISPLAY_TIME,
     NewExplosions = lists:foldl(fun(Coord, AccMap) ->
         maps:put(Coord, ExpiryTime, AccMap)
     end, State#state.active_explosions, Coordinates),
@@ -813,7 +814,7 @@ gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
         if
             length(ServersNotFound) =/= 0 ->
                 io:format("❌ Failed to monitor ~p servers. The following were not monitored:~w~n", [length(ServersNotFound), ServersNotFound]),
-                NewRefs = attempt_gn_graphics_monitoring(ServersNotFound),
+                NewRefs = monitor_gn_graphics_servers(ServersNotFound),
                 NewRefs ++ RefsList;
             true -> % every server was successfully monitored
                 io:format("✅ All GN graphics server were monitored successfully!~n"),
