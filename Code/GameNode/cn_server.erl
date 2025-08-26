@@ -237,7 +237,7 @@ bomb_explosion_handler(Coord, Radius) ->
     {atomic, ResultList} = calculate_explosion_reach(Coord, Radius),
     %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
     %% ResultList can be passed to the graphics server so it knows where to show an explosion
-    cn_server_graphics:show_explosion(ResultList),
+    cn_server_graphics:show_explosion(lists:flatten(ResultList)),
     %% Sends inflict_damage messages to all objects affected by the explosion
     notify_affected_objects(ResultList).
 
