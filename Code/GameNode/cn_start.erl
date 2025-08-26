@@ -237,3 +237,78 @@ create_tables(GN_node, CN_node, Node_number) ->
     ]),
     io:format("CN: full printout of create_tables for node number #~w:~ntiles: ~w~nbombs: ~w~npowerups: ~w~nplayers: ~w~n", 
         [Node_number,Debug1 ,Debug2, Debug3, Debug4]).
+
+
+%% @doc awaits mnesia table's finalized setup, then inserts the generated map-state to the tables
+initial_mnesia_load(TableNamesList, Map) ->
+    mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % ? timeout is 5000ms for now
+    insert_map_to_database(Map),
+    io:format("*Initial map state loaded successfully to mnesia tables~n").
+
+insert_map_to_database(Map) ->
+    % full map size - 16x16 [0->15][0->15]
+    lists:foreach(fun(X) ->
+            lists:foreach(fun(Y) ->
+                {TileType, PowerupType, _BombType, PlayerID} = get_tile_content(X,Y, Map),
+                if
+                    TileType == player_start -> % player at this location
+                        init_player([X,Y], PlayerID);
+                    TileType =/= free -> % tile "exists"
+                        insert_tile([X,Y], TileType, PowerupType);
+                    true -> ok % empty tiles aren't stored in database
+                end
+            end,
+            lists:seq(0,15)) end,
+        lists:seq(0,15)),
+    ok.
+
+%% lessen my suffering in getting content of [X,Y]
+get_tile_content(Pos_x, Pos_y, Map) ->
+    array:get(Pos_y, array:get(Pos_x, Map)).
+
+%% inserts the tile to its appropriate position
+insert_tile(Position=[X,Y], Type, Contains) ->
+%% inserts tile to appropriate table - synchronously
+    %% Map partitioning:
+    %% __________
+    %%| GN1| GN2|
+    %% ---------
+    %%| GN3| GN4|
+    %%-----------
+    F = fun() ->
+        Inserted_record = #mnesia_tiles{position = Position, type = Type, contains = Contains},
+        case true of
+            _ when X >= 0, X =< 7 , Y > 7 , Y =< 15 -> % GN1
+                mnesia:write(gn1_tiles, Inserted_record, write);
+            _ when X > 7, X =< 15 , Y > 7 , Y =< 15 -> % GN2
+                mnesia:write(gn2_tiles, Inserted_record, write);
+            _ when X >= 0 , X =< 7 , Y >= 0 , Y =< 7 -> % GN3
+                mnesia:write(gn3_tiles, Inserted_record, write);
+            _ when X > 7 , X =< 15 , Y >= 0 , Y =< 7 -> % GN4
+                mnesia:write(gn4_tiles, Inserted_record, write)
+        end end,
+        mnesia:activity(transaction, F).
+
+%% Initialize a player in the appropriate mnesia player table
+init_player([X,Y], PlayerID) ->
+    Fun = fun() ->
+        Init_player_record = #mnesia_players{
+            player_number = list_to_integer([lists:nth(8, atom_to_list(PlayerID))]),
+            position = [X,Y],
+            direction = none,
+            movement = false
+        },
+        case PlayerID of
+            'player_1' ->
+                mnesia:write(gn1_players, Init_player_record, write);
+            'player_2' ->
+                mnesia:write(gn2_players, Init_player_record, write);
+            'player_3' ->
+                mnesia:write(gn3_players, Init_player_record, write);
+            'player_4' ->
+                mnesia:write(gn4_players, Init_player_record, write)
+        end end,
+    io:format("CN: initialized a player entry ~w at location ~w~n",[PlayerID, [X,Y]]),
+    mnesia:activity(transaction, Fun).
+
+%% --------------------------------------------------------------
