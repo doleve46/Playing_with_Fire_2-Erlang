@@ -370,14 +370,21 @@ link_GNs_loop(NodeNumbers) ->
 link_with_retry(GN_server_name, RetryCount) when RetryCount > 4 ->
     erlang:error({link_failed_after_retries, GN_server_name, RetryCount});
 link_with_retry(GN_server_name, RetryCount) ->
-    try
-       Pid = whereis(GN_server_name),
-       link(Pid),
-       io:format("Successfully linked to ~p~n", [GN_server_name]),
-       Pid
-    catch
-       _:_ ->
-          io:format("Failed to link to ~p, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
-          timer:sleep(500),
-          link_with_retry(GN_server_name, RetryCount + 1)
+    Pid = whereis(GN_server_name),
+    case Pid of
+        undefined ->
+            io:format("Process ~p not found, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+            timer:sleep(500),
+            link_with_retry(GN_server_name, RetryCount + 1);
+        _ ->
+            try
+                link(Pid),
+                io:format("Successfully linked to ~p~n", [GN_server_name]),
+                Pid
+            catch
+                _:_ ->
+                    io:format("Failed to link to ~p, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+                    timer:sleep(500),
+                    link_with_retry(GN_server_name, RetryCount + 1)
+            end
     end.
