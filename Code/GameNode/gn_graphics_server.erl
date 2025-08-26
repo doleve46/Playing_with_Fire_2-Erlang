@@ -19,7 +19,8 @@
     last_update_time = 0,       % Track when we last received an update
     local_gn_name,              % This GN's identifier (gn1, gn2, gn3, gn4)
     backend_timing = #{},       % Backend timing constants received from CN
-    local_player_ids = []       % Player IDs that belong to this GN
+    local_player_ids = [],      % Player IDs that belong to this GN
+    active_explosions = #{}     % Track active explosions received from CN
 }).
 
 %%%===================================================================
@@ -67,12 +68,16 @@ handle_call(get_current_map, _From, State) ->
 handle_call(get_dead_players, _From, State) ->
     {reply, State#state.dead_players, State};
 
+handle_call(get_active_explosions, _From, State) ->
+    {reply, State#state.active_explosions, State};
+
 handle_call(get_local_info, _From, State) ->
     LocalInfo = #{
         local_gn => State#state.local_gn_name,
         local_players => State#state.local_player_ids,
         backend_timing => State#state.backend_timing,
-        update_counter => State#state.update_counter
+        update_counter => State#state.update_counter,
+        active_explosions_count => maps:size(State#state.active_explosions)
     },
     {reply, LocalInfo, State};
 
@@ -84,12 +89,13 @@ handle_cast({map_update, EnhancedMapState}, State) ->
     % Received enhanced map update from CN graphics server
     CurrentTime = erlang:system_time(millisecond),
     
-    % Handle enhanced format with timing and death information
-    {ActualMapState, DeadPlayers, BackendTiming} = case EnhancedMapState of
-        #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing} ->
-            % New enhanced format with death information and backend timing
-            io:format("🗺️ GN received enhanced map update from CN (#~w) with timing & death info~n", 
-                      [State#state.update_counter + 1]),
+    % Handle enhanced format with timing, death, and explosion information
+    {ActualMapState, DeadPlayers, BackendTiming, ActiveExplosions} = case EnhancedMapState of
+        #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing, active_explosions := Explosions} ->
+            % Full enhanced format with explosions
+            ExplosionCount = maps:size(Explosions),
+            io:format("🗺️ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
+                      [State#state.update_counter + 1, ExplosionCount]),
             
             % Check for newly dead players
             NewDeaths = maps:filter(fun(PlayerID, _DeathInfo) ->
@@ -111,17 +117,36 @@ handle_cast({map_update, EnhancedMapState}, State) ->
             true -> ok
             end,
             
-            {GridData, DeadPlayersMap, Timing};
+            % Log new explosions
+            PreviousExplosions = maps:size(State#state.active_explosions),
+            if ExplosionCount > PreviousExplosions ->
+                NewExplosionCount = ExplosionCount - PreviousExplosions,
+                io:format("💥 ~w new explosions received from CN~n", [NewExplosionCount]);
+            ExplosionCount < PreviousExplosions ->
+                ExpiredCount = PreviousExplosions - ExplosionCount,
+                io:format("💨 ~w explosions expired~n", [ExpiredCount]);
+            true -> ok
+            end,
+            
+            {GridData, DeadPlayersMap, Timing, Explosions};
+            
+        #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing} ->
+            % Enhanced format without explosions
+            io:format("🗺️ GN received enhanced map update from CN (#~w) with timing & death info~n", 
+                      [State#state.update_counter + 1]),
+            {GridData, DeadPlayersMap, Timing, State#state.active_explosions};
+            
         #{map := GridData, dead_players := DeadPlayersMap} ->
-            % Format without backend timing
+            % Format without backend timing or explosions
             io:format("🗺️ GN received map update from CN (#~w) with death info~n", 
                       [State#state.update_counter + 1]),
-            {GridData, DeadPlayersMap, State#state.backend_timing};
+            {GridData, DeadPlayersMap, State#state.backend_timing, State#state.active_explosions};
+            
         _ ->
             % Old format - just the grid
             io:format("🗺️ GN received basic map update from CN (#~w)~n", 
                       [State#state.update_counter + 1]),
-            {EnhancedMapState, State#state.dead_players, State#state.backend_timing}
+            {EnhancedMapState, State#state.dead_players, State#state.backend_timing, State#state.active_explosions}
     end,
     
     % Create enhanced data for local Python visualizer with GN-specific information
@@ -131,7 +156,8 @@ handle_cast({map_update, EnhancedMapState}, State) ->
         update_time => CurrentTime,
         local_gn => State#state.local_gn_name,
         local_players => State#state.local_player_ids,
-        backend_timing => BackendTiming
+        backend_timing => BackendTiming,
+        active_explosions => ActiveExplosions
     },
     
     send_enhanced_map_to_python(State#state.python_port, LocalEnhancedMapData),
@@ -140,6 +166,7 @@ handle_cast({map_update, EnhancedMapState}, State) ->
         current_map_state = LocalEnhancedMapData,
         dead_players = DeadPlayers,
         backend_timing = BackendTiming,
+        active_explosions = ActiveExplosions,
         update_counter = State#state.update_counter + 1,
         last_update_time = CurrentTime
     },
@@ -169,7 +196,8 @@ handle_cast(force_update, State) ->
         undefined ->
             io:format("⚠️ No enhanced map state available for force update~n");
         MapState ->
-            io:format("🔄 Force updating Python with current enhanced map state~n"),
+            ExplosionCount = maps:size(State#state.active_explosions),
+            io:format("🔄 Force updating Python with current enhanced map state (~w explosions)~n", [ExplosionCount]),
             send_enhanced_map_to_python(State#state.python_port, MapState)
     end,
     {noreply, State};
@@ -286,7 +314,7 @@ create_enhanced_python_port(LocalGN) ->
         % Set environment variable to identify which GN this is
         os:putenv("GN_ID", atom_to_list(LocalGN)),
         
-        % Use the enhanced Python visualizer for GN nodes with death detection
+        % Use the enhanced Python visualizer for GN nodes with death and explosion detection
         Port = open_port({spawn, "python3 enhanced_gn_map_live.py"}, 
                         [binary, exit_status, {packet, 4}]),
         io:format("✅ Enhanced Python visualizer port created for ~w~n", [LocalGN]),
@@ -310,6 +338,20 @@ send_enhanced_map_to_python(Port, MapState) ->
         
         % Log details about what we're sending (less frequent to reduce spam)
         case MapState of
+            #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing, active_explosions := Explosions} ->
+                DeadCount = maps:size(DeadPlayers),
+                ExplosionCount = maps:size(Explosions),
+                TimingKeys = maps:keys(Timing),
+                % Only log every 40 updates (every 2 seconds at 50ms intervals)
+                case get(log_counter) of
+                    undefined -> put(log_counter, 1);
+                    Counter when Counter >= 40 ->
+                        io:format("📤 Enhanced map forwarded to Python visualizer (~w, dead: ~w, explosions: ~w, timing: ~w)~n", 
+                                 [LocalGN, DeadCount, ExplosionCount, TimingKeys]),
+                        put(log_counter, 1);
+                    Counter ->
+                        put(log_counter, Counter + 1)
+                end;
             #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing} ->
                 DeadCount = maps:size(DeadPlayers),
                 TimingKeys = maps:keys(Timing),
@@ -393,6 +435,7 @@ get_enhanced_state_statistics(State) ->
         local_players => State#state.local_player_ids,
         update_counter => State#state.update_counter,
         dead_players_count => maps:size(State#state.dead_players),
+        active_explosions_count => maps:size(State#state.active_explosions),
         last_update_time => State#state.last_update_time,
         has_map_state => State#state.current_map_state =/= undefined,
         has_python_port => State#state.python_port =/= undefined,
@@ -408,6 +451,7 @@ debug_enhanced_state(State) ->
     io:format("   Local Players: ~w~n", [maps:get(local_players, Stats)]),
     io:format("   Update Counter: ~w~n", [maps:get(update_counter, Stats)]),
     io:format("   Dead Players: ~w~n", [maps:get(dead_players_count, Stats)]),
+    io:format("   Active Explosions: ~w~n", [maps:get(active_explosions_count, Stats)]),
     io:format("   Has Map State: ~w~n", [maps:get(has_map_state, Stats)]),
     io:format("   Has Python Port: ~w~n", [maps:get(has_python_port, Stats)]),
     io:format("   Has Backend Timing: ~w~n", [maps:get(has_backend_timing, Stats)]),
@@ -422,6 +466,16 @@ debug_enhanced_state(State) ->
             LocalStr = if IsLocal -> " (LOCAL)"; true -> "" end,
             io:format("      Player ~w died at ~w on ~w~s~n", [PlayerID, DeathTime, LocalGNAtom, LocalStr])
         end, ok, State#state.dead_players);
+    true -> ok
+    end,
+    
+    % Show active explosions if any
+    if maps:get(active_explosions_count, Stats) > 0 ->
+        io:format("   💥 Active Explosions:~n"),
+        maps:fold(fun(Coord, ExpiryTime, _Acc) ->
+            TimeLeft = ExpiryTime - erlang:system_time(millisecond),
+            io:format("      ~w expires in ~wms~n", [Coord, TimeLeft])
+        end, ok, State#state.active_explosions);
     true -> ok
     end,
     
@@ -443,3 +497,17 @@ get_local_dead_players(State) ->
     maps:filter(fun(PlayerID, _DeathInfo) ->
         is_local_player(PlayerID, State)
     end, State#state.dead_players).
+
+%% Check if there are any active explosions in this GN's area
+has_local_explosions(State) ->
+    maps:size(State#state.active_explosions) > 0.
+
+%% Get explosion statistics for this GN
+get_explosion_stats(State) ->
+    CurrentTime = erlang:system_time(millisecond),
+    #{
+        total_explosions => maps:size(State#state.active_explosions),
+        expiring_soon => maps:size(maps:filter(fun(_Coord, ExpiryTime) ->
+            (ExpiryTime - CurrentTime) < 200  % Less than 200ms left
+        end, State#state.active_explosions))
+    }.
