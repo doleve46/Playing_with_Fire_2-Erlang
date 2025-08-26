@@ -102,7 +102,7 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     ConnectedNodeNames),
     %% * From this point until the game actually starts, the GNs shouldn't be able to disconnect/crash.
     %% Initialize mnesia
-    AllNodes = node() ++ ConnectedNodeNames,
+    AllNodes = [node()] ++ ConnectedNodeNames,
     application:set_env(mnesia, dir, "/home/dolev/Documents/mnesia_files"), % ! Change directory based on PC running on, critical for CN
     mnesia:create_schema(AllNodes), % mnesia start-up requirement
     rpc:multicall(AllNodes, application, start, [mnesia]), % Starts mnesia on all nodes
