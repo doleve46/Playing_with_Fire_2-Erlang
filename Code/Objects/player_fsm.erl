@@ -113,7 +113,15 @@ callback_mode() ->
     state_functions.
 
 init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
-    {_, GN_registered_name} = process_info(GN_Pid, registered_name),
+    % Get GN name - handle both local and global registration
+    GN_registered_name = case process_info(GN_Pid, registered_name) of
+        {registered_name, LocalName} -> 
+            LocalName;  % locally registered
+        [] -> 
+            % Not locally registered, check if it's globally registered
+            % For GN servers, construct the expected global name
+            list_to_atom("GN" ++ integer_to_list(PlayerNumber) ++ "_server")
+    end,
     Data = #player_data{
         player_number = PlayerNumber,
         local_gn = GN_registered_name,

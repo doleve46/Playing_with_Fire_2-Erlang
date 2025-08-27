@@ -43,4 +43,4 @@ echo "Commands will be executed automatically. Press Ctrl+C to exit when done."
 sleep 1
 
 # Use timeout to give the shell time to start, then send the command
-rebar3 shell --name "CN@$IP_ADDRESS" --setcookie 12345 --eval cn_start:cn_bootstrap("132.72.81.").
+rebar3 shell --name "CN@$IP_ADDRESS" --setcookie 12345 --eval 'cn_start:cn_bootstrap("132.72.81.").'
