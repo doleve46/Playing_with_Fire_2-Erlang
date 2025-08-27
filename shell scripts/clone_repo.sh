@@ -1,20 +1,24 @@
 #!/bin/bash
 
-# Target directory (must already exist)
+# Target directory (your rebar3 project folder)
 TARGET_DIR="/home/csestudent/Desktop/dolev_roi/playing_with_fire/src"
 
 # Repo URL
 REPO_URL="https://github.com/roialus/Playing_with_Fire_2-Earlang.git"
 
-# Enter the directory
-cd "$TARGET_DIR" || { echo "Directory $TARGET_DIR not found."; exit 1; }
+# Temporary directory
+TMP_DIR=$(mktemp -d)
 
-# Clone the repo into this directory
-git clone "$REPO_URL" .
+# Clone repo into temp dir
+git clone "$REPO_URL" "$TMP_DIR" || { echo "Failed to clone repository."; exit 1; }
 
-# Print result
-if [ $? -eq 0 ]; then
-    echo "Repository successfully cloned into $TARGET_DIR"
-else
-    echo "Failed to clone repository."
-fi
+# Copy contents (excluding .git) into target dir
+shopt -s dotglob
+cp -r "$TMP_DIR"/* "$TARGET_DIR"/
+shopt -u dotglob
+
+# Cleanup
+rm -rf "$TMP_DIR"
+
+echo "Repository contents merged into $TARGET_DIR"
+# Note: This script assumes the target directory already exists and is a rebar3 project.
