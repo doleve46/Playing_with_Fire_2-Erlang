@@ -26,7 +26,7 @@
 %% --------------------------------------------------------------
 cn_bootstrap(IP_prefix) ->
     %% Discover all GNs in the local network
-    GN_list = discover_GNs(IP_prefix),
+    GN_list = discover_GNs_improved(IP_prefix),
     io:format("Discovered GN nodes: ~p~n", [GN_list]),
     spawn(cn_start, start, [GN_list]). % spawn cn_start process
 

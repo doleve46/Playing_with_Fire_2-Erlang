@@ -33,9 +33,9 @@ start() ->
     NodeName = atom_to_list(node()),
     GNNumber = list_to_integer([lists:nth(3, NodeName)]),
     %% Left the loop after sending response to playmode (bot/human)
-    %% Spawn gn_server and gn_server_graphics
+    %% Spawn gn_server and gn_graphics_server
     {ok, _Pid_gn_server} = gn_server:start_link({GNNumber, IsBot}),
-    {ok, _Pid_gn_server_graphics} = gn_server_graphics:start_link(NodeName).
+    {ok, _Pid_gn_graphics_server} = gn_graphics_server:start_link(NodeName).
 
 gn_receive_loop(Menu_Pid) ->
     receive
