@@ -439,14 +439,38 @@ class CompleteGameVisualizer:
         return grid
 
     def load_complete_game_state(self):
-        """Load complete game state from Erlang unified grid format"""
-        print("🔄 Loading complete game state...")
+        """Load complete game state - tries multiple file paths for compatibility"""
+        print("🔄 Loading game state...")
 
-        # Try to read from Erlang file first
-        erlang_grid = self.parse_erlang_map_file("test_unified_map.erl")
-
-        # Parse the complete game state
-        return self.parse_complete_game_state(erlang_grid)
+        # Try multiple possible paths for the Erlang map file
+        possible_paths = [
+            "src/Code/Map/test_unified_map.erl",
+            "Code/Map/test_unified_map.erl", 
+            "test_unified_map.erl",
+            "Map/test_unified_map.erl"
+        ]
+        
+        for path in possible_paths:
+            try:
+                erlang_grid = self.parse_erlang_map_file(path)
+                print(f"✅ Successfully loaded game state from: {path}")
+                return self.parse_complete_game_state(erlang_grid)
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                print(f"⚠️ Error parsing {path}: {e}")
+                continue
+        
+        # If no file found, return default empty state
+        print("⚠️ No map file found, using default empty state")
+        return {
+            'tiles': [[0 for _ in range(MAP_SIZE)] for _ in range(MAP_SIZE)],
+            'powerups': [['none' for _ in range(MAP_SIZE)] for _ in range(MAP_SIZE)],
+            'bombs': [],  # List of active bombs with timers
+            'players': [],  # Current player positions and status
+            'explosions': [],  # Active explosion areas
+            'game_info': {'time': 0, 'round': 1, 'status': 'waiting_for_data'}
+        }
 
     def parse_complete_game_state(self, erlang_grid):
         """Parse complete game state including bombs, players, explosions"""
@@ -599,14 +623,31 @@ class CompleteGameVisualizer:
     def check_file_changes(self):
         """Check if the map file has been modified and reload if needed"""
         try:
-            current_time = os.path.getmtime("test_unified_map.erl")
+            current_time = os.path.getmtime("src/Code/Map/test_unified_map.erl")
             if hasattr(self, 'last_file_time') and current_time > self.last_file_time:
                 print("🔄 Game state file changed, reloading...")
                 self.reload_game_state()
             self.last_file_time = current_time
         except FileNotFoundError:
+            # If the file doesn't exist, try alternative paths
+            alternative_paths = [
+                "Code/Map/test_unified_map.erl",
+                "test_unified_map.erl",
+                "Map/test_unified_map.erl"
+            ]
+            for alt_path in alternative_paths:
+                try:
+                    current_time = os.path.getmtime(alt_path)
+                    if hasattr(self, 'last_file_time') and current_time > self.last_file_time:
+                        print("🔄 Game state file changed, reloading...")
+                        self.reload_game_state()
+                    self.last_file_time = current_time
+                    return  # Found and processed successfully
+                except FileNotFoundError:
+                    continue
+            # If we get here, none of the paths worked
             if hasattr(self, 'last_file_time'):
-                print("⚠️ Game state file not found")
+                print("⚠️ Game state file not found in any expected location")
         except Exception as e:
             print(f"⚠️ Error checking file: {e}")
 
@@ -2102,7 +2143,7 @@ class CompleteGameVisualizer:
         """Main game loop with complete live visualization"""
         print("🎮 Playing with Fire 2 - Complete Live Game Viewer Started!")
         print("🖱️ Click tiles to inspect | R to reload | ESC to exit | Resize window as needed")
-        print("📡 Monitoring: test_unified_map.erl for live updates")
+        print("📡 Receiving real-time updates from Erlang CN server")
 
         running = True
         while running:

@@ -80,7 +80,7 @@ init([GNNodes]) ->
     erlang:send_after(?TICK_DELAY, self(), monitor_gn_graphics_servers),
    
     % Create Python port
-    erlang:send(self(), create_python_port),
+    erlang:send_after(500, self(), create_python_port),
    
     % Start periodic updates (faster for better timer sync)
     erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
