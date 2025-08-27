@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1]).
+-export([start_link/1, generate_atom_table_names/2]).
 
 -export([get_registered_name/1]).
 
