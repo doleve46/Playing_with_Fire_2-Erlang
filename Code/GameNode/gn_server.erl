@@ -38,7 +38,7 @@
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link({GN_number, IsBot}) ->
     GN_name = list_to_atom("GN" ++ integer_to_list(GN_number) ++ "_server"),
-    gen_server:start_link({global, GN_name}, ?MODULE, [[GN_number, IsBot]], [{priority, high}]).
+    gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, IsBot], [{priority, high}]).
 
 %%%===================================================================
 %%% gen_server callbacks

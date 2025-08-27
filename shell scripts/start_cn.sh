@@ -39,16 +39,8 @@ fi
 echo "Starting Erlang shell with name GN1@$IP_ADDRESS..."
 echo "Will automatically run gn_start:start() after shell starts..."
 
-# Create a temporary script file
-cat > /tmp/erlang_commands.txt << 'EOF'
-cn_start:cn_bootstrap("132.72.81.").
-EOF
-
 echo "Commands will be executed automatically. Press Ctrl+C to exit when done."
 sleep 1
 
 # Use timeout to give the shell time to start, then send the command
-(sleep 1.5; cat /tmp/erlang_commands.txt; cat) | rebar3 shell --name "CN@$IP_ADDRESS" --setcookie 12345
-
-# Clean up
-rm -f /tmp/erlang_commands.txt
+rebar3 shell --name "CN@$IP_ADDRESS" --setcookie 12345 --eval cn_start:cn_bootstrap("132.72.81.").
