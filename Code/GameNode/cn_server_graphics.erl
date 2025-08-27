@@ -809,44 +809,29 @@ setup_mnesia_subscriptions(Tables) ->
     end, [], Tables).
 
 %% Monitor enhanced graphics servers on all GN nodes
--spec monitor_gn_graphics_servers(GNNodes::list()) -> [{reference(), atom()}].
 monitor_gn_graphics_servers(GNNodes)->
-    RefsList = attempt_gn_graphics_monitoring(GNNodes),
-    gn_monitoring_receive_loop(RefsList, []).
-
-gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
-    receive
-        {'DOWN', Ref, process, _Pid, noproc} ->
-            case lists:keyfind(Ref, 1, RefsList) of
-                false -> % unknown message - unsure what to do with it
-                    io:format("❌ *Unknown monitoring failure message received:~n~w~n",[{'DOWN', Ref, process, _Pid, noproc}]),
-                    gn_monitoring_receive_loop(RefsList, ServersNotFound);
-                {_, NodeName} -> % a monitoring to NodeName has failed - add to failed servers
-                    io:format("❌ *A monitoring request has failed on node ~w. Accumulating before retrying..~n",[NodeName]),
-                    gn_monitoring_receive_loop(lists:keydelete(Ref, 1, RefsList), [NodeName | ServersNotFound])
-            end;
-        AnythingElse -> % re-send to self in 5 seconds
-            erlang:send_after(5000, self(), AnythingElse),
-            gn_monitoring_receive_loop(RefsList, ServersNotFound)
-     after 1500 -> % timeout is 1.5sec
-        case length(ServersNotFound) =/= 0 of
-            true ->
-                io:format("❌ Failed to monitor ~p servers. The following were not monitored:~w~n", [length(ServersNotFound), ServersNotFound]),
-                NewRefs = monitor_gn_graphics_servers(ServersNotFound),
-                NewRefs ++ RefsList;
-            false -> % every server was successfully monitored
-                io:format("✅ All GN graphics server were monitored successfully!~n"),
-                RefsList
-         end
-    end.
-
-attempt_gn_graphics_monitoring(NodeList) ->
-    RefsList = lists:map(fun(Node) ->
-        Ref = erlang:monitor(process, {gn_graphics_server, Node}),
-        io:format("Sent request to monitor process ~w~n", [Node]),
-        {Ref, Node} end, NodeList),
-    timer:sleep(1000), % wait for 1 second before looking at the messages we received
-    RefsList.
+    % First, get the PIDs of the GN graphics servers
+    GNServerPids = lists:foldl(fun(Node, Acc) ->
+        case rpc:call(Node, erlang, whereis, [gn_graphics_server]) of
+            Pid when is_pid(Pid) ->
+                io:format("✅ Found GN graphics server on ~w: ~p~n", [Node, Pid]),
+                [{Node, Pid} | Acc];
+            undefined ->
+                io:format("⚠️ GN graphics server not found on ~w~n", [Node]),
+                Acc;
+            {badrpc, Reason} ->
+                io:format("❌ RPC failed for ~w: ~p~n", [Node, Reason]),
+                Acc
+        end
+    end, [], GNNodes),
+    
+    % Monitor the found processes
+    lists:foreach(fun({Node, Pid}) ->
+        Ref = erlang:monitor(process, Pid),
+        io:format("🔍 Monitoring GN graphics server ~p on ~w~n", [Pid, Node])
+    end, GNServerPids),
+    
+    GNServerPids.
 
 %% Create enhanced Python visualizer port
 create_python_visualizer_port() ->
