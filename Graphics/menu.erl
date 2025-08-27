@@ -67,40 +67,24 @@ handle_gui_event(Port, "return_to_menu", _Status) ->
 
 handle_gui_event(Port, "play_game_clicked", _Status) ->
     io:format("User chose to play the game~n"),
-    send(Port, "show_game_setup"),
     send_to_gn_start({play_as_human}),
-    % Close the menu GUI immediately after selection
-    send(Port, "close_gui"),
-    timer:sleep(500), % Brief delay for GUI to process close command
-    %% Close port and process after playmode selection
-    spawn(fun() ->
-        timer:sleep(500),
-        try 
-            port_close(Port)
-        catch 
-            _:_ -> ok  % Ignore port close errors
-        end,
-        exit(normal)
-    end),
+    % Close the port immediately to shut down the GUI
+    try 
+        port_close(Port)
+    catch 
+        _:_ -> ok  % Ignore port close errors
+    end,
     terminate;
 
 handle_gui_event(Port, "bot_clicked", _Status) ->
     io:format("User chose bot mode~n"),
-    send(Port, "show_game_setup"),
     send_to_gn_start({play_as_bot}),
-    % Close the menu GUI immediately after selection
-    send(Port, "close_gui"),
-    timer:sleep(500), % Brief delay for GUI to process close command
-    %% Close port and process after playmode selection
-    spawn(fun() ->
-        timer:sleep(500),
-        try 
-            port_close(Port)
-        catch 
-            _:_ -> ok  % Ignore port close errors
-        end,
-        exit(normal)
-    end),
+    % Close the port immediately to shut down the GUI
+    try 
+        port_close(Port)
+    catch 
+        _:_ -> ok  % Ignore port close errors
+    end,
     terminate;
 
 handle_gui_event(Port, "choice_timeout", _Status) ->

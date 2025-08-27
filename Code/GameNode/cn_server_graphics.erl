@@ -972,23 +972,26 @@ send_enhanced_map_to_python(State) ->
 
 %% Send enhanced map to all GN graphics servers
 send_enhanced_map_to_gn_servers(State) ->
+    GNCount = length(State#state.gn_graphics_servers),
+    io:format("🔄 CN attempting to send map update to ~w GN graphics servers~n", [GNCount]),
     lists:foreach(fun({Node, Pid}) ->
         case is_pid(Pid) andalso is_process_alive(Pid) of
             true ->
                 try
                     % Send enhanced map state with full backend information
                     gen_server:cast(Pid, {map_update, State#state.current_map_state}),
+                    io:format("📡 Map update sent to GN server on ~w~n", [Node]),
                     case State#state.update_counter rem 40 == 0 of  % Log every 2 seconds
                         true ->
                             ExplosionCount = maps:size(State#state.active_explosions),
                             io:format("📡 Enhanced map (with timers, FSM state & ~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
                         false -> ok
                     end
-            catch
-                _:Error ->
-                    io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
-            end;
-        false ->
-            io:format("⚠️ GN server on ~w not alive~n", [Node])
+                catch
+                    _:Error ->
+                        io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
+                end;
+            false ->
+                io:format("⚠️ GN server on ~w not alive or not found (Pid: ~p)~n", [Node, Pid])
         end
     end, State#state.gn_graphics_servers).
