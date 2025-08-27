@@ -10,7 +10,7 @@
 -author("dolev").
 
 %% API
--export([start/1]).
+-export([start/0]).
 
 %% ! NOTE: when terminating, need to use application:stop(mnesia)
 %% ! NOTE: for super-massive debugging use sys:trace(Pid, true).
@@ -22,7 +22,7 @@
 start() ->
     io:format("🚀 Starting GN initial startup process...~n"),
     %% Register the process locally
-    register(gn_start),
+    register(gn_start, self()),
     %% trap exits
     process_flag(trap_exit, true),
     %% Spawn the menu process
@@ -31,7 +31,7 @@ start() ->
     %% Enter receive loop
     IsBot = gn_receive_loop(Menu_Pid),
     NodeName = atom_to_list(node()),
-    GNNumber = list_to_integer([lists:nth(3, atom_to_list(Name))])
+    GNNumber = list_to_integer([lists:nth(3, NodeName)]),
     %% Left the loop after sending response to playmode (bot/human)
     %% Spawn gn_server and gn_server_graphics
     {ok, _Pid_gn_server} = gn_server:start_link({GNNumber, IsBot}),
@@ -61,14 +61,14 @@ handle_menu_request({play_clicked}, Menu_Pid) ->
 handle_menu_request({exit_clicked}, Menu_Pid) ->
     io:format("GN_start received exit_clicked request~n"),
     %% Forward the request to the cn_server
-    {cn_start} ! {self(), node(), disconnect_request};
+    {cn_start} ! {self(), node(), disconnect_request},
     gn_receive_loop(Menu_Pid);
-handle_menu_request({play_as_human}, Menu_Pid) ->
+handle_menu_request({play_as_human}, _Menu_Pid) ->
     io:format("GN_start received play_as_human request~n"),
     %% Forward the request to the cn_server
     {cn_start} ! {self(), playmode, false},
     false; % leave the loop
-handle_menu_request({play_as_bot}, Menu_Pid) ->
+handle_menu_request({play_as_bot}, _Menu_Pid) ->
     io:format("GN_start received play_as_bot request~n"),
     %% Forward the request to the cn_server
     {cn_start} ! {self(), playmode, true},
@@ -81,7 +81,7 @@ handle_menu_request(Unknown, Menu_Pid) ->
 handle_cn_start_request({connected_count, Count}, Menu_Pid) ->
     io:format("GN_start received connected_count update: ~p~n", [Count]),
     %% Forward the update to the menu process
-    Menu_Pid ! {cn_start, connected_count, Count};
+    Menu_Pid ! {cn_start, connection_count, Count};
 handle_cn_start_request({choose_playmode, are_you_bot}, Menu_Pid) ->
     io:format("GN_start received choose_playmode request~n"),
     %% Forward the request to the menu process

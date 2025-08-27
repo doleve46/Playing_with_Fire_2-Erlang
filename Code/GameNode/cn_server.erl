@@ -29,14 +29,13 @@
 %% Linux compatible
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %-include_lib("src/clean-repo/Code/Objects/object_records.hrl").
-%% Windows compatible
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+%% Windows compatible - Fixed relative paths
+-include("../Objects/object_records.hrl").
+-include("../common_parameters.hrl").
 
 % Required module for QLC
 -include_lib("stdlib/include/qlc.hrl").
 
-%% todo: move this record (if it is even necessary) to the .hrl
 -record(gn_data, {
     pid,
     tiles,
@@ -154,7 +153,7 @@ handle_cast(_Msg, State) ->
 %%%================== handle info ==================
 %% @doc Initialization of GN_data - sets up the links to all gn_servers
 handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
-    GN_pids_list = link_GNs_loop(list:seq(1, length(GN_playmode_list))),
+    GN_pids_list = link_GNs_loop(lists:seq(1, length(GN_playmode_list))),
     CN_data = lists:map(
         fun(Index) -> 
             Individual_table_names = generate_table_names(Index),
@@ -177,7 +176,7 @@ handle_info({graphics_ready, _GraphicsPid}, State) ->
     %% Notify all GN servers to start the game
     lists:foreach(fun(#gn_data{pid = Pid}) ->
         Pid ! start_game
-    end, State#gn_data),
+    end, State),
     {noreply, State};
 
 %% @doc Handles failure messages from the monitored processes
@@ -237,7 +236,8 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
 bomb_explosion_handler(Coord, Radius) ->
     {atomic, ResultList} = calculate_explosion_reach(Coord, Radius),
     %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
-    %% todo: ResultList can be passed to the graphics server so it knows where to show an explosion
+    %% ResultList can be passed to the graphics server so it knows where to show an explosion
+    cn_server_graphics:show_explosion(lists:flatten(ResultList)),
     %% Sends inflict_damage messages to all objects affected by the explosion
     notify_affected_objects(ResultList).
 
@@ -370,14 +370,21 @@ link_GNs_loop(NodeNumbers) ->
 link_with_retry(GN_server_name, RetryCount) when RetryCount > 4 ->
     erlang:error({link_failed_after_retries, GN_server_name, RetryCount});
 link_with_retry(GN_server_name, RetryCount) ->
-    try
-       Pid = whereis(GN_server_name),
-       link(Pid),
-       io:format("Successfully linked to ~p~n", [GN_server_name]),
-       Pid
-    catch
-       _:_ ->
-          io:format("Failed to link to ~p, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
-          timer:sleep(500),
-          link_with_retry(GN_server_name, RetryCount + 1)
+    Pid = whereis(GN_server_name),
+    case Pid of
+        undefined ->
+            io:format("Process ~p not found, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+            timer:sleep(500),
+            link_with_retry(GN_server_name, RetryCount + 1);
+        _ ->
+            try
+                link(Pid),
+                io:format("Successfully linked to ~p~n", [GN_server_name]),
+                Pid
+            catch
+                _:_ ->
+                    io:format("Failed to link to ~p, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+                    timer:sleep(500),
+                    link_with_retry(GN_server_name, RetryCount + 1)
+            end
     end.

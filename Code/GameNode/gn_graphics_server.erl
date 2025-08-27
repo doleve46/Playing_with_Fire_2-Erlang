@@ -8,7 +8,7 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--include("common_parameters.hrl").
+-include("../common_parameters.hrl").
 
 -record(state, {
     cn_node,                    % Central node
@@ -459,33 +459,36 @@ debug_enhanced_state(State) ->
     io:format("   Last Update: ~w~n", [maps:get(last_update_time, Stats)]),
     
     % Show dead players details
-    if maps:get(dead_players_count, Stats) > 0 ->
-        io:format("   💀 Dead Players Details:~n"),
-        maps:fold(fun(PlayerID, {DeathTime, _LastState, LocalGNAtom}, _Acc) ->
-            IsLocal = lists:member(PlayerID, State#state.local_player_ids),
-            LocalStr = if IsLocal -> " (LOCAL)"; true -> "" end,
-            io:format("      Player ~w died at ~w on ~w~s~n", [PlayerID, DeathTime, LocalGNAtom, LocalStr])
-        end, ok, State#state.dead_players);
-    true -> ok
+    case maps:get(dead_players_count, Stats) > 0 of
+        true ->
+            io:format("   💀 Dead Players Details:~n"),
+            maps:fold(fun(PlayerID, {DeathTime, _LastState, LocalGNAtom}, _Acc) ->
+                IsLocal = lists:member(PlayerID, State#state.local_player_ids),
+                LocalStr = if IsLocal -> " (LOCAL)"; true -> "" end,
+                io:format("      Player ~w died at ~w on ~w~s~n", [PlayerID, DeathTime, LocalGNAtom, LocalStr])
+            end, ok, State#state.dead_players);
+        false -> ok
     end,
     
     % Show active explosions if any
-    if maps:get(active_explosions_count, Stats) > 0 ->
-        io:format("   💥 Active Explosions:~n"),
-        maps:fold(fun(Coord, ExpiryTime, _Acc) ->
-            TimeLeft = ExpiryTime - erlang:system_time(millisecond),
-            io:format("      ~w expires in ~wms~n", [Coord, TimeLeft])
-        end, ok, State#state.active_explosions);
-    true -> ok
+    case maps:get(active_explosions_count, Stats) > 0 of
+        true ->
+            io:format("   💥 Active Explosions:~n"),
+            maps:fold(fun(Coord, ExpiryTime, _Acc) ->
+                TimeLeft = ExpiryTime - erlang:system_time(millisecond),
+                io:format("      ~w expires in ~wms~n", [Coord, TimeLeft])
+            end, ok, State#state.active_explosions);
+        false -> ok
     end,
     
     % Show backend timing if available
-    if maps:size(State#state.backend_timing) > 0 ->
-        io:format("   ⏱️ Backend Timing Constants:~n"),
-        maps:fold(fun(Key, Value, _Acc) ->
-            io:format("      ~w: ~w ms~n", [Key, Value])
-        end, ok, State#state.backend_timing);
-    true -> ok
+    case maps:size(State#state.backend_timing) > 0 of
+        true ->
+            io:format("   ⏱️ Backend Timing Constants:~n"),
+            maps:fold(fun(Key, Value, _Acc) ->
+                io:format("      ~w: ~w ms~n", [Key, Value])
+            end, ok, State#state.backend_timing);
+        false -> ok
     end.
 
 %% Check if a player is local to this GN

@@ -21,7 +21,7 @@
 %% linux compatible
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %% Windows compatible
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+-include("../common_parameters.hrl").
 
 -include("object_records.hrl").
 
@@ -33,7 +33,7 @@
 
 %% @doc Spawns the server and registers the local name (unique)
 -spec(start_link(Pos_x::integer, Pos_y::integer,
-    Type:: 'unbreakable'|'breakable'|'two_hit'|'one_hit',
+    Type:: 'unbreakable'|'breakable'|?STRONG|'one_hit',
     Contains::any() ) -> % todo: update later when finalized
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link(Pos_x, Pos_y, Type, Contains) ->
@@ -90,7 +90,7 @@ handle_cast(inflict_damage, State = #tile_state{}) ->
             {noreply, State};
         breakable -> % damage to breakable tile breaks it, handled under terminate/2
             {stop, normal, State};
-        two_hit -> % moves to 2nd phase of breaking, notify "rulling" GN
+        ?STRONG -> % moves to 2nd phase of breaking, notify "rulling" GN
             New_State = State#tile_state{type = one_hit},
             notify_gn(New_State, one_hit),
             {noreply, New_State};
@@ -110,8 +110,11 @@ handle_cast(_Request, State = #tile_state{}) ->
 
 handle_info(Info, State = #tile_state{}) ->
     case Info of
-        hibernate -> {noreply, State, hibernate}; % todo: added a hibernation mode - maybe sends a message at the start to all tiles to sleep?
-        _ -> {noreply, State}
+        hibernate ->
+            %% ? added hibernation support - maybe sends a message at the start to all tiles to sleep?
+            {noreply, State, hibernate};
+        _ ->
+            {noreply, State}
     end.
 
 

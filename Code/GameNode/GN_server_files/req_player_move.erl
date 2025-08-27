@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 
 -module(req_player_move).
--author(dolev).
+-author("dolev").
 
 %% ? Because the gn_server file became insanely cluttered, I'm splitting it into different files
 %% ? based on functionality. This file will include all functions relevant to a player requesting movement
@@ -26,9 +26,9 @@
 
 %%% ===========================================================================
 %% ? Imports for windows:
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/GameNode/mnesia_records.hrl").
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/Objects/object_records.hrl").
+-include("../../common_parameters.hrl").
+-include("../mnesia_records.hrl").
+-include("../../Objects/object_records.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 
 %% ? imports for linux:
@@ -379,7 +379,7 @@ consume_powerup(Powerup, Player_record, Players_table) ->
     end,
     Fun = fun() ->
         mnesia:write(Players_table, Updated_record, write) end,
-    mnesia:activity(interaction, Fun).
+    mnesia:activity(transaction, Fun).
 
 
 
@@ -409,7 +409,7 @@ update_player_cooldowns(Message, Players_table) ->
             [] -> not_found % should never happen
         end
     end,
-    mnesia:activity(interaction, Fun),
+    mnesia:activity(transaction, Fun),
     if
         NewValue == 0, WhatToUpdate == movement_cooldown_update ->
             %% A movement just finished. Trigger event for updating coordinate and all that entails

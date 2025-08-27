@@ -20,7 +20,7 @@
 %% linux compatible
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %% windows compatible
--include_lib("project_env/src/Playing_with_Fire_2-Earlang/Code/common_parameters.hrl").
+-include("../common_parameters.hrl").
 
 
 -record(io_state, {
@@ -180,7 +180,7 @@ convert_input_to_command(Input) ->
         q -> {ok, ignite_remote};   % 'q' for remote bomb ignition
         
         % Control commands
-        escape -> {ok, quit};  % Escape to quit
+        %escape -> {ok, quit};  % Escape to quit
         %% TODO: This is not implemented or supported at the moment - do we even allow to quit?
         
         _ -> invalid_input
