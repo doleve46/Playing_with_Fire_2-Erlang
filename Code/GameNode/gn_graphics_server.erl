@@ -280,10 +280,10 @@ determine_local_gn() ->
             % Method 2: Check node name pattern
             NodeName = atom_to_list(node()),
             case NodeName of
-                "gn1" ++ _ -> gn1;
-                "gn2" ++ _ -> gn2;
-                "gn3" ++ _ -> gn3;
-                "gn4" ++ _ -> gn4;
+                "GN1" ++ _ -> gn1;
+                "GN2" ++ _ -> gn2;
+                "GN3" ++ _ -> gn3;
+                "GN4" ++ _ -> gn4;
                 _ ->
                     % Method 3: Default fallback (should be configured properly in deployment)
                     io:format("⚠️ Could not determine GN ID from node name ~p, defaulting to gn1~n", [NodeName]),
@@ -314,8 +314,8 @@ create_enhanced_python_port(LocalGN) ->
         % Set environment variable to identify which GN this is
         os:putenv("GN_ID", atom_to_list(LocalGN)),
         
-        % Use the enhanced Python visualizer for GN nodes with death and explosion detection
-        Port = open_port({spawn, "python3 enhanced_gn_map_live.py"}, 
+        % Use the GN Python visualizer (located in Map/ directory)
+        Port = open_port({spawn, "python3 Code/Map/gn_map_live.py"}, 
                         [binary, exit_status, {packet, 4}]),
         io:format("✅ Enhanced Python visualizer port created for ~w~n", [LocalGN]),
         

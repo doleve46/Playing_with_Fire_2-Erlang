@@ -73,7 +73,11 @@ handle_gui_event(Port, "play_game_clicked", _Status) ->
     %% Close port and process 1 second after playmode selection
     spawn(fun() ->
         timer:sleep(1000),
-        port_close(Port),
+        try 
+            port_close(Port)
+        catch 
+            _:_ -> ok  % Ignore port close errors
+        end,
         exit(normal)
     end),
     terminate;
@@ -86,7 +90,11 @@ handle_gui_event(Port, "bot_clicked", _Status) ->
     %% Close port and process after playmode selection
     spawn(fun() ->
         timer:sleep(1000),
-        port_close(Port),
+        try 
+            port_close(Port)
+        catch 
+            _:_ -> ok  % Ignore port close errors
+        end,
         exit(normal)
     end),
     terminate;
