@@ -156,7 +156,13 @@ handle_info(create_python_port, State) ->
     send_map_to_all_targets(UpdatedState),
     io:format("✅ Enhanced Python port created and initial map sent~n"),
     %% Send ready message to cn_server
-    cn_server ! {graphics_ready, self()},
+    case global:whereis_name(cn_server) of
+        Pid when is_pid(Pid) ->
+            Pid ! {graphics_ready, self()},
+            io:format("✅ Graphics ready message sent to CN server~n");
+        undefined ->
+            io:format("⚠️ CN server not found when sending graphics_ready message~n")
+    end,
     {noreply, UpdatedState};
 
 handle_info(periodic_update, State) ->

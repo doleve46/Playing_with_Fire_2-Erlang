@@ -362,7 +362,7 @@ find_in_player_tables(Pid, [Table| T]) ->
 link_GNs_loop(NodeNumbers) ->
     io:format("Attempt to link to all gn_servers..~n"),
     Pids = lists:map(fun(NodeNum) ->
-       GN_server_name = list_to_atom("gn" ++ integer_to_list(NodeNum) ++ "_server"),
+       GN_server_name = list_to_atom("GN" ++ integer_to_list(NodeNum) ++ "_server"),
        link_with_retry(GN_server_name, 0)
     end, NodeNumbers),
     Pids. % return list of linked PIDs
@@ -370,10 +370,10 @@ link_GNs_loop(NodeNumbers) ->
 link_with_retry(GN_server_name, RetryCount) when RetryCount > 4 ->
     erlang:error({link_failed_after_retries, GN_server_name, RetryCount});
 link_with_retry(GN_server_name, RetryCount) ->
-    Pid = whereis(GN_server_name),
+    Pid = global:whereis_name(GN_server_name),
     case Pid of
         undefined ->
-            io:format("Process ~p not found, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+            io:format("Process ~p not found globally, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
             timer:sleep(500),
             link_with_retry(GN_server_name, RetryCount + 1);
         _ ->
