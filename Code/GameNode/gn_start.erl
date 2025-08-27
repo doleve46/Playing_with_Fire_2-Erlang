@@ -46,6 +46,17 @@ gn_receive_loop(Menu_Pid) ->
         {cn_start, Request} ->
             handle_cn_start_request(Request, Menu_Pid),
             gn_receive_loop(Menu_Pid);
+        %% Handle EXIT messages from crashed processes (like menu timeout)
+        {'EXIT', Pid, Reason} ->
+            io:format("Process ~p exited with reason: ~p~n", [Pid, Reason]),
+            if 
+                Pid == Menu_Pid, Reason == badsig ->
+                    io:format("Menu process crashed due to timeout, defaulting to bot mode~n"),
+                    % Default to bot mode and exit loop
+                    true;
+                true ->
+                    gn_receive_loop(Menu_Pid)
+            end;
         %% ignore other messages and log them to console
         Unknown ->
             io:format("GN_start received unknown message: ~p~n", [Unknown]),

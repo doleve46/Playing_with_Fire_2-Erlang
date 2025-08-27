@@ -69,10 +69,12 @@ handle_gui_event(Port, "play_game_clicked", _Status) ->
     io:format("User chose to play the game~n"),
     send(Port, "show_game_setup"),
     send_to_gn_start({play_as_human}),
-    timer:sleep(3000), % Simulate game setup time
-    %% Close port and process 1 second after playmode selection
+    % Close the menu GUI immediately after selection
+    send(Port, "close_gui"),
+    timer:sleep(500), % Brief delay for GUI to process close command
+    %% Close port and process after playmode selection
     spawn(fun() ->
-        timer:sleep(1000),
+        timer:sleep(500),
         try 
             port_close(Port)
         catch 
@@ -86,10 +88,12 @@ handle_gui_event(Port, "bot_clicked", _Status) ->
     io:format("User chose bot mode~n"),
     send(Port, "show_game_setup"),
     send_to_gn_start({play_as_bot}),
-    timer:sleep(3000), % Simulate game setup time
+    % Close the menu GUI immediately after selection
+    send(Port, "close_gui"),
+    timer:sleep(500), % Brief delay for GUI to process close command
     %% Close port and process after playmode selection
     spawn(fun() ->
-        timer:sleep(1000),
+        timer:sleep(500),
         try 
             port_close(Port)
         catch 
@@ -107,7 +111,11 @@ handle_gui_event(Port, "choice_timeout", _Status) ->
     %% Close port and process after timeout
     spawn(fun() ->
         timer:sleep(1000),
-        port_close(Port),
+        try 
+            port_close(Port)
+        catch 
+            _:_ -> ok  % Ignore port close errors
+        end,
         exit(normal)
     end),
     terminate;
