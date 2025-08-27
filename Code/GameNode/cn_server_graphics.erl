@@ -333,9 +333,13 @@ terminate(Reason, State) ->
    
     % Terminate GN graphics servers
     lists:foreach(fun({_Node, Pid}) ->
-        case is_pid(Pid) andalso is_process_alive(Pid) of
+        case is_pid(Pid) of
             true ->
-                exit(Pid, shutdown);
+                try
+                    exit(Pid, shutdown)
+                catch
+                    _:_ -> ok  % Ignore errors when trying to exit remote processes
+                end;
             false -> ok
         end
     end, State#state.gn_graphics_servers),
@@ -976,7 +980,7 @@ send_enhanced_map_to_gn_servers(State) ->
     GNCount = length(State#state.gn_graphics_servers),
     io:format("🔄 CN attempting to send map update to ~w GN graphics servers~n", [GNCount]),
     lists:foreach(fun({Node, Pid}) ->
-        case is_pid(Pid) andalso is_process_alive(Pid) of
+        case is_pid(Pid) of
             true ->
                 try
                     % Send enhanced map state with full backend information
@@ -993,6 +997,6 @@ send_enhanced_map_to_gn_servers(State) ->
                         io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
                 end;
             false ->
-                io:format("⚠️ GN server on ~w not alive or not found (Pid: ~p)~n", [Node, Pid])
+                io:format("⚠️ Invalid PID for GN server on ~w: ~p~n", [Node, Pid])
         end
     end, State#state.gn_graphics_servers).
