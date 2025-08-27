@@ -52,8 +52,15 @@ gn_receive_loop(Menu_Pid) ->
             if 
                 Pid == Menu_Pid, Reason == badsig ->
                     io:format("Menu process crashed due to timeout, defaulting to bot mode~n"),
-                    % Default to bot mode and exit loop
-                    true;
+                    % Send bot decision to CN and exit loop
+                    case global:whereis_name(cn_start) of
+                        CNPid when is_pid(CNPid) ->
+                            io:format("Found CN process, sending timeout bot decision~n"),
+                            CNPid ! {self(), playmode, true};
+                        undefined ->
+                            io:format("CN process not found during timeout handling~n")
+                    end,
+                    true;  % exit the loop to continue startup
                 true ->
                     gn_receive_loop(Menu_Pid)
             end;
@@ -107,7 +114,7 @@ handle_menu_request({play_as_bot}, _Menu_Pid) ->
         undefined ->
             io:format("CN process not found in global registry. Connected nodes: ~p~n", [nodes()])
     end,
-    true; % leave the loop
+    false; % leave the loop (same as play_as_human)
 handle_menu_request(Unknown, Menu_Pid) ->
     io:format("GN_start received unknown menu request: ~p~n", [Unknown]),
     gn_receive_loop(Menu_Pid).
