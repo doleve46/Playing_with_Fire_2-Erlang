@@ -80,7 +80,7 @@ init([GNNodes]) ->
     erlang:send_after(?TICK_DELAY, self(), monitor_gn_graphics_servers),
    
     % Create Python port
-    erlang:send_after(500, self(), create_python_port),
+    erlang:send(self(), create_python_port),
    
     % Start periodic updates (faster for better timer sync)
     erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
@@ -135,6 +135,7 @@ handle_info(setup_subscriptions, State) ->
     Tables = get_all_tables(),
     SubscribedTables = setup_mnesia_subscriptions(Tables),
     io:format("✅ Subscribed to tables: ~p~n", [SubscribedTables]),
+    io:format("🔄 Graphics server still running after subscriptions setup~n"),
     {noreply, State#state{subscribed_tables = SubscribedTables}};
 
 handle_info(monitor_gn_graphics_servers, State) ->
@@ -145,6 +146,7 @@ handle_info(monitor_gn_graphics_servers, State) ->
 
 handle_info(create_python_port, State) ->
     io:format("🐍 Creating enhanced Python port...~n"),
+    io:format("🔍 Graphics server received create_python_port message~n"),
     Port = create_python_visualizer_port(),
     % Create initial enhanced map state
     InitialMapState = create_enhanced_map_state(State),
