@@ -145,7 +145,12 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     io:format("✅ CN server started successfully~n"),
     {ok, _Pid_cn_graphics_server} = cn_server_graphics:start_link(ConnectedNodeNames),
     io:format("✅ CN graphics server started successfully~n"),
-    ok. % Startup process ends gracefully
+    
+    % Keep this process alive so linked servers don't terminate
+    io:format("🔄 CN startup complete, keeping process alive...~n"),
+    receive
+        stop -> ok
+    end.
 
 %% =================== Helper Functions ======================
 

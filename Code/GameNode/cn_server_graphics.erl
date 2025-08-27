@@ -132,11 +132,17 @@ handle_cast(_Msg, State) ->
 %% Handle messages
 handle_info(setup_subscriptions, State) ->
     io:format("📡 Setting up enhanced mnesia subscriptions...~n"),
-    Tables = get_all_tables(),
-    SubscribedTables = setup_mnesia_subscriptions(Tables),
-    io:format("✅ Subscribed to tables: ~p~n", [SubscribedTables]),
-    io:format("🔄 Graphics server still running after subscriptions setup~n"),
-    {noreply, State#state{subscribed_tables = SubscribedTables}};
+    try
+        Tables = get_all_tables(),
+        SubscribedTables = setup_mnesia_subscriptions(Tables),
+        io:format("✅ Subscribed to tables: ~p~n", [SubscribedTables]),
+        {noreply, State#state{subscribed_tables = SubscribedTables}}
+    catch
+        Class:Error:Stacktrace ->
+            io:format("❌ Error in setup_subscriptions: ~p:~p~n", [Class, Error]),
+            io:format("❌ Stacktrace: ~p~n", [Stacktrace]),
+            {noreply, State}
+    end;
 
 handle_info(monitor_gn_graphics_servers, State) ->
     io:format("🚀 Attempting to monitor all GN graphics servers...~n"),
@@ -307,10 +313,12 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
 
 handle_info({'DOWN', MonitorRef, process, RemotePid, noconnection}, State) ->
     %% TODO: deal with GN graphics servers disconnecting.
+    io:format("🔍 Received DOWN message for disconnected GN graphics server~n"),
     {noreply, State};
 
 handle_info(Info, State) ->
     io:format("ℹ️ Unexpected message: ~p~n", [Info]),
+    io:format("🔍 Graphics server still alive after unexpected message~n"),
     {noreply, State}.
 
 %% Cleanup on termination
