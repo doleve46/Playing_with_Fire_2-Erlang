@@ -314,16 +314,10 @@ create_enhanced_python_port(LocalGN) ->
         % Set environment variable to identify which GN this is
         os:putenv("GN_ID", atom_to_list(LocalGN)),
         
-        % Try different possible paths for the GN Python visualizer
-        PossiblePaths = [
-            "Code/Map/gn_map_live.py",           % From project root
-            "src/Code/Map/gn_map_live.py",       % If in src/ directory
-            "../Map/gn_map_live.py",             % Relative from GameNode/
-            "Map/gn_map_live.py",                % Direct from project root
-            "gn_map_live.py"                     % Same directory
-        ],
-        
-        Port = try_python_paths(PossiblePaths, LocalGN),
+        % Use Python 3.6 with manually installed dataclasses
+        Port = open_port({spawn, "python3 src/Code/Map/gn_map_live.py"}, 
+                        [binary, exit_status, {packet, 4}]),
+        io:format("✅ Enhanced Python visualizer port created for ~w~n", [LocalGN]),
         
         Port
     catch
@@ -521,19 +515,3 @@ get_explosion_stats(State) ->
         end, State#state.active_explosions))
     }.
 
-%% Helper function to try different Python script paths
-try_python_paths([], LocalGN) ->
-    io:format("❌ Could not find gn_map_live.py in any expected location for ~w~n", [LocalGN]),
-    undefined;
-try_python_paths([Path | RestPaths], LocalGN) ->
-    case filelib:is_file(Path) of
-        true ->
-            io:format("🐍 Found Python script at: ~s~n", [Path]),
-            Port = open_port({spawn, "python3 " ++ Path}, 
-                           [binary, exit_status, {packet, 4}]),
-            io:format("✅ Enhanced Python visualizer port created for ~w using ~s~n", [LocalGN, Path]),
-            Port;
-        false ->
-            io:format("⚠️ Python script not found at: ~s, trying next path...~n", [Path]),
-            try_python_paths(RestPaths, LocalGN)
-    end.
