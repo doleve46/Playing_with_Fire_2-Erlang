@@ -158,12 +158,13 @@ handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
         fun(Index) -> 
             Individual_table_names = generate_table_names(Index),
             PidA = lists:nth(Index, GN_pids_list),
+            [TilesTable, BombsTable, PowerupsTable, PlayersTable] = Individual_table_names,
             #gn_data{
                 pid = PidA,
-                tiles = lists:hd(Individual_table_names),
-                bombs = lists:nth(2, Individual_table_names),
-                powerups = lists:nth(3, Individual_table_names),
-                players = lists:last(Individual_table_names)
+                tiles = TilesTable,
+                bombs = BombsTable,
+                powerups = PowerupsTable,
+                players = PlayersTable
             }
         end, lists:seq(1,4)),
     io:format("Successfully linked to all gn_servers ~w~n", [GN_pids_list]),
