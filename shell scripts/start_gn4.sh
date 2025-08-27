@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 # Get the current IP address (using the default route interface)
 IP_ADDRESS=$(hostname -I | awk '{print $1}')
