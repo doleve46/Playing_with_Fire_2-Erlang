@@ -1270,7 +1270,7 @@ class EnhancedGameVisualizer:
             'active': True
         })
 
-        def create_enhanced_tile_change_effect(self, x, y, old_tile, new_tile):
+    def create_enhanced_tile_change_effect(self, x, y, old_tile, new_tile):
         """Create enhanced tile change effect"""
         self.game_effects.append({
             'type': 'tile_change_enhanced',
