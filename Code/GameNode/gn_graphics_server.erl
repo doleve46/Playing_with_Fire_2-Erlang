@@ -243,10 +243,12 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
 
 handle_info({nodedown, Node}, State) when Node == State#state.cn_node ->
     io:format("⚠️ CN node ~w went down~n", [Node]),
+    %% TODO: show something on screen for this time? add a variable in the state record that stops all timers?
     {noreply, State};
 
 handle_info({nodeup, Node}, State) when Node == State#state.cn_node ->
     io:format("✅ CN node ~w came back up~n", [Node]),
+    %% TODO: going back up mechanism - should request a full map, return all timers back to normal.
     {noreply, State};
 
 handle_info(Info, State) ->
