@@ -1,6 +1,5 @@
 -module(gn_graphics_server).
 -behaviour(gen_server).
-%% TODO: Need to verify that a python port is created through cn_graphics and gn_graphics, and is responsive and works as intended.
 
 %% API
 -export([start_link/1]).
@@ -41,7 +40,7 @@ init([CNNode]) ->
     LocalGN = determine_local_gn(),
     LocalPlayerIDs = get_local_player_ids(LocalGN),
     
-    io:format("ðŸŽ® Enhanced GN Graphics Server starting on ~w (Local GN: ~w, Players: ~w)~n", 
+    io:format("🎮 Enhanced GN Graphics Server starting on ~w (Local GN: ~w, Players: ~w)~n", 
               [node(), LocalGN, LocalPlayerIDs]),
     
     State = #state{
@@ -49,16 +48,17 @@ init([CNNode]) ->
         local_gn_name = LocalGN,
         local_player_ids = LocalPlayerIDs
     },
-     %% trap exits
+    
+    %% trap exits
     process_flag(trap_exit, true),
     
-    % Monitors ALL nodes in the cluster for connection up/down (message of the form {nodeup, Node} | {nodedown, Node}
+    % Monitors ALL nodes in the cluster for connection up/down
     net_kernel:monitor_nodes(true),
     
     % Create Python port after a short delay
     erlang:send_after(50, self(), create_python_port),
     
-    io:format("âœ… Enhanced GN Graphics Server initialized (waiting for CN updates)~n"),
+    io:format("✅ Enhanced GN Graphics Server initialized (waiting for CN updates)~n"),
     {ok, State}.
 
 %% Handle synchronous calls
@@ -94,7 +94,7 @@ handle_cast({map_update, EnhancedMapState}, State) ->
         #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing, active_explosions := Explosions} ->
             % Full enhanced format with explosions
             ExplosionCount = maps:size(Explosions),
-            io:format("ðŸ—ºï¸ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
+            io:format("🗺️ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
                       [State#state.update_counter + 1, ExplosionCount]),
             
             % Check for newly dead players
@@ -104,14 +104,14 @@ handle_cast({map_update, EnhancedMapState}, State) ->
             
             if map_size(NewDeaths) > 0 ->
                 NewDeathList = maps:to_list(NewDeaths),
-                io:format("ðŸ’€ New deaths detected by GN: ~p~n", [NewDeathList]),
+                io:format("💀 New deaths detected by GN: ~p~n", [NewDeathList]),
                 
                 % Check if any deaths are for local players
                 lists:foreach(fun({PlayerID, {DeathTime, _LastState, LocalGNAtom}}) ->
                     if LocalGNAtom =:= State#state.local_gn_name ->
-                        io:format("ðŸ©¸ LOCAL PLAYER ~w DIED on this GN! (Death time: ~w)~n", [PlayerID, DeathTime]);
+                        io:format("🩸 LOCAL PLAYER ~w DIED on this GN! (Death time: ~w)~n", [PlayerID, DeathTime]);
                     true ->
-                        io:format("ðŸ’€ Remote player ~w died on ~w~n", [PlayerID, LocalGNAtom])
+                        io:format("💀 Remote player ~w died on ~w~n", [PlayerID, LocalGNAtom])
                     end
                 end, NewDeathList);
             true -> ok
@@ -121,10 +121,10 @@ handle_cast({map_update, EnhancedMapState}, State) ->
             PreviousExplosions = maps:size(State#state.active_explosions),
             if ExplosionCount > PreviousExplosions ->
                 NewExplosionCount = ExplosionCount - PreviousExplosions,
-                io:format("ðŸ’¥ ~w new explosions received from CN~n", [NewExplosionCount]);
+                io:format("💥 ~w new explosions received from CN~n", [NewExplosionCount]);
             ExplosionCount < PreviousExplosions ->
                 ExpiredCount = PreviousExplosions - ExplosionCount,
-                io:format("ðŸ’¨ ~w explosions expired~n", [ExpiredCount]);
+                io:format("💨 ~w explosions expired~n", [ExpiredCount]);
             true -> ok
             end,
             
@@ -132,19 +132,19 @@ handle_cast({map_update, EnhancedMapState}, State) ->
             
         #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing} ->
             % Enhanced format without explosions
-            io:format("ðŸ—ºï¸ GN received enhanced map update from CN (#~w) with timing & death info~n", 
+            io:format("🗺️ GN received enhanced map update from CN (#~w) with timing & death info~n", 
                       [State#state.update_counter + 1]),
             {GridData, DeadPlayersMap, Timing, State#state.active_explosions};
             
         #{map := GridData, dead_players := DeadPlayersMap} ->
             % Format without backend timing or explosions
-            io:format("ðŸ—ºï¸ GN received map update from CN (#~w) with death info~n", 
+            io:format("🗺️ GN received map update from CN (#~w) with death info~n", 
                       [State#state.update_counter + 1]),
             {GridData, DeadPlayersMap, State#state.backend_timing, State#state.active_explosions};
             
         _ ->
             % Old format - just the grid
-            io:format("ðŸ—ºï¸ GN received basic map update from CN (#~w)~n", 
+            io:format("🗺️ GN received basic map update from CN (#~w)~n", 
                       [State#state.update_counter + 1]),
             {EnhancedMapState, State#state.dead_players, State#state.backend_timing, State#state.active_explosions}
     end,
@@ -174,19 +174,19 @@ handle_cast({map_update, EnhancedMapState}, State) ->
 
 % Handle movement confirmations from CN
 handle_cast({movement_confirmation, ConfirmationData}, State) ->
-    % Forward movement confirmations directly to Python
+    % Forward movement confirmations to Python as JSON
     send_movement_confirmation_to_python(State#state.python_port, ConfirmationData),
     {noreply, State};
 
 % Handle timer updates from CN
 handle_cast({timer_update, TimerData}, State) ->
-    % Forward timer updates directly to Python
+    % Forward timer updates to Python as JSON
     send_timer_update_to_python(State#state.python_port, TimerData),
     {noreply, State};
 
 % Handle FSM updates from CN
 handle_cast({fsm_update, FSMData}, State) ->
-    % Forward FSM updates directly to Python
+    % Forward FSM updates to Python as JSON
     send_fsm_update_to_python(State#state.python_port, FSMData),
     {noreply, State};
 
@@ -194,10 +194,10 @@ handle_cast(force_update, State) ->
     % Force update - just resend current state if we have it
     case State#state.current_map_state of
         undefined ->
-            io:format("âš ï¸ No enhanced map state available for force update~n");
+            io:format("⚠️ No enhanced map state available for force update~n");
         MapState ->
             ExplosionCount = maps:size(State#state.active_explosions),
-            io:format("ðŸ”„ Force updating Python with current enhanced map state (~w explosions)~n", [ExplosionCount]),
+            io:format("🔄 Force updating Python with current enhanced map state (~w explosions)~n", [ExplosionCount]),
             send_enhanced_map_to_python(State#state.python_port, MapState)
     end,
     {noreply, State};
@@ -208,7 +208,7 @@ handle_cast(_Msg, State) ->
 %% Handle messages
 handle_info(create_python_port, State) ->
     % Create Python port for enhanced visualizer
-    io:format("ðŸ Creating enhanced Python visualizer port...~n"),
+    io:format("🐍 Creating enhanced Python visualizer port...~n"),
     Port = create_enhanced_python_port(State#state.local_gn_name),
     
     UpdatedState = State#state{python_port = Port},
@@ -216,21 +216,21 @@ handle_info(create_python_port, State) ->
     % If we already have enhanced map state from CN, send it
     case State#state.current_map_state of
         undefined ->
-            io:format("âœ… Enhanced Python port created, waiting for first CN update~n");
+            io:format("✅ Enhanced Python port created, waiting for first CN update~n");
         MapState ->
             send_enhanced_map_to_python(Port, MapState),
-            io:format("âœ… Enhanced Python port created and current map state sent~n")
+            io:format("✅ Enhanced Python port created and current map state sent~n")
     end,
     
     {noreply, UpdatedState};
 
 % Handle Python port messages
 handle_info({Port, {data, Data}}, State) when Port == State#state.python_port ->
-    io:format("ðŸ Message from enhanced Python: ~p~n", [Data]),
+    io:format("🐍 Message from enhanced Python: ~p~n", [Data]),
     {noreply, State};
 
 handle_info({Port, closed}, State) when Port == State#state.python_port ->
-    io:format("âš ï¸ Enhanced Python port closed, restarting...~n"),
+    io:format("⚠️ Enhanced Python port closed, restarting...~n"),
     NewPort = create_enhanced_python_port(State#state.local_gn_name),
     
     % Resend current enhanced map state if available
@@ -242,22 +242,20 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
     {noreply, State#state{python_port = NewPort}};
 
 handle_info({nodedown, Node}, State) when Node == State#state.cn_node ->
-    io:format("âš ï¸ CN node ~w went down~n", [Node]),
-    %% TODO: show something on screen for this time? add a variable in the state record that stops all timers?
+    io:format("⚠️ CN node ~w went down~n", [Node]),
     {noreply, State};
 
 handle_info({nodeup, Node}, State) when Node == State#state.cn_node ->
-    io:format("âœ… CN node ~w came back up~n", [Node]),
-    %% TODO: going back up mechanism - should request a full map, return all timers back to normal.
+    io:format("✅ CN node ~w came back up~n", [Node]),
     {noreply, State};
 
 handle_info(Info, State) ->
-    io:format("â„¹ï¸ Unexpected message: ~p~n", [Info]),
+    io:format("ℹ️ Unexpected message: ~p~n", [Info]),
     {noreply, State}.
 
 %% Cleanup on termination
 terminate(_Reason, State) ->
-    io:format("ðŸ›‘ Enhanced GN Graphics Server terminating~n"),
+    io:format("🛑 Enhanced GN Graphics Server terminating~n"),
     if State#state.python_port =/= undefined ->
         port_close(State#state.python_port);
     true -> ok
@@ -286,7 +284,7 @@ determine_local_gn() ->
                 "gn4" ++ _ -> gn4;
                 _ ->
                     % Method 3: Default fallback (should be configured properly in deployment)
-                    io:format("âš ï¸ Could not determine GN ID from node name ~p, defaulting to gn1~n", [NodeName]),
+                    io:format("⚠️ Could not determine GN ID from node name ~p, defaulting to gn1~n", [NodeName]),
                     gn1
             end;
         GNStr ->
@@ -305,7 +303,7 @@ get_local_player_ids(LocalGN) ->
     maps:get(LocalGN, GNToPlayers, []).
 
 %%%===================================================================
-%%% Enhanced Python Port Communication
+%%% Enhanced Python Port Communication (ALL JSON)
 %%%===================================================================
 
 %% Create enhanced Python port for GN-specific visualizer
@@ -317,31 +315,16 @@ create_enhanced_python_port(LocalGN) ->
         % Use the enhanced Python visualizer for GN nodes with death and explosion detection
         Port = open_port({spawn, "python3 enhanced_gn_map_live.py"}, 
                         [binary, exit_status, {packet, 4}]),
-        io:format("âœ… Enhanced Python visualizer port created for ~w~n", [LocalGN]),
+        io:format("✅ Enhanced Python visualizer port created for ~w~n", [LocalGN]),
         
         Port
     catch
         _:Error ->
-            io:format("âŒ Failed to create enhanced Python port: ~p~n", [Error]),
+            io:format("❌ Failed to create enhanced Python port: ~p~n", [Error]),
             undefined
     end.
 
-json_encode(Data) ->
-    jsx:encode(Data, [
-        {space, 1},           % Pretty printing
-        {indent, 2},          % Indentation
-        return_maps,          % Return maps instead of proplists
-        strict,               % Strict JSON compliance
-        {encoding, utf8}      % Ensure UTF-8 encoding
-    ]).
-
-% Helper function to convert atoms safely
-atom_to_utf8_binary(Atom) when is_atom(Atom) ->
-    unicode:characters_to_binary(atom_to_list(Atom), latin1, utf8);
-atom_to_utf8_binary(Other) ->
-    Other.
-
-% Convert your data structures
+%% Convert Erlang data structures to JSON-safe format
 convert_for_json(#{} = Map) ->
     maps:fold(fun(K, V, Acc) ->
         NewKey = case is_atom(K) of
@@ -361,138 +344,199 @@ convert_for_json(List) when is_list(List) ->
 convert_for_json(Atom) when is_atom(Atom) ->
     atom_to_utf8_binary(Atom);
 
+convert_for_json(Tuple) when is_tuple(Tuple) ->
+    % Convert tuples to lists for JSON compatibility
+    convert_for_json(tuple_to_list(Tuple));
+
 convert_for_json(Other) ->
     Other.
 
+%% Helper function to convert atoms safely to UTF-8 binaries
+atom_to_utf8_binary(Atom) when is_atom(Atom) ->
+    unicode:characters_to_binary(atom_to_list(Atom), latin1, utf8);
+atom_to_utf8_binary(Other) ->
+    Other.
 
-send_enhanced_map_to_python(State) ->
-    if State#state.python_port =/= undefined andalso
-       State#state.current_map_state =/= undefined ->
-        try
-            % Convert to JSON-safe format first
-            JsonSafeData = convert_for_json(State#state.current_map_state),
-            
-            % Encode as UTF-8 JSON
-            JsonBinary = jsx:encode(JsonSafeData, [{encoding, utf8}]),
-            
-            % Send to Python
-            port_command(State#state.python_port, JsonBinary),
-            
-            io:format("📡 JSON data sent to Python visualizer~n")
-        catch
-            _:Error ->
-                io:format("❌ Error encoding JSON: ~p~n", [Error])
-        end;
-    true ->
-        io:format("⚠️ Python port or map state not ready~n")
-    end.
-% %% Send enhanced map data to Python visualizer
-% send_enhanced_map_to_python(undefined, _MapState) ->
-%     io:format("âš ï¸ No enhanced Python port available~n");
+%% Send enhanced map data to Python visualizer as JSON
+send_enhanced_map_to_python(undefined, _MapState) ->
+    io:format("⚠️ No enhanced Python port available~n");
 
-% send_enhanced_map_to_python(Port, MapState) ->
-%     try
-%         % Send enhanced map state as binary term
-%         MapBinary = term_to_binary(MapState),
-%         port_command(Port, MapBinary),
-        
-%         % Log details about what we're sending (less frequent to reduce spam)
-%         case MapState of
-%             #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing, active_explosions := Explosions} ->
-%                 DeadCount = maps:size(DeadPlayers),
-%                 ExplosionCount = maps:size(Explosions),
-%                 TimingKeys = maps:keys(Timing),
-%                 % Only log every 40 updates (every 2 seconds at 50ms intervals)
-%                 case get(log_counter) of
-%                     undefined -> put(log_counter, 1);
-%                     Counter when Counter >= 40 ->
-%                         io:format("ðŸ“¤ Enhanced map forwarded to Python visualizer (~w, dead: ~w, explosions: ~w, timing: ~w)~n", 
-%                                  [LocalGN, DeadCount, ExplosionCount, TimingKeys]),
-%                         put(log_counter, 1);
-%                     Counter ->
-%                         put(log_counter, Counter + 1)
-%                 end;
-%             #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing} ->
-%                 DeadCount = maps:size(DeadPlayers),
-%                 TimingKeys = maps:keys(Timing),
-%                 % Only log every 40 updates (every 2 seconds at 50ms intervals)
-%                 case get(log_counter) of
-%                     undefined -> put(log_counter, 1);
-%                     Counter when Counter >= 40 ->
-%                         io:format("ðŸ“¤ Enhanced map forwarded to Python visualizer (~w, dead: ~w, timing: ~w)~n", 
-%                                  [LocalGN, DeadCount, TimingKeys]),
-%                         put(log_counter, 1);
-%                     Counter ->
-%                         put(log_counter, Counter + 1)
-%                 end;
-%             _ ->
-%                 ok
-%         end
-%     catch
-%         _:Error ->
-%             io:format("âŒ Error sending enhanced data to Python: ~p~n", [Error])
-%     end.
-
-% For different message types, ensure proper conversion
-send_message_to_python(State, MessageType, Data) ->
-    JsonMessage = #{
-        <<"type">> => atom_to_utf8_binary(MessageType),
-        <<"data">> => convert_for_json(Data),
-        <<"timestamp">> => erlang:system_time(millisecond)
-    },
-    
-    JsonBinary = jsx:encode(JsonMessage, [{encoding, utf8}]),
-    port_command(State#state.python_port, JsonBinary).
-
-%% Send movement confirmation to Python visualizer
-send_movement_confirmation_to_python(undefined, _ConfirmationData) ->
-    io:format("âš ï¸ No Python port available for movement confirmation~n");
-
-send_movement_confirmation_to_python(Port, ConfirmationData) ->
+send_enhanced_map_to_python(Port, MapState) ->
     try
-        ConfirmationMsg = [movement_confirmation, ConfirmationData],
-        MsgBinary = term_to_binary(ConfirmationMsg),
-        port_command(Port, MsgBinary),
+        % Create JSON message structure
+        JsonMessage = #{
+            <<"type">> => <<"map_update">>,
+            <<"timestamp">> => erlang:system_time(millisecond),
+            <<"data">> => convert_for_json(MapState)
+        },
         
-        case ConfirmationData of
-            #{entity_type := player, entity_data := #{player_id := PlayerID}} ->
-                io:format("ðŸƒ Movement confirmation forwarded for player ~w~n", [PlayerID]);
-            #{entity_type := bomb, entity_data := #{from_pos := Pos}} ->
-                io:format("ðŸ’£ Movement confirmation forwarded for bomb at ~w~n", [Pos]);
+        % Encode as UTF-8 JSON
+        JsonBinary = jsx:encode(JsonMessage, [
+            {space, 1},
+            {indent, 2},
+            return_maps,
+            strict,
+            {encoding, utf8}
+        ]),
+        
+        % Send to Python
+        port_command(Port, JsonBinary),
+        
+        % Log details about what we're sending (less frequent to reduce spam)
+        case MapState of
+            #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing, active_explosions := Explosions} ->
+                DeadCount = maps:size(DeadPlayers),
+                ExplosionCount = maps:size(Explosions),
+                TimingKeys = maps:keys(Timing),
+                % Only log every 40 updates (every 2 seconds at 50ms intervals)
+                case get(log_counter) of
+                    undefined -> put(log_counter, 1);
+                    Counter when Counter >= 40 ->
+                        io:format("📤 Enhanced JSON map forwarded to Python visualizer (~w, dead: ~w, explosions: ~w, timing: ~w)~n", 
+                                 [LocalGN, DeadCount, ExplosionCount, TimingKeys]),
+                        put(log_counter, 1);
+                    Counter ->
+                        put(log_counter, Counter + 1)
+                end;
+            #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing} ->
+                DeadCount = maps:size(DeadPlayers),
+                TimingKeys = maps:keys(Timing),
+                % Only log every 40 updates (every 2 seconds at 50ms intervals)
+                case get(log_counter) of
+                    undefined -> put(log_counter, 1);
+                    Counter when Counter >= 40 ->
+                        io:format("📤 Enhanced JSON map forwarded to Python visualizer (~w, dead: ~w, timing: ~w)~n", 
+                                 [LocalGN, DeadCount, TimingKeys]),
+                        put(log_counter, 1);
+                    Counter ->
+                        put(log_counter, Counter + 1)
+                end;
             _ ->
-                io:format("ðŸ“¤ Movement confirmation forwarded~n")
+                ok
         end
     catch
         _:Error ->
-            io:format("âŒ Error sending movement confirmation to Python: ~p~n", [Error])
+            io:format("❌ Error sending enhanced JSON data to Python: ~p~n", [Error])
     end.
 
-%% Send timer update to Python visualizer
+%% Send movement confirmation to Python visualizer as JSON
+send_movement_confirmation_to_python(undefined, _ConfirmationData) ->
+    io:format("⚠️ No Python port available for movement confirmation~n");
+
+send_movement_confirmation_to_python(Port, ConfirmationData) ->
+    try
+        % Create JSON message structure
+        JsonMessage = #{
+            <<"type">> => <<"movement_confirmation">>,
+            <<"timestamp">> => erlang:system_time(millisecond),
+            <<"data">> => convert_for_json(ConfirmationData)
+        },
+        
+        % Encode as UTF-8 JSON
+        JsonBinary = jsx:encode(JsonMessage, [
+            return_maps,
+            strict,
+            {encoding, utf8}
+        ]),
+        
+        % Send to Python
+        port_command(Port, JsonBinary),
+        
+        case ConfirmationData of
+            #{entity_type := player, entity_data := #{player_id := PlayerID}} ->
+                io:format("🏃 JSON movement confirmation forwarded for player ~w~n", [PlayerID]);
+            #{entity_type := bomb, entity_data := #{from_pos := Pos}} ->
+                io:format("💣 JSON movement confirmation forwarded for bomb at ~w~n", [Pos]);
+            _ ->
+                io:format("📤 JSON movement confirmation forwarded~n")
+        end
+    catch
+        _:Error ->
+            io:format("❌ Error sending JSON movement confirmation to Python: ~p~n", [Error])
+    end.
+
+%% Send timer update to Python visualizer as JSON
 send_timer_update_to_python(undefined, _TimerData) ->
     ok;
 
 send_timer_update_to_python(Port, TimerData) ->
     try
-        TimerMsg = [timer_update, TimerData],
-        MsgBinary = term_to_binary(TimerMsg),
-        port_command(Port, MsgBinary)
+        % Create JSON message structure
+        JsonMessage = #{
+            <<"type">> => <<"timer_update">>,
+            <<"timestamp">> => erlang:system_time(millisecond),
+            <<"data">> => convert_for_json(TimerData)
+        },
+        
+        % Encode as UTF-8 JSON
+        JsonBinary = jsx:encode(JsonMessage, [
+            return_maps,
+            strict,
+            {encoding, utf8}
+        ]),
+        
+        % Send to Python
+        port_command(Port, JsonBinary),
+        
+        io:format("⏱️ JSON timer update forwarded to Python~n")
     catch
         _:Error ->
-            io:format("âŒ Error sending timer update to Python: ~p~n", [Error])
+            io:format("❌ Error sending JSON timer update to Python: ~p~n", [Error])
     end.
 
-%% Send FSM update to Python visualizer
+%% Send FSM update to Python visualizer as JSON
 send_fsm_update_to_python(undefined, _FSMData) ->
     ok;
 
 send_fsm_update_to_python(Port, FSMData) ->
     try
-        FSMMsg = [fsm_update, FSMData],
-        MsgBinary = term_to_binary(FSMMsg),
-        port_command(Port, MsgBinary)
+        % Create JSON message structure
+        JsonMessage = #{
+            <<"type">> => <<"fsm_update">>,
+            <<"timestamp">> => erlang:system_time(millisecond),
+            <<"data">> => convert_for_json(FSMData)
+        },
+        
+        % Encode as UTF-8 JSON
+        JsonBinary = jsx:encode(JsonMessage, [
+            return_maps,
+            strict,
+            {encoding, utf8}
+        ]),
+        
+        % Send to Python
+        port_command(Port, JsonBinary),
+        
+        io:format("🎰 JSON FSM update forwarded to Python~n")
     catch
         _:Error ->
-            io:format("âŒ Error sending FSM update to Python: ~p~n", [Error])
+            io:format("❌ Error sending JSON FSM update to Python: ~p~n", [Error])
+    end.
+
+%% Send explosion event to Python visualizer as JSON
+send_explosion_event_to_python(Port, ExplosionData) ->
+    try
+        % Create JSON message structure
+        JsonMessage = #{
+            <<"type">> => <<"explosion_event">>,
+            <<"timestamp">> => erlang:system_time(millisecond),
+            <<"data">> => convert_for_json(ExplosionData)
+        },
+        
+        % Encode as UTF-8 JSON
+        JsonBinary = jsx:encode(JsonMessage, [
+            return_maps,
+            strict,
+            {encoding, utf8}
+        ]),
+        
+        % Send to Python
+        port_command(Port, JsonBinary),
+        
+        io:format("💥 JSON explosion event forwarded to Python~n")
+    catch
+        _:Error ->
+            io:format("❌ Error sending JSON explosion event to Python: ~p~n", [Error])
     end.
 
 %%%===================================================================
@@ -517,7 +561,7 @@ get_enhanced_state_statistics(State) ->
 %% Enhanced debug function to print current state
 debug_enhanced_state(State) ->
     Stats = get_enhanced_state_statistics(State),
-    io:format("ðŸ” Enhanced GN Graphics Server Debug State:~n"),
+    io:format("🔍 Enhanced GN Graphics Server Debug State:~n"),
     io:format("   Local GN: ~w~n", [maps:get(local_gn, Stats)]),
     io:format("   Local Players: ~w~n", [maps:get(local_players, Stats)]),
     io:format("   Update Counter: ~w~n", [maps:get(update_counter, Stats)]),
@@ -532,7 +576,7 @@ debug_enhanced_state(State) ->
     % Show dead players details
     case maps:get(dead_players_count, Stats) > 0 of
         true ->
-            io:format("   ðŸ’€ Dead Players Details:~n"),
+            io:format("   💀 Dead Players Details:~n"),
             maps:fold(fun(PlayerID, {DeathTime, _LastState, LocalGNAtom}, _Acc) ->
                 IsLocal = lists:member(PlayerID, State#state.local_player_ids),
                 LocalStr = if IsLocal -> " (LOCAL)"; true -> "" end,
@@ -544,7 +588,7 @@ debug_enhanced_state(State) ->
     % Show active explosions if any
     case maps:get(active_explosions_count, Stats) > 0 of
         true ->
-            io:format("   ðŸ’¥ Active Explosions:~n"),
+            io:format("   💥 Active Explosions:~n"),
             maps:fold(fun(Coord, ExpiryTime, _Acc) ->
                 TimeLeft = ExpiryTime - erlang:system_time(millisecond),
                 io:format("      ~w expires in ~wms~n", [Coord, TimeLeft])
@@ -555,7 +599,7 @@ debug_enhanced_state(State) ->
     % Show backend timing if available
     case maps:size(State#state.backend_timing) > 0 of
         true ->
-            io:format("   â±ï¸ Backend Timing Constants:~n"),
+            io:format("   ⏱️ Backend Timing Constants:~n"),
             maps:fold(fun(Key, Value, _Acc) ->
                 io:format("      ~w: ~w ms~n", [Key, Value])
             end, ok, State#state.backend_timing);
