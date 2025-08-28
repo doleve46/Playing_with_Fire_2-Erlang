@@ -4,9 +4,9 @@ import math
 import random
 import os
 import time
+from erlang_py import erlang
 import struct
 import select
-import json
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -357,19 +357,12 @@ class EnhancedGNGameVisualizer:
             return None
 
     def decode_erlang_data(self, binary_data: bytes) -> Optional[dict]:
-        """Enhanced Erlang binary term decoder with better error handling"""
+        """Decode Erlang binary term format using erlang_py."""
         try:
-            # For development, assume it's a string representation of Erlang terms
-            text = binary_data.decode('utf-8', errors='ignore')
-            if text.startswith('[') and (text.endswith(']') or text.endswith('].')):
-                # Remove trailing period if present
-                if text.endswith('].'):
-                    text = text[:-1]
-                # Use eval for development (not secure, but works for testing)
-                return eval(text)
-            return None
+            # The erlang.decode function handles the ETF format.
+            return erlang.decode(binary_data)
         except Exception as e:
-            print(f"❌ Error decoding Erlang data: {e}")
+            print(f"❌ Error decoding Erlang data with erlang_py: {e}")
             return None
 
     def handle_port_data(self, packets: List[bytes]):
