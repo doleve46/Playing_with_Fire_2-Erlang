@@ -304,33 +304,36 @@ class CleanGNVisualizer:
             print(f"❌ Unexpected parsing error: {e}")
             return None
 
-    def handle_port_data(self, data: bytes):
-        """Handle incoming data from Erlang port"""
-        parsed_data = self.parse_json_data(data)
-        if parsed_data is None:
-            return
+def handle_port_data(self, data: bytes):
+    """Handle incoming JSON data from Erlang port"""
+    parsed_data = self.parse_json_data(data)
+    if parsed_data is None:
+        return
 
-        print(f"📨 Received data type: {type(parsed_data)}")
+    print(f"📨 Received JSON data: {type(parsed_data)}")
 
-        # Handle different message types
-        if isinstance(parsed_data, list) and len(parsed_data) >= 2:
-            message_type = parsed_data[0]
-            message_data = parsed_data[1] if len(parsed_data) > 1 else {}
-            
-            print(f"📩 Message type: {message_type}")
-            
-            if message_type == 'movement_confirmation':
-                self.handle_movement_confirmation(message_data)
-            elif message_type == 'timer_update':
-                self.handle_timer_update(message_data)
-            elif message_type == 'fsm_update':
-                self.handle_fsm_update(message_data)
-            elif message_type == 'explosion_event':
-                self.handle_explosion_event(message_data)
-            else:
-                self.process_map_update(parsed_data)
+    # Handle JSON message format ONLY
+    if isinstance(parsed_data, dict):
+        message_type = parsed_data.get('type', 'unknown')
+        message_data = parsed_data.get('data', {})
+        timestamp = parsed_data.get('timestamp', 0)
+        
+        print(f"📩 JSON Message: {message_type} at {timestamp}")
+        
+        if message_type == 'map_update':
+            self.process_map_update(message_data)
+        elif message_type == 'movement_confirmation':
+            self.handle_movement_confirmation(message_data)
+        elif message_type == 'timer_update':
+            self.handle_timer_update(message_data)
+        elif message_type == 'fsm_update':
+            self.handle_fsm_update(message_data)
+        elif message_type == 'explosion_event':
+            self.handle_explosion_event(message_data)
         else:
-            self.process_map_update(parsed_data)
+            print(f"❓ Unknown message type: {message_type}")
+    else:
+        print(f"❌ Expected JSON dict, got: {type(parsed_data)}")
 
     def process_map_update(self, update_data):
         """Process map update from GN graphics server"""
