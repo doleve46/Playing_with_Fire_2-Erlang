@@ -312,7 +312,7 @@ def handle_port_data(self, data: bytes):
 
     print(f"📨 Received JSON data: {type(parsed_data)}")
 
-    # Handle JSON message format ONLY
+    # Handle JSON message format
     if isinstance(parsed_data, dict):
         message_type = parsed_data.get('type', 'unknown')
         message_data = parsed_data.get('data', {})
