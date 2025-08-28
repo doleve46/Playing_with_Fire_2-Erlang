@@ -7,7 +7,7 @@
 %% This Process tries to monitor al 4 of them - when he is successful he sends a 'ready' 
 %% message to cn_server, and proceed to work as before.
 %% Added explosion visualization support with direct function call interface.
-%% NOW USING JSON FOR ALL PYTHON COMMUNICATION (like GN servers)
+%% NOW USING JSON FOR ALL PYTHON COMMUNICATION
 %%% ------------------------------------------------------------------------------------------------------
 %% API
 -export([start_link/1, get_current_map/0, show_explosion/1]).
@@ -379,7 +379,7 @@ atom_to_utf8_binary(Other) ->
 create_json_python_visualizer_port() ->
     try
         % Use the updated Python visualizer that expects JSON input
-        Port = open_port({spawn, "python3 enhanced_map_live_port_json.py"},
+        Port = open_port({spawn, "python3 map_live_port.py"},
                         [binary, exit_status, {packet, 4}]),
         io:format("✅ Enhanced JSON Python port created: ~p~n", [Port]),
         Port
