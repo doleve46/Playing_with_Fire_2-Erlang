@@ -35,7 +35,14 @@ start() ->
     %% Left the loop after sending response to playmode (bot/human)
     %% Spawn gn_server and gn_graphics_server
     {ok, _Pid_gn_server} = gn_server:start_link({GNNumber, IsBot}),
-    {ok, _Pid_gn_graphics_server} = gn_graphics_server:start_link(NodeName).
+    %% Get the CN node name from the global registry to pass to graphics server
+    CNNodeName = case global:whereis_name(cn_start) of
+        Pid when is_pid(Pid) -> node(Pid);
+        undefined -> 
+            io:format("⚠️ Warning: CN node not found, crashing the system~n"),
+            exit({cn_node_not_found, self()})
+    end,
+    {ok, _Pid_gn_graphics_server} = gn_graphics_server:start_link(CNNodeName).
 
 gn_receive_loop(Menu_Pid) ->
     receive
