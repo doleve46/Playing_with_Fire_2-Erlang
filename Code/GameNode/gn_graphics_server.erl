@@ -1,5 +1,6 @@
 -module(gn_graphics_server).
 -behaviour(gen_server).
+%% TODO: Need to verify that a python port is created through cn_graphics and gn_graphics, and is responsive and works as intended.
 
 %% API
 -export([start_link/1]).
@@ -26,6 +27,8 @@
 %%% API
 %%%===================================================================
 
+%% Starts the enhanced GN graphics server
+-spec start_link(node()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(CNNode) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [CNNode], []).
 
@@ -33,11 +36,12 @@ start_link(CNNode) ->
 %%% gen_server callbacks
 %%%===================================================================
 
+%% Initialize the enhanced GN graphics server
 init([CNNode]) ->
     LocalGN = determine_local_gn(),
     LocalPlayerIDs = get_local_player_ids(LocalGN),
     
-    io:format("GN Graphics Server starting on ~w (Local GN: ~w, Players: ~w)~n", 
+    io:format("ðŸŽ® Enhanced GN Graphics Server starting on ~w (Local GN: ~w, Players: ~w)~n", 
               [node(), LocalGN, LocalPlayerIDs]),
     
     State = #state{
@@ -45,16 +49,19 @@ init([CNNode]) ->
         local_gn_name = LocalGN,
         local_player_ids = LocalPlayerIDs
     },
-    
+     %% trap exits
     process_flag(trap_exit, true),
+    
+    % Monitors ALL nodes in the cluster for connection up/down (message of the form {nodeup, Node} | {nodedown, Node}
     net_kernel:monitor_nodes(true),
     
     % Create Python port after a short delay
     erlang:send_after(50, self(), create_python_port),
     
-    io:format("GN Graphics Server initialized (waiting for CN updates)~n"),
+    io:format("âœ… Enhanced GN Graphics Server initialized (waiting for CN updates)~n"),
     {ok, State}.
 
+%% Handle synchronous calls
 handle_call(get_current_map, _From, State) ->
     {reply, State#state.current_map_state, State};
 
@@ -77,6 +84,7 @@ handle_call(get_local_info, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
+%% Handle asynchronous casts
 handle_cast({map_update, EnhancedMapState}, State) ->
     % Received enhanced map update from CN graphics server
     CurrentTime = erlang:system_time(millisecond),
@@ -85,21 +93,59 @@ handle_cast({map_update, EnhancedMapState}, State) ->
     {ActualMapState, DeadPlayers, BackendTiming, ActiveExplosions} = case EnhancedMapState of
         #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing, active_explosions := Explosions} ->
             % Full enhanced format with explosions
-            check_for_newly_dead_players(DeadPlayersMap, State#state.dead_players, State#state.local_player_ids),
+            ExplosionCount = maps:size(Explosions),
+            io:format("ðŸ—ºï¸ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
+                      [State#state.update_counter + 1, ExplosionCount]),
+            
+            % Check for newly dead players
+            NewDeaths = maps:filter(fun(PlayerID, _DeathInfo) ->
+                not maps:is_key(PlayerID, State#state.dead_players)
+            end, DeadPlayersMap),
+            
+            if map_size(NewDeaths) > 0 ->
+                NewDeathList = maps:to_list(NewDeaths),
+                io:format("ðŸ’€ New deaths detected by GN: ~p~n", [NewDeathList]),
+                
+                % Check if any deaths are for local players
+                lists:foreach(fun({PlayerID, {DeathTime, _LastState, LocalGNAtom}}) ->
+                    if LocalGNAtom =:= State#state.local_gn_name ->
+                        io:format("ðŸ©¸ LOCAL PLAYER ~w DIED on this GN! (Death time: ~w)~n", [PlayerID, DeathTime]);
+                    true ->
+                        io:format("ðŸ’€ Remote player ~w died on ~w~n", [PlayerID, LocalGNAtom])
+                    end
+                end, NewDeathList);
+            true -> ok
+            end,
+            
+            % Log new explosions
+            PreviousExplosions = maps:size(State#state.active_explosions),
+            if ExplosionCount > PreviousExplosions ->
+                NewExplosionCount = ExplosionCount - PreviousExplosions,
+                io:format("ðŸ’¥ ~w new explosions received from CN~n", [NewExplosionCount]);
+            ExplosionCount < PreviousExplosions ->
+                ExpiredCount = PreviousExplosions - ExplosionCount,
+                io:format("ðŸ’¨ ~w explosions expired~n", [ExpiredCount]);
+            true -> ok
+            end,
+            
             {GridData, DeadPlayersMap, Timing, Explosions};
             
         #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing} ->
             % Enhanced format without explosions
-            check_for_newly_dead_players(DeadPlayersMap, State#state.dead_players, State#state.local_player_ids),
+            io:format("ðŸ—ºï¸ GN received enhanced map update from CN (#~w) with timing & death info~n", 
+                      [State#state.update_counter + 1]),
             {GridData, DeadPlayersMap, Timing, State#state.active_explosions};
             
         #{map := GridData, dead_players := DeadPlayersMap} ->
             % Format without backend timing or explosions
-            check_for_newly_dead_players(DeadPlayersMap, State#state.dead_players, State#state.local_player_ids),
+            io:format("ðŸ—ºï¸ GN received map update from CN (#~w) with death info~n", 
+                      [State#state.update_counter + 1]),
             {GridData, DeadPlayersMap, State#state.backend_timing, State#state.active_explosions};
             
         _ ->
             % Old format - just the grid
+            io:format("ðŸ—ºï¸ GN received basic map update from CN (#~w)~n", 
+                      [State#state.update_counter + 1]),
             {EnhancedMapState, State#state.dead_players, State#state.backend_timing, State#state.active_explosions}
     end,
     
@@ -147,34 +193,44 @@ handle_cast({fsm_update, FSMData}, State) ->
 handle_cast(force_update, State) ->
     % Force update - just resend current state if we have it
     case State#state.current_map_state of
-        undefined -> ok;
-        MapState -> send_enhanced_map_to_python(State#state.python_port, MapState)
+        undefined ->
+            io:format("âš ï¸ No enhanced map state available for force update~n");
+        MapState ->
+            ExplosionCount = maps:size(State#state.active_explosions),
+            io:format("ðŸ”„ Force updating Python with current enhanced map state (~w explosions)~n", [ExplosionCount]),
+            send_enhanced_map_to_python(State#state.python_port, MapState)
     end,
     {noreply, State};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% Handle messages
 handle_info(create_python_port, State) ->
     % Create Python port for enhanced visualizer
+    io:format("ðŸ Creating enhanced Python visualizer port...~n"),
     Port = create_enhanced_python_port(State#state.local_gn_name),
     
     UpdatedState = State#state{python_port = Port},
     
     % If we already have enhanced map state from CN, send it
     case State#state.current_map_state of
-        undefined -> ok;
-        MapState -> send_enhanced_map_to_python(Port, MapState)
+        undefined ->
+            io:format("âœ… Enhanced Python port created, waiting for first CN update~n");
+        MapState ->
+            send_enhanced_map_to_python(Port, MapState),
+            io:format("âœ… Enhanced Python port created and current map state sent~n")
     end,
     
     {noreply, UpdatedState};
 
 % Handle Python port messages
 handle_info({Port, {data, Data}}, State) when Port == State#state.python_port ->
+    io:format("ðŸ Message from enhanced Python: ~p~n", [Data]),
     {noreply, State};
 
 handle_info({Port, closed}, State) when Port == State#state.python_port ->
-    io:format("Python port closed, restarting...~n"),
+    io:format("âš ï¸ Enhanced Python port closed, restarting...~n"),
     NewPort = create_enhanced_python_port(State#state.local_gn_name),
     
     % Resend current enhanced map state if available
@@ -186,23 +242,29 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
     {noreply, State#state{python_port = NewPort}};
 
 handle_info({nodedown, Node}, State) when Node == State#state.cn_node ->
-    io:format("CN node ~w went down~n", [Node]),
+    io:format("âš ï¸ CN node ~w went down~n", [Node]),
+    %% TODO: show something on screen for this time? add a variable in the state record that stops all timers?
     {noreply, State};
 
 handle_info({nodeup, Node}, State) when Node == State#state.cn_node ->
-    io:format("CN node ~w came back up~n", [Node]),
+    io:format("âœ… CN node ~w came back up~n", [Node]),
+    %% TODO: going back up mechanism - should request a full map, return all timers back to normal.
     {noreply, State};
 
 handle_info(Info, State) ->
+    io:format("â„¹ï¸ Unexpected message: ~p~n", [Info]),
     {noreply, State}.
 
+%% Cleanup on termination
 terminate(_Reason, State) ->
+    io:format("ðŸ›‘ Enhanced GN Graphics Server terminating~n"),
     if State#state.python_port =/= undefined ->
         port_close(State#state.python_port);
     true -> ok
     end,
     ok.
 
+%% Handle code changes
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -210,6 +272,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Enhanced GN Identification Functions
 %%%===================================================================
 
+%% Determine which GN this server is running on
 determine_local_gn() ->
     % Method 1: Try environment variable first
     case os:getenv("GN_ID") of
@@ -222,13 +285,15 @@ determine_local_gn() ->
                 "gn3" ++ _ -> gn3;
                 "gn4" ++ _ -> gn4;
                 _ ->
-                    io:format("Could not determine GN ID from node name ~p, defaulting to gn1~n", [NodeName]),
+                    % Method 3: Default fallback (should be configured properly in deployment)
+                    io:format("âš ï¸ Could not determine GN ID from node name ~p, defaulting to gn1~n", [NodeName]),
                     gn1
             end;
         GNStr ->
             list_to_atom(GNStr)
     end.
 
+%% Get the player IDs that belong to this GN
 get_local_player_ids(LocalGN) ->
     % Map GN nodes to player IDs based on game design
     GNToPlayers = #{
@@ -243,49 +308,95 @@ get_local_player_ids(LocalGN) ->
 %%% Enhanced Python Port Communication
 %%%===================================================================
 
+%% Create enhanced Python port for GN-specific visualizer
 create_enhanced_python_port(LocalGN) ->
     try
         % Set environment variable to identify which GN this is
         os:putenv("GN_ID", atom_to_list(LocalGN)),
         
-        % FIXED: Use the correct Python file name that exists
-        Port = open_port({spawn, "python3 gn_map_live.py"}, 
+        % Use the enhanced Python visualizer for GN nodes with death and explosion detection
+        Port = open_port({spawn, "python3 enhanced_gn_map_live.py"}, 
                         [binary, exit_status, {packet, 4}]),
-        io:format("Python visualizer port created for ~w~n", [LocalGN]),
+        io:format("âœ… Enhanced Python visualizer port created for ~w~n", [LocalGN]),
         
         Port
     catch
         _:Error ->
-            io:format("Failed to create Python port: ~p~n", [Error]),
+            io:format("âŒ Failed to create enhanced Python port: ~p~n", [Error]),
             undefined
     end.
 
+%% Send enhanced map data to Python visualizer
 send_enhanced_map_to_python(undefined, _MapState) ->
-    ok;
+    io:format("âš ï¸ No enhanced Python port available~n");
 
 send_enhanced_map_to_python(Port, MapState) ->
     try
         % Send enhanced map state as binary term
         MapBinary = term_to_binary(MapState),
-        port_command(Port, MapBinary)
+        port_command(Port, MapBinary),
+        
+        % Log details about what we're sending (less frequent to reduce spam)
+        case MapState of
+            #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing, active_explosions := Explosions} ->
+                DeadCount = maps:size(DeadPlayers),
+                ExplosionCount = maps:size(Explosions),
+                TimingKeys = maps:keys(Timing),
+                % Only log every 40 updates (every 2 seconds at 50ms intervals)
+                case get(log_counter) of
+                    undefined -> put(log_counter, 1);
+                    Counter when Counter >= 40 ->
+                        io:format("ðŸ“¤ Enhanced map forwarded to Python visualizer (~w, dead: ~w, explosions: ~w, timing: ~w)~n", 
+                                 [LocalGN, DeadCount, ExplosionCount, TimingKeys]),
+                        put(log_counter, 1);
+                    Counter ->
+                        put(log_counter, Counter + 1)
+                end;
+            #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing} ->
+                DeadCount = maps:size(DeadPlayers),
+                TimingKeys = maps:keys(Timing),
+                % Only log every 40 updates (every 2 seconds at 50ms intervals)
+                case get(log_counter) of
+                    undefined -> put(log_counter, 1);
+                    Counter when Counter >= 40 ->
+                        io:format("ðŸ“¤ Enhanced map forwarded to Python visualizer (~w, dead: ~w, timing: ~w)~n", 
+                                 [LocalGN, DeadCount, TimingKeys]),
+                        put(log_counter, 1);
+                    Counter ->
+                        put(log_counter, Counter + 1)
+                end;
+            _ ->
+                ok
+        end
     catch
         _:Error ->
-            ok
+            io:format("âŒ Error sending enhanced data to Python: ~p~n", [Error])
     end.
 
+%% Send movement confirmation to Python visualizer
 send_movement_confirmation_to_python(undefined, _ConfirmationData) ->
-    ok;
+    io:format("âš ï¸ No Python port available for movement confirmation~n");
 
 send_movement_confirmation_to_python(Port, ConfirmationData) ->
     try
         ConfirmationMsg = [movement_confirmation, ConfirmationData],
         MsgBinary = term_to_binary(ConfirmationMsg),
-        port_command(Port, MsgBinary)
+        port_command(Port, MsgBinary),
+        
+        case ConfirmationData of
+            #{entity_type := player, entity_data := #{player_id := PlayerID}} ->
+                io:format("ðŸƒ Movement confirmation forwarded for player ~w~n", [PlayerID]);
+            #{entity_type := bomb, entity_data := #{from_pos := Pos}} ->
+                io:format("ðŸ’£ Movement confirmation forwarded for bomb at ~w~n", [Pos]);
+            _ ->
+                io:format("ðŸ“¤ Movement confirmation forwarded~n")
+        end
     catch
         _:Error ->
-            ok
+            io:format("âŒ Error sending movement confirmation to Python: ~p~n", [Error])
     end.
 
+%% Send timer update to Python visualizer
 send_timer_update_to_python(undefined, _TimerData) ->
     ok;
 
@@ -296,9 +407,10 @@ send_timer_update_to_python(Port, TimerData) ->
         port_command(Port, MsgBinary)
     catch
         _:Error ->
-            ok
+            io:format("âŒ Error sending timer update to Python: ~p~n", [Error])
     end.
 
+%% Send FSM update to Python visualizer
 send_fsm_update_to_python(undefined, _FSMData) ->
     ok;
 
@@ -309,34 +421,14 @@ send_fsm_update_to_python(Port, FSMData) ->
         port_command(Port, MsgBinary)
     catch
         _:Error ->
-            ok
+            io:format("âŒ Error sending FSM update to Python: ~p~n", [Error])
     end.
 
 %%%===================================================================
-%%% Enhanced Helper Functions
+%%% Additional Enhanced Helper Functions
 %%%===================================================================
 
-check_for_newly_dead_players(NewDeadPlayers, OldDeadPlayers, LocalPlayerIDs) ->
-    % Check for newly dead players
-    NewDeaths = maps:filter(fun(PlayerID, _DeathInfo) ->
-        not maps:is_key(PlayerID, OldDeadPlayers)
-    end, NewDeadPlayers),
-    
-    if map_size(NewDeaths) > 0 ->
-        NewDeathList = maps:to_list(NewDeaths),
-        
-        % Check if any deaths are for local players
-        lists:foreach(fun({PlayerID, {DeathTime, _LastState, LocalGNAtom}}) ->
-            IsLocal = lists:member(PlayerID, LocalPlayerIDs),
-            if IsLocal ->
-                io:format("LOCAL PLAYER ~w DIED on this GN! (Death time: ~w)~n", [PlayerID, DeathTime]);
-            true ->
-                io:format("Remote player ~w died on ~w~n", [PlayerID, LocalGNAtom])
-            end
-        end, NewDeathList);
-    true -> ok
-    end.
-
+%% Get enhanced statistics about current state
 get_enhanced_state_statistics(State) ->
     #{
         local_gn => State#state.local_gn_name,
@@ -351,9 +443,10 @@ get_enhanced_state_statistics(State) ->
         backend_timing_keys => maps:keys(State#state.backend_timing)
     }.
 
+%% Enhanced debug function to print current state
 debug_enhanced_state(State) ->
     Stats = get_enhanced_state_statistics(State),
-    io:format("Enhanced GN Graphics Server Debug State:~n"),
+    io:format("ðŸ” Enhanced GN Graphics Server Debug State:~n"),
     io:format("   Local GN: ~w~n", [maps:get(local_gn, Stats)]),
     io:format("   Local Players: ~w~n", [maps:get(local_players, Stats)]),
     io:format("   Update Counter: ~w~n", [maps:get(update_counter, Stats)]),
@@ -365,10 +458,10 @@ debug_enhanced_state(State) ->
     io:format("   Backend Timing Keys: ~w~n", [maps:get(backend_timing_keys, Stats)]),
     io:format("   Last Update: ~w~n", [maps:get(last_update_time, Stats)]),
     
-    % Show dead players details if any
+    % Show dead players details
     case maps:get(dead_players_count, Stats) > 0 of
         true ->
-            io:format("   Dead Players Details:~n"),
+            io:format("   ðŸ’€ Dead Players Details:~n"),
             maps:fold(fun(PlayerID, {DeathTime, _LastState, LocalGNAtom}, _Acc) ->
                 IsLocal = lists:member(PlayerID, State#state.local_player_ids),
                 LocalStr = if IsLocal -> " (LOCAL)"; true -> "" end,
@@ -380,7 +473,7 @@ debug_enhanced_state(State) ->
     % Show active explosions if any
     case maps:get(active_explosions_count, Stats) > 0 of
         true ->
-            io:format("   Active Explosions:~n"),
+            io:format("   ðŸ’¥ Active Explosions:~n"),
             maps:fold(fun(Coord, ExpiryTime, _Acc) ->
                 TimeLeft = ExpiryTime - erlang:system_time(millisecond),
                 io:format("      ~w expires in ~wms~n", [Coord, TimeLeft])
@@ -391,24 +484,28 @@ debug_enhanced_state(State) ->
     % Show backend timing if available
     case maps:size(State#state.backend_timing) > 0 of
         true ->
-            io:format("   Backend Timing Constants:~n"),
+            io:format("   â±ï¸ Backend Timing Constants:~n"),
             maps:fold(fun(Key, Value, _Acc) ->
                 io:format("      ~w: ~w ms~n", [Key, Value])
             end, ok, State#state.backend_timing);
         false -> ok
     end.
 
+%% Check if a player is local to this GN
 is_local_player(PlayerID, State) ->
     lists:member(PlayerID, State#state.local_player_ids).
 
+%% Get local dead players only
 get_local_dead_players(State) ->
     maps:filter(fun(PlayerID, _DeathInfo) ->
         is_local_player(PlayerID, State)
     end, State#state.dead_players).
 
+%% Check if there are any active explosions in this GN's area
 has_local_explosions(State) ->
     maps:size(State#state.active_explosions) > 0.
 
+%% Get explosion statistics for this GN
 get_explosion_stats(State) ->
     CurrentTime = erlang:system_time(millisecond),
     #{
