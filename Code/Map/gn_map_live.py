@@ -4,7 +4,7 @@ import math
 import random
 import os
 import time
-from erlang_py import erlang
+import erlang
 import struct
 import select
 from typing import Dict, List, Tuple, Optional, Any
@@ -228,6 +228,11 @@ class EnhancedGNGameVisualizer:
         self.camera_shake = 0.0
         self.selected_tile = None
 
+        # Debug counters
+        self.packets_received = 0
+        self.decode_attempts = 0
+        self.decode_successes = 0
+
         # GN identification - determine which GN this is
         self.local_gn = self.determine_local_gn()  # gn1, gn2, gn3, or gn4
         self.local_gn_player_ids = self.get_local_player_ids()  # Which players belong to this GN
@@ -321,86 +326,242 @@ class EnhancedGNGameVisualizer:
         return gn_to_players.get(self.local_gn, [])
 
     def read_port_data(self) -> Optional[List[bytes]]:
-        """Enhanced port data reading with better error handling"""
+        """Enhanced port data reading with better error handling for Erlang ports"""
         try:
-            # Check if data is available on stdin
-            ready, _, _ = select.select([sys.stdin], [], [], 0)
-            if not ready:
-                return None
+            # Try the advanced method first (for Linux/Unix systems)
+            try:
+                # For Erlang ports, we need to read from stdin in a different way
+                # Set stdin to non-blocking mode
+                import fcntl
+                import os
+                
+                # Get current flags
+                fd = sys.stdin.fileno()
+                fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                
+                try:
+                    # Try to read available data
+                    data = os.read(fd, 4096)  # Read up to 4KB at a time
+                    if not data:
+                        return None
+                        
+                    self.port_buffer += data
+                    
+                    # Debug: Show raw data received
+                    if data:
+                        print(f"🔍 Raw data received: {len(data)} bytes")
+                        print(f"🔍 First 50 bytes (hex): {data[:50].hex()}")
+                    
+                except (OSError, IOError):
+                    # No data available - this is normal
+                    return None
+                finally:
+                    # Reset stdin to blocking mode
+                    fcntl.fcntl(fd, fcntl.F_SETFL, fl)
+                    
+            except ImportError:
+                # fcntl not available (Windows?), try alternative method
+                print("⚠️ fcntl not available, trying select method")
+                ready, _, _ = select.select([sys.stdin], [], [], 0)
+                if not ready:
+                    return None
+                    
+                data = sys.stdin.buffer.read()
+                if not data:
+                    return None
+                    
+                self.port_buffer += data
+                print(f"🔍 Raw data received via select: {len(data)} bytes")
 
-            # Read available data
-            data = sys.stdin.buffer.read()
-            if not data:
-                return None
-
-            self.port_buffer += data
-
-            # Process complete packets (4-byte length prefix + data)
+            # Process complete packets
             packets = []
+            
+            # Try different packet formats that Erlang might send
+            
+            # Format 1: Try 4-byte length prefix (big-endian)
             while len(self.port_buffer) >= 4:
-                # Read packet length (big-endian 32-bit)
-                packet_length = struct.unpack('>I', self.port_buffer[:4])[0]
-
-                if len(self.port_buffer) >= 4 + packet_length:
-                    # Complete packet available
-                    packet_data = self.port_buffer[4:4 + packet_length]
-                    self.port_buffer = self.port_buffer[4 + packet_length:]
-                    packets.append(packet_data)
-                else:
-                    # Incomplete packet, wait for more data
+                try:
+                    packet_length = struct.unpack('>I', self.port_buffer[:4])[0]
+                    print(f"🔍 Trying format 1 - packet length: {packet_length}")
+                    
+                    if packet_length > 1000000:  # Sanity check - packets shouldn't be > 1MB
+                        print(f"⚠️ Packet length {packet_length} seems too large, trying format 2")
+                        break
+                        
+                    if len(self.port_buffer) >= 4 + packet_length:
+                        packet_data = self.port_buffer[4:4 + packet_length]
+                        self.port_buffer = self.port_buffer[4 + packet_length:]
+                        packets.append(packet_data)
+                        print(f"✅ Format 1 packet extracted: {len(packet_data)} bytes")
+                    else:
+                        break
+                except struct.error:
                     break
+            
+            # Format 2: Try 2-byte length prefix (big-endian) - common for Erlang
+            if not packets and len(self.port_buffer) >= 2:
+                try:
+                    packet_length = struct.unpack('>H', self.port_buffer[:2])[0]
+                    print(f"🔍 Trying format 2 - packet length: {packet_length}")
+                    
+                    if len(self.port_buffer) >= 2 + packet_length:
+                        packet_data = self.port_buffer[2:2 + packet_length]
+                        self.port_buffer = self.port_buffer[2 + packet_length:]
+                        packets.append(packet_data)
+                        print(f"✅ Format 2 packet extracted: {len(packet_data)} bytes")
+                except struct.error:
+                    pass
+            
+            # Format 3: Try raw ETF data without length prefix
+            if not packets and len(self.port_buffer) > 0:
+                print(f"🔍 Trying format 3 - raw ETF data: {len(self.port_buffer)} bytes")
+                try:
+                    # Try to decode the entire buffer as ETF
+                    decoded = erlang.decode(self.port_buffer)
+                    # If successful, use the entire buffer as one packet
+                    packets.append(self.port_buffer)
+                    self.port_buffer = b''
+                    print(f"✅ Format 3 packet extracted: raw ETF data")
+                except Exception as e:
+                    print(f"⚠️ Format 3 failed: {e}")
+                    # Keep some data for next iteration but don't let buffer grow infinitely
+                    if len(self.port_buffer) > 10000:
+                        print("⚠️ Buffer too large, clearing")
+                        self.port_buffer = b''
 
             return packets if packets else None
 
         except Exception as e:
-            # This is normal when no data is available
+            print(f"❌ Error reading port data: {e}")
             return None
 
     def decode_erlang_data(self, binary_data: bytes) -> Optional[dict]:
-        """Decode Erlang binary term format using erlang_py."""
+        """Decode Erlang binary term format using erlang_py with enhanced error handling"""
         try:
-            # The erlang.decode function handles the ETF format.
-            return erlang.decode(binary_data)
+            print(f"🔍 Attempting to decode {len(binary_data)} bytes")
+            print(f"🔍 First 20 bytes (hex): {binary_data[:20].hex()}")
+            print(f"🔍 First 20 bytes (ascii): {binary_data[:20]}")
+            
+            # The erlang.decode function handles the ETF format
+            decoded_data = erlang.decode(binary_data)
+            print(f"✅ Successfully decoded Erlang data: {type(decoded_data)}")
+            
+            # Log the structure of decoded data for debugging
+            if isinstance(decoded_data, (list, tuple)):
+                print(f"🔍 Decoded data is a {type(decoded_data).__name__} with {len(decoded_data)} elements")
+                if len(decoded_data) > 0:
+                    print(f"🔍 First element type: {type(decoded_data[0])}")
+                    print(f"🔍 First element: {decoded_data[0]}")
+            elif isinstance(decoded_data, dict):
+                print(f"🔍 Decoded data is a dict with keys: {list(decoded_data.keys())}")
+            else:
+                print(f"🔍 Decoded data: {decoded_data}")
+            
+            return decoded_data
+            
         except Exception as e:
             print(f"❌ Error decoding Erlang data with erlang_py: {e}")
+            print(f"🔍 Binary data length: {len(binary_data)}")
+            if len(binary_data) > 0:
+                print(f"🔍 First byte: 0x{binary_data[0]:02x}")
+                # ETF format should start with version byte (131 = 0x83)
+                if binary_data[0] == 131:
+                    print("✅ Data starts with ETF version byte (131)")
+                    if len(binary_data) > 1:
+                        print(f"🔍 ETF type byte: 0x{binary_data[1]:02x}")
+                else:
+                    print(f"⚠️ Data doesn't start with ETF version byte, got: 0x{binary_data[0]:02x}")
             return None
 
     def handle_port_data(self, packets: List[bytes]):
         """Enhanced packet handling with real-time event processing"""
-        for packet in packets:
+        self.packets_received += len(packets)
+        
+        for i, packet in enumerate(packets):
+            print(f"📦 Processing packet {i+1}/{len(packets)}")
+            self.decode_attempts += 1
             decoded_data = self.decode_erlang_data(packet)
+            
             if decoded_data:
-                # Handle different message types
+                self.decode_successes += 1
+                print(f"✅ Packet {i+1} decoded successfully")
+                
+                # Handle different message types based on the structure
                 if isinstance(decoded_data, list) and len(decoded_data) >= 2:
                     message_type = decoded_data[0]
                     message_data = decoded_data[1] if len(decoded_data) > 1 else {}
                     
+                    print(f"🏷️ Message type: {message_type}")
+                    
                     if message_type == 'movement_confirmation':
-                        print("🏃 Received enhanced movement confirmation from GN")
+                        print("🏃 Received enhanced movement confirmation from CN")
                         self.handle_movement_confirmation(message_data)
                     elif message_type == 'timer_update':
-                        print("⏱️ Received timer update from GN")
+                        print("⏱️ Received timer update from CN")
                         self.handle_timer_update(message_data)
                     elif message_type == 'fsm_update':
-                        print("🎰 Received FSM state update from GN")
+                        print("🎰 Received FSM state update from CN")
                         self.handle_fsm_update(message_data)
                     elif message_type == 'explosion_event':
-                        print("💥 Received explosion event from GN")
+                        print("💥 Received explosion event from CN")
                         self.handle_explosion_event(message_data)
+                    elif message_type == 'map_update':
+                        print("🗺️ Received map update from CN")
+                        self.process_map_update(message_data)
                     else:
+                        print(f"❓ Unknown message type: {message_type}, treating as map update")
                         # Handle as regular map update
                         self.process_map_update(decoded_data)
-                elif self.waiting_for_initial_map:
-                    # First data should be from GN graphics server
-                    print("🗺️ Received initial enhanced map from GN graphics server")
-                    success = self.process_initial_map(decoded_data)
-                    if success:
-                        self.waiting_for_initial_map = False
-                        self.map_initialized = True
-                        print("✅ Initial enhanced map loaded! Now listening for GN updates...")
+                        
+                elif isinstance(decoded_data, dict):
+                    print("📋 Received dictionary data, checking for map structure")
+                    if 'map' in decoded_data:
+                        print("🗺️ Found map data in dictionary")
+                        if self.waiting_for_initial_map:
+                            print("🗺️ Processing as initial map")
+                            success = self.process_initial_map(decoded_data)
+                            if success:
+                                self.waiting_for_initial_map = False
+                                self.map_initialized = True
+                                print("✅ Initial enhanced map loaded! Now listening for updates...")
+                        else:
+                            print("🔄 Processing as map update")
+                            self.process_map_update(decoded_data)
+                    else:
+                        print(f"❓ Dictionary without 'map' key, keys: {list(decoded_data.keys())}")
+                        
+                elif isinstance(decoded_data, (list, tuple)) and len(decoded_data) > 0:
+                    print(f"� Received {type(decoded_data).__name__} data, checking structure")
+                    
+                    # Check if this looks like a grid/map structure
+                    if (len(decoded_data) >= 10 and 
+                        all(isinstance(row, (list, tuple)) for row in decoded_data)):
+                        print("🗺️ Data looks like a game grid")
+                        
+                        if self.waiting_for_initial_map:
+                            print("🗺️ Processing as initial map from CN graphics server")
+                            # Wrap in expected format
+                            map_data = {'map': decoded_data}
+                            success = self.process_initial_map(map_data)
+                            if success:
+                                self.waiting_for_initial_map = False
+                                self.map_initialized = True
+                                print("✅ Initial enhanced map loaded! Now listening for CN updates...")
+                        else:
+                            print("🔄 Processing as map update")
+                            self.process_map_update(decoded_data)
+                    else:
+                        print(f"❓ Unrecognized data structure: {type(decoded_data)} with {len(decoded_data)} elements")
+                        if len(decoded_data) > 0:
+                            print(f"🔍 First element: {decoded_data[0]}")
                 else:
-                    # Regular map update
-                    self.process_map_update(decoded_data)
+                    print(f"❓ Unhandled decoded data type: {type(decoded_data)}")
+                    
+            else:
+                print(f"❌ Failed to decode packet {i+1}")
+                
+        print(f"📦 Finished processing {len(packets)} packets")
 
     def process_initial_map(self, map_data: dict) -> bool:
         """Process initial map with enhanced backend timing information"""
@@ -2654,6 +2815,13 @@ class EnhancedGNGameVisualizer:
                 features_surface = self.mini_font.render(features_text, True, COLORS['TEXT_GOLD'])
                 features_rect = features_surface.get_rect(center=(self.current_width // 2, self.current_height // 2 + 40))
                 self.screen.blit(features_surface, features_rect)
+                
+                # Debug information
+                debug_text = f"Debug: Packets received: {self.packets_received} | Decode attempts: {self.decode_attempts} | Successes: {self.decode_successes} | Erlang lib: True"
+                debug_color = COLORS['TEXT_ORANGE'] if self.packets_received == 0 else COLORS['TEXT_GREEN']
+                debug_surface = self.mini_font.render(debug_text, True, debug_color)
+                debug_rect = debug_surface.get_rect(center=(self.current_width // 2, self.current_height // 2 + 70))
+                self.screen.blit(debug_surface, debug_rect)
 
             # Update display
             pygame.display.flip()
