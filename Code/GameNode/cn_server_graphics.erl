@@ -132,10 +132,17 @@ handle_cast(_Msg, State) ->
 %% Handle messages
 handle_info(setup_subscriptions, State) ->
     io:format("📡 Setting up enhanced mnesia subscriptions...~n"),
-    Tables = get_all_tables(),
-    SubscribedTables = setup_mnesia_subscriptions(Tables),
-    io:format("✅ Subscribed to tables: ~p~n", [SubscribedTables]),
-    {noreply, State#state{subscribed_tables = SubscribedTables}};
+    try
+        Tables = get_all_tables(),
+        SubscribedTables = setup_mnesia_subscriptions(Tables),
+        io:format("✅ Subscribed to tables: ~p~n", [SubscribedTables]),
+        {noreply, State#state{subscribed_tables = SubscribedTables}}
+    catch
+        Class:Error:Stacktrace ->
+            io:format("❌ Error in setup_subscriptions: ~p:~p~n", [Class, Error]),
+            io:format("❌ Stacktrace: ~p~n", [Stacktrace]),
+            {noreply, State}
+    end;
 
 handle_info(monitor_gn_graphics_servers, State) ->
     io:format("🚀 Attempting to monitor all GN graphics servers...~n"),
@@ -145,6 +152,7 @@ handle_info(monitor_gn_graphics_servers, State) ->
 
 handle_info(create_python_port, State) ->
     io:format("🐍 Creating enhanced Python port...~n"),
+    io:format("🔍 Graphics server received create_python_port message~n"),
     Port = create_python_visualizer_port(),
     % Create initial enhanced map state
     InitialMapState = create_enhanced_map_state(State),
@@ -156,7 +164,13 @@ handle_info(create_python_port, State) ->
     send_map_to_all_targets(UpdatedState),
     io:format("✅ Enhanced Python port created and initial map sent~n"),
     %% Send ready message to cn_server
-    cn_server ! {graphics_ready, self()},
+    case global:whereis_name(cn_server) of
+        Pid when is_pid(Pid) ->
+            Pid ! {graphics_ready, self()},
+            io:format("✅ Graphics ready message sent to CN server~n");
+        undefined ->
+            io:format("⚠️ CN server not found when sending graphics_ready message~n")
+    end,
     {noreply, UpdatedState};
 
 handle_info(periodic_update, State) ->
@@ -299,10 +313,12 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
 
 handle_info({'DOWN', MonitorRef, process, RemotePid, noconnection}, State) ->
     %% TODO: deal with GN graphics servers disconnecting.
+    io:format("🔍 Received DOWN message for disconnected GN graphics server~n"),
     {noreply, State};
 
 handle_info(Info, State) ->
     io:format("ℹ️ Unexpected message: ~p~n", [Info]),
+    io:format("🔍 Graphics server still alive after unexpected message~n"),
     {noreply, State}.
 
 %% Cleanup on termination
@@ -317,9 +333,13 @@ terminate(Reason, State) ->
    
     % Terminate GN graphics servers
     lists:foreach(fun({_Node, Pid}) ->
-        case is_pid(Pid) andalso is_process_alive(Pid) of
+        case is_pid(Pid) of
             true ->
-                exit(Pid, shutdown);
+                try
+                    exit(Pid, shutdown)
+                catch
+                    _:_ -> ok  % Ignore errors when trying to exit remote processes
+                end;
             false -> ok
         end
     end, State#state.gn_graphics_servers),
@@ -793,49 +813,34 @@ setup_mnesia_subscriptions(Tables) ->
     end, [], Tables).
 
 %% Monitor enhanced graphics servers on all GN nodes
--spec monitor_gn_graphics_servers(GNNodes::list()) -> [{reference(), atom()}].
 monitor_gn_graphics_servers(GNNodes)->
-    RefsList = attempt_gn_graphics_monitoring(GNNodes),
-    gn_monitoring_receive_loop(RefsList, []).
-
-gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
-    receive
-        {'DOWN', Ref, process, _Pid, noproc} ->
-            case lists:keyfind(Ref, 1, RefsList) of
-                false -> % unknown message - unsure what to do with it
-                    io:format("❌ *Unknown monitoring failure message received:~n~w~n",[{'DOWN', Ref, process, _Pid, noproc}]),
-                    gn_monitoring_receive_loop(RefsList, ServersNotFound);
-                {_, NodeName} -> % a monitoring to NodeName has failed - add to failed servers
-                    io:format("❌ *A monitoring request has failed on node ~w. Accumulating before retrying..~n",[NodeName]),
-                    gn_monitoring_receive_loop(lists:keydelete(Ref, 1, RefsList), [NodeName | ServersNotFound])
-            end;
-        AnythingElse -> % re-send to self in 5 seconds
-            erlang:send_after(5000, self(), AnythingElse),
-            gn_monitoring_receive_loop(RefsList, ServersNotFound)
-     after 1500 -> % timeout is 1.5sec
-        case length(ServersNotFound) =/= 0 of
-            true ->
-                io:format("❌ Failed to monitor ~p servers. The following were not monitored:~w~n", [length(ServersNotFound), ServersNotFound]),
-                NewRefs = monitor_gn_graphics_servers(ServersNotFound),
-                NewRefs ++ RefsList;
-            false -> % every server was successfully monitored
-                io:format("✅ All GN graphics server were monitored successfully!~n"),
-                RefsList
-         end
-    end.
-
-attempt_gn_graphics_monitoring(NodeList) ->
-    RefsList = lists:map(fun(Node) ->
-        Ref = erlang:monitor(process, {gn_graphics_server, Node}),
-        io:format("Sent request to monitor process ~w~n", [Node]),
-        {Ref, Node} end, NodeList),
-    timer:sleep(1000), % wait for 1 second before looking at the messages we received
-    RefsList.
+    % First, get the PIDs of the GN graphics servers
+    GNServerPids = lists:foldl(fun(Node, Acc) ->
+        case rpc:call(Node, erlang, whereis, [gn_graphics_server]) of
+            Pid when is_pid(Pid) ->
+                io:format("✅ Found GN graphics server on ~w: ~p~n", [Node, Pid]),
+                [{Node, Pid} | Acc];
+            undefined ->
+                io:format("⚠️ GN graphics server not found on ~w~n", [Node]),
+                Acc;
+            {badrpc, Reason} ->
+                io:format("❌ RPC failed for ~w: ~p~n", [Node, Reason]),
+                Acc
+        end
+    end, [], GNNodes),
+    
+    % Monitor the found processes
+    lists:foreach(fun({Node, Pid}) ->
+        Ref = erlang:monitor(process, Pid),
+        io:format("🔍 Monitoring GN graphics server ~p on ~w~n", [Pid, Node])
+    end, GNServerPids),
+    
+    GNServerPids.
 
 %% Create enhanced Python visualizer port
 create_python_visualizer_port() ->
     try
-        Port = open_port({spawn, "python3 enhanced_map_live_port.py"},
+        Port = open_port({spawn, "python3 src/Graphics/map_live.py"},
                         [binary, exit_status, {packet, 4}]),
         io:format("✅ Enhanced Python port created: ~p~n", [Port]),
         Port
@@ -972,23 +977,26 @@ send_enhanced_map_to_python(State) ->
 
 %% Send enhanced map to all GN graphics servers
 send_enhanced_map_to_gn_servers(State) ->
+    GNCount = length(State#state.gn_graphics_servers),
+    io:format("🔄 CN attempting to send map update to ~w GN graphics servers~n", [GNCount]),
     lists:foreach(fun({Node, Pid}) ->
-        case is_pid(Pid) andalso is_process_alive(Pid) of
+        case is_pid(Pid) of
             true ->
                 try
                     % Send enhanced map state with full backend information
                     gen_server:cast(Pid, {map_update, State#state.current_map_state}),
+                    io:format("📡 Map update sent to GN server on ~w~n", [Node]),
                     case State#state.update_counter rem 40 == 0 of  % Log every 2 seconds
                         true ->
                             ExplosionCount = maps:size(State#state.active_explosions),
                             io:format("📡 Enhanced map (with timers, FSM state & ~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
                         false -> ok
                     end
-            catch
-                _:Error ->
-                    io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
-            end;
-        false ->
-            io:format("⚠️ GN server on ~w not alive~n", [Node])
+                catch
+                    _:Error ->
+                        io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
+                end;
+            false ->
+                io:format("⚠️ Invalid PID for GN server on ~w: ~p~n", [Node, Pid])
         end
     end, State#state.gn_graphics_servers).

@@ -39,7 +39,7 @@
 start_link(PlayerNumber) ->
     ServerName = list_to_atom("io_handler_" ++ integer_to_list(PlayerNumber)),
     gen_server:start_link({local, ServerName}, ?MODULE, 
-        [PlayerNumber], []).
+        [PlayerNumber, true], []).  % true = keyboard mode for human players
 
 %% @doc Send input (for testing)
 send_input(PlayerNumber, Input) ->

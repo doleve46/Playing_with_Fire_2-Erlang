@@ -33,9 +33,9 @@ start() ->
     NodeName = atom_to_list(node()),
     GNNumber = list_to_integer([lists:nth(3, NodeName)]),
     %% Left the loop after sending response to playmode (bot/human)
-    %% Spawn gn_server and gn_server_graphics
+    %% Spawn gn_server and gn_graphics_server
     {ok, _Pid_gn_server} = gn_server:start_link({GNNumber, IsBot}),
-    {ok, _Pid_gn_server_graphics} = gn_server_graphics:start_link(NodeName).
+    {ok, _Pid_gn_graphics_server} = gn_graphics_server:start_link(NodeName).
 
 gn_receive_loop(Menu_Pid) ->
     receive
@@ -46,6 +46,24 @@ gn_receive_loop(Menu_Pid) ->
         {cn_start, Request} ->
             handle_cn_start_request(Request, Menu_Pid),
             gn_receive_loop(Menu_Pid);
+        %% Handle EXIT messages from crashed processes (like menu timeout)
+        {'EXIT', Pid, Reason} ->
+            io:format("Process ~p exited with reason: ~p~n", [Pid, Reason]),
+            if 
+                Pid == Menu_Pid, Reason == badsig ->
+                    io:format("Menu process crashed due to timeout, defaulting to bot mode~n"),
+                    % Send bot decision to CN and exit loop
+                    case global:whereis_name(cn_start) of
+                        CNPid when is_pid(CNPid) ->
+                            io:format("Found CN process, sending timeout bot decision~n"),
+                            CNPid ! {self(), playmode, true};
+                        undefined ->
+                            io:format("CN process not found during timeout handling~n")
+                    end,
+                    true;  % exit the loop to continue startup
+                true ->
+                    gn_receive_loop(Menu_Pid)
+            end;
         %% ignore other messages and log them to console
         Unknown ->
             io:format("GN_start received unknown message: ~p~n", [Unknown]),
@@ -55,24 +73,48 @@ gn_receive_loop(Menu_Pid) ->
 
 handle_menu_request({play_clicked}, Menu_Pid) ->
     io:format("GN_start received play_clicked request~n"),
-    %% Forward the request to the cn_server
-    {cn_start} ! {self(), node(), connect_request},
+    %% Forward the request to the cn_server using global name
+    case global:whereis_name(cn_start) of
+        Pid when is_pid(Pid) ->
+            io:format("Found CN process, sending connect request~n"),
+            Pid ! {self(), node(), connect_request};
+        undefined ->
+            io:format("CN process not found in global registry. Connected nodes: ~p~n", [nodes()])
+    end,
     gn_receive_loop(Menu_Pid);
-handle_menu_request({exit_clicked}, Menu_Pid) ->
+handle_menu_request({exit_clicked}, _Menu_Pid) ->
     io:format("GN_start received exit_clicked request~n"),
-    %% Forward the request to the cn_server
-    {cn_start} ! {self(), node(), disconnect_request},
-    gn_receive_loop(Menu_Pid);
+    %% Forward the request to the cn_server using global name
+    case global:whereis_name(cn_start) of
+        Pid when is_pid(Pid) ->
+            io:format("Found CN process, sending disconnect request~n"),
+            Pid ! {self(), node(), disconnect_request};
+        undefined ->
+            io:format("CN process not found in global registry. Connected nodes: ~p~n", [nodes()])
+    end,
+    gn_receive_loop(_Menu_Pid);
 handle_menu_request({play_as_human}, _Menu_Pid) ->
     io:format("GN_start received play_as_human request~n"),
-    %% Forward the request to the cn_server
-    {cn_start} ! {self(), playmode, false},
+    %% Forward the request to the cn_server using global name
+    case global:whereis_name(cn_start) of
+        Pid when is_pid(Pid) ->
+            io:format("Found CN process, sending playmode request~n"),
+            Pid ! {self(), playmode, false};
+        undefined ->
+            io:format("CN process not found in global registry. Connected nodes: ~p~n", [nodes()])
+    end,
     false; % leave the loop
 handle_menu_request({play_as_bot}, _Menu_Pid) ->
     io:format("GN_start received play_as_bot request~n"),
-    %% Forward the request to the cn_server
-    {cn_start} ! {self(), playmode, true},
-    true; % leave the loop
+    %% Forward the request to the cn_server using global name
+    case global:whereis_name(cn_start) of
+        Pid when is_pid(Pid) ->
+            io:format("Found CN process, sending playmode request~n"),
+            Pid ! {self(), playmode, true};
+        undefined ->
+            io:format("CN process not found in global registry. Connected nodes: ~p~n", [nodes()])
+    end,
+    false; % leave the loop (same as play_as_human)
 handle_menu_request(Unknown, Menu_Pid) ->
     io:format("GN_start received unknown menu request: ~p~n", [Unknown]),
     gn_receive_loop(Menu_Pid).

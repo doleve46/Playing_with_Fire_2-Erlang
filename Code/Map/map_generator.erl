@@ -603,7 +603,7 @@ visualize_map(Grid) ->
             Char = case {TileType, BombType, PlayerID} of
                 {_, ?NORMAL_BOMB, _} -> " B";        % Bomb takes priority
                 {_, ?REMOTE_BOMB, _} -> " R";        % Remote bomb
-                {_, ?FREEZE_BOMB_ITEM, _} -> " F";   % Freeze bomb
+                {_, ?FREEZE_BOMB, _} -> " F";   % Freeze bomb
                 {_, _, ?PLAYER_1} -> " 1";           % Player 1
                 {_, _, ?PLAYER_2} -> " 2";           % Player 2
                 {_, _, ?PLAYER_3} -> " 3";           % Player 3
@@ -633,7 +633,7 @@ visualize_map(Grid) ->
 
 %% Start the Python port for graphical interface
 start_grid_port() ->
-    Port = open_port({spawn, "python3 map_live_port.py"}, 
+    Port = open_port({spawn, "python3 Graphics/map_live_port.py"}, 
                      [binary, exit_status, {packet, 4}]),
     register(grid_port, Port),
     Port.
@@ -764,10 +764,10 @@ test_generation() ->
     % Visualize
     visualize_map(Grid),
 
-    % Send to Python port for graphical interface
-    io:format("Starting Python port for visualization...~n"),   % for debugging
-    start_grid_port(),
-    send_grid(Grid),
+    % NOTE: Python port visualization removed to avoid conflicts with cn_server_graphics
+    % If you need to test the map visually, use cn_server_graphics instead
+    % start_grid_port(),
+    % send_grid(Grid),
     
     % Export for testing
     %export_map(Grid, "test_unified_map.erl"),

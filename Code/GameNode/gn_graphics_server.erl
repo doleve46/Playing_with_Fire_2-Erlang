@@ -86,6 +86,7 @@ handle_call(_Request, _From, State) ->
 
 %% Handle asynchronous casts
 handle_cast({map_update, EnhancedMapState}, State) ->
+    io:format("📡 GN Graphics Server received map update from CN~n"),
     % Received enhanced map update from CN graphics server
     CurrentTime = erlang:system_time(millisecond),
     
@@ -280,10 +281,10 @@ determine_local_gn() ->
             % Method 2: Check node name pattern
             NodeName = atom_to_list(node()),
             case NodeName of
-                "gn1" ++ _ -> gn1;
-                "gn2" ++ _ -> gn2;
-                "gn3" ++ _ -> gn3;
-                "gn4" ++ _ -> gn4;
+                "GN1" ++ _ -> gn1;
+                "GN2" ++ _ -> gn2;
+                "GN3" ++ _ -> gn3;
+                "GN4" ++ _ -> gn4;
                 _ ->
                     % Method 3: Default fallback (should be configured properly in deployment)
                     io:format("⚠️ Could not determine GN ID from node name ~p, defaulting to gn1~n", [NodeName]),
@@ -314,8 +315,8 @@ create_enhanced_python_port(LocalGN) ->
         % Set environment variable to identify which GN this is
         os:putenv("GN_ID", atom_to_list(LocalGN)),
         
-        % Use the enhanced Python visualizer for GN nodes with death and explosion detection
-        Port = open_port({spawn, "python3 enhanced_gn_map_live.py"}, 
+        % Use Python 3.6 with manually installed dataclasses
+        Port = open_port({spawn, "python3 src/Code/Map/gn_map_live.py"}, 
                         [binary, exit_status, {packet, 4}]),
         io:format("✅ Enhanced Python visualizer port created for ~w~n", [LocalGN]),
         
@@ -514,3 +515,4 @@ get_explosion_stats(State) ->
             (ExpiryTime - CurrentTime) < 200  % Less than 200ms left
         end, State#state.active_explosions))
     }.
+

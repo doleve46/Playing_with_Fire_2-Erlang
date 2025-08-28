@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1]).
+-export([start_link/1, generate_atom_table_names/2]).
 
 -export([get_registered_name/1]).
 
@@ -38,7 +38,7 @@
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link({GN_number, IsBot}) ->
     GN_name = list_to_atom("GN" ++ integer_to_list(GN_number) ++ "_server"),
-    gen_server:start_link({global, GN_name}, ?MODULE, [[GN_number, IsBot]], [{priority, high}]).
+    gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, IsBot], [{priority, high}]).
 
 %%%===================================================================
 %%% gen_server callbacks
