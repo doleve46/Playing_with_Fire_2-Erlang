@@ -12,89 +12,315 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2]).
+-export([start_link/1]).
+
+-export([get_registered_name/1]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-    code_change/3]).
-
--define(SERVER, ?MODULE).
-
--record(gn_state, {
-    tiles_table_name,
-    bombs_table_name,
-    powerups_table_name,
-    players_table_name
-}).
-
--include("mnesia_records.hrl").
--include_lib("/home/dolev/Documents/Erlang_project/Code/Objects/object_records.hrl"). %% todo: need to find a way around full-path
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
+-include_lib("mnesia_records.hrl").
+-include_lib("stdlib/include/qlc.hrl").
+%%% Linux compatible
+%-include_lib("src/clean-repo/Code/Objects/object_records.hrl").
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
+%%% Windows compatible - Fixed relative paths
+-include("../Objects/object_records.hrl").
+-include("../common_parameters.hrl").
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-%% @doc Spawns the server and registers the local name (unique)
--spec(start_link(GN_number::integer(), PlayerType::atom('bot'|'human')) ->
+%% @doc Spawns the server and registers name globally as 'GNx_server', priority set to high 
+-spec(start_link({GN_number::integer(), IsBot::boolean()}) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(GN_number, PlayerType) ->
-    %% PlayerType = bot/human
-    GN_name = list_to_atom("GN_" ++ integer_to_list(GN_number)),
-    gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, PlayerType], []). % register GN names GLOBALLY
+start_link({GN_number, IsBot}) ->
+    GN_name = list_to_atom("GN" ++ integer_to_list(GN_number) ++ "_server"),
+    gen_server:start_link({global, GN_name}, ?MODULE, [[GN_number, IsBot]], [{priority, high}]).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-%% @private
 %% @doc Initializes the server
--spec(init(Args :: term()) ->
-{ok, State :: #gn_state{}} | {ok, State :: #gn_state{}, timeout() | hibernate} |
-{stop, Reason :: term()} | ignore).
+-spec(init(list()) ->
+    {ok, State :: #gn_state{}} | {ok, State :: #gn_state{}, timeout() | hibernate} |
+    {stop, Reason :: term()} | ignore).
 init([GN_number, PlayerType]) ->
     Data = #gn_state{
         tiles_table_name = generate_atom_table_names(GN_number, "_tiles"),
         bombs_table_name = generate_atom_table_names(GN_number, "_bombs"),
         powerups_table_name = generate_atom_table_names(GN_number, "_powerups"),
         players_table_name = generate_atom_table_names(GN_number, "_players")},
+    %% Initialize tiles and players from the generated map
     initialize_tiles(Data#gn_state.tiles_table_name),
-    initialize_players(Data#gn_state.players_table_name, PlayerType, GN_number), % todo
+    initialize_players(Data#gn_state.players_table_name, PlayerType, GN_number),
     {ok, Data}.
 
-%% @private
+%%% ============== Handle call ==============
+
 %% @doc Handling call messages
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
     State :: #gn_state{}) ->
-{reply, Reply :: term(), NewState :: #gn_state{}} |
-{reply, Reply :: term(), NewState :: #gn_state{}, timeout() | hibernate} |
-{noreply, NewState :: #gn_state{}} |
-{noreply, NewState :: #gn_state{}, timeout() | hibernate} |
-{stop, Reason :: term(), Reply :: term(), NewState :: #gn_state{}} |
-{stop, Reason :: term(), NewState :: #gn_state{}}).
+    {reply, Reply :: term(), NewState :: #gn_state{}} |
+    {reply, Reply :: term(), NewState :: #gn_state{}, timeout() | hibernate} |
+    {noreply, NewState :: #gn_state{}} |
+    {noreply, NewState :: #gn_state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: #gn_state{}} |
+    {stop, Reason :: term(), NewState :: #gn_state{}}).
 handle_call(_Request, _From, State = #gn_state{}) ->
-{reply, ok, State}.
+    {reply, ok, State}.
 
-%% @private
-%% @doc Handling cast messages
+%%% ============== Handle cast ==============
+
 -spec(handle_cast(Request :: term(), State :: #gn_state{}) ->
-{noreply, NewState :: #gn_state{}} |
-{noreply, NewState :: #gn_state{}, timeout() | hibernate} |
-{stop, Reason :: term(), NewState :: #gn_state{}}).
-handle_cast(_Request, State = #gn_state{}) ->
-{noreply, State}.
+    {noreply, NewState :: #gn_state{}} |
+    {noreply, NewState :: #gn_state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #gn_state{}}).
+%% @doc Handle player requests
+handle_cast({player_message, Request}, State = #gn_state{}) ->
+    ThisGN = get_registered_name(self()),
+    case Request of
+        %% * Player movement request mechanism
+        {move_request, PlayerNum, ThisGN , Direction} -> % move request from a player in our quarter
+            Move_verdict = req_player_move:handle_player_movement(PlayerNum, Direction, State),
+            case Move_verdict of
+                can_move ->
+                    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
+                    player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
+                cant_move ->
+                    req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
+                    player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
+                dest_not_here ->
+                    %% extracts the player's record from mnesia's player table
+                    Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+                    %% Calculate destination coordinates
+                    Destination_coord = req_player_move:calc_new_coordinates(Player#mnesia_players.position, Direction),
+                    gen_server:cast(cn_server,
+                        {query_request, get_registered_name(self()), 
+                            {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction}})
+            end,
+            {noreply, State};
+        {move_request, PlayerNum, TargetGN, Direction} -> % move request from a player outside my quarter
+            gen_server:cast(cn_server, {forward_request, TargetGN, {move_request, player, PlayerNum, Direction}}),
+            {noreply, State};
 
-%% @private
+        %% * Player requesting to place bombs mechanism
+        {place_bomb_request, PlayerNum, ThisGN} -> % place bomb request from a player in our quarter
+            case bomb_helper_functions:place_bomb(PlayerNum, State#gn_state.players_table_name, State#gn_state.bombs_table_name) of
+                bomb_placed ->
+                    %% bomb was placed successfully, added into mnesia table by helper function
+                    %% Notify player FSM of successful placement
+                    player_fsm:gn_response(PlayerNum, {bomb_result, accepted});
+                Error ->
+                    %% Notify player FSM of failed placement
+                    %% Error logging for debugging
+                    {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
+                    io:format("[~2..0B:~2..0B:~2..0B]: Failed to place bomb for player ~p: ~p~n", [Hour, Min, Sec, PlayerNum, Error]),
+                    error_logger:info_msg("Failed to place bomb for player ~p: ~p", [PlayerNum, Error]),
+                    player_fsm:gn_response(PlayerNum, {bomb_result, denied})
+            end,
+            {noreply, State};
+        {place_bomb_request, PlayerNum, TargetGN} -> % place bomb request from a player outside my quarter
+            gen_server:cast(cn_server, {forward_request, TargetGN, {place_bomb_request, PlayerNum, ThisGN}}),
+            {noreply, State};
+
+        %% * Player requesting to ignite remote bombs
+        %% Must check if any of his bombs are 'remote' type, and if any of them are - ignite them
+        %% This takes place within cn_server, as the bombs can be across all quarters on theory
+        {ignite_bomb_request, PlayerNum} ->
+            gen_server:cast(cn_server, {query_request, self(), {ignite_bomb_request, PlayerNum}}),
+            {noreply, State};
+
+        %% * Cooldown updates
+        {cooldown_update, ThisGN, UpdateContent} ->
+            req_player_move:update_player_cooldowns(UpdateContent, State#gn_state.players_table_name),
+            {noreply, State};
+        {cooldown_update, TargetGN, UpdateContent} ->
+            gen_server:cast(cn_server, {forward_request, TargetGN, {cooldown_update, TargetGN, UpdateContent}}),
+            {noreply, State}
+    end;
+
+handle_cast({forwarded, Request}, State = #gn_state{}) ->
+    %% * handles forwarded messages
+    case Request of
+        {move_request, player, PlayerNum, Direction} ->
+            %% *  handles a move request of a player inside my quarter whose FSM is on another node
+            %% extracts the player's record from mnesia's player table
+            Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+            %% Calculate destination coordinates
+            Destination_coord = req_player_move:calc_new_coordinates(Player#mnesia_players.position, Direction),
+
+            case req_player_move:handle_player_movement(PlayerNum, Direction, State) of
+                can_move -> 
+                    %% move is possible. Update data, open halfway timer, respond to player FSM
+                    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
+                    %% respond to the player FSM via CN->hosting GN
+                    gen_server:cast(cn_server,
+                        {forward_request, Player#mnesia_players.local_gn, 
+                            {gn_answer, {move_result, player, PlayerNum, accepted}}
+                        });
+                cant_move -> % can't move, obstacle blocking
+                    req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
+                    gen_server:cast(cn_server,
+                        {forward_request, Player#mnesia_players.local_gn, 
+                            {gn_answer, {move_result, player, PlayerNum, denied}}
+                        });
+                dest_not_here -> % destination coordinate is overseen by another GN
+                    gen_server:cast(cn_server,
+                        {query_request, get_registered_name(self()), 
+                            {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction}})
+            end,
+            {noreply, State};
+        
+        %% * A GN who hosts a player (physically) receives a response for his movement request
+        {gn_answer, {move_result, player, PlayerNum, Answer}} ->
+            %% Pass the message to the Player FSM
+            %% Look for the player in your own records (to find his Pid)
+            Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+            case erlang:is_record(Player_record, mnesia_players) of 
+                true -> 
+                    %% Everything as normal (found the record), pass the message
+                    player_fsm:gn_response(PlayerNum, {move_result, Answer});
+                false -> % crash the process
+                    erlang:error(record_not_found, [node(), Player_record])
+            end,
+            {noreply, State};
+
+        %% * A GN got a respond for a movement request of a player/bomb to another quarter (separate pattern-matching) - this is the forwarded reply handler
+        %% * This deals with situations where the Player FSM is on the same node as the relevant GN as well as when its on another
+        {movement_clearance, player, PlayerNum, Answer} ->
+            req_player_move:handle_player_movement_clearance(PlayerNum, Answer, State#gn_state.players_table_name),
+            {noreply, State};
+
+        {movement_clearance, bomb, BombIdentifier, Answer} -> % todo: implement bomb movement clearance
+            req_player_move:handle_bomb_movement_clearance(BombIdentifier, Answer, State#gn_state.bombs_table_name),
+            {noreply, State};
+
+        %% * A player has changed coordinates, resulting in a target GN change.
+        %% * this message is sent by the previous GN to let the player FSM update his target
+        {new_target_gn, player, PlayerNum, New_GN} ->
+            player_fsm:update_target_gn(PlayerNum, New_GN);
+
+        {cooldown_update, _ThisGN, UpdateContent} ->
+            req_player_move:update_player_cooldowns(UpdateContent, State#gn_state.players_table_name),
+            {noreply, State};
+
+         %% * Player requesting to place bombs
+        {place_bomb_request, PlayerNum, AskingGN} ->
+            case bomb_helper_functions:place_bomb(PlayerNum, State#gn_state.players_table_name, State#gn_state.bombs_table_name) of
+                bomb_placed ->
+                    %% bomb was placed successfully, added into mnesia table by helper function
+                    %% Player is NOT physically no our machine - forward the response through cn server to local gn server
+                    gen_server:cast(cn_server, {forward_request, AskingGN, {bomb_result, accepted}});
+                Error ->
+                    %% Notify player FSM of failed placement
+                    %% Error logging for debugging
+                    {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
+                    io:format("[~2..0B:~2..0B:~2..0B]: Failed to place bomb for player ~p: ~p~n", [Hour, Min, Sec, PlayerNum, Error]),
+                    error_logger:info_msg("Failed to place bomb for player ~p: ~p", [PlayerNum, Error]),
+                    %% Player is NOT physically no our machine - forward the response through cn server to local gn server
+                    gen_server:cast(cn_server, {forward_request, AskingGN, {PlayerNum, bomb_result, denied}})
+            end,
+            {noreply, State};
+
+        %% * An answer from target GN for a bomb placement was forwarded back to us (local GN) - notify player FSM
+        {PlayerNum, bomb_result, Answer} ->
+            player_fsm:gn_response(PlayerNum, {bomb_result, Answer}),
+            {noreply, State}
+            
+    end;
+
+
+%% * received a move request to the quarter of this GN from another GN - differntiate bomb from player
+handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
+    case EntityType of
+        player -> % a player wants to pass to this GN
+            {PlayerNum, Destination_coord, Direction, BuffsList, AskingGN} = ActualRequest,
+            %% checks destination coordinate for obstacles (if the move is possible),
+            %% this should also "kickstart" any action caused by this attempted movement
+            Move_result = req_player_move:check_for_obstables(Destination_coord, BuffsList, Direction, State),
+            gen_server:cast(cn_server, 
+                {forward_request, AskingGN,
+                    {movement_clearance, player, PlayerNum, Move_result}});
+        bomb -> % a bomb wants to pass to this GN
+            placeholder %! not yet implemented
+    end,
+    {noreply, State};
+
+
+%% * A player came into my quarter of the map - open a timer, let the player FSM know
+handle_cast({incoming_player, PlayerNum}, State) ->
+    Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+    req_player_move:check_entered_coord(Player_record),
+    {noreply, State};
+
+%% * A tile updates his status (broken/transition to one_hit)
+handle_cast({tile_update, Message, Position}, State = #gn_state{}) ->
+    case Message of
+        tile_breaking -> % tile broke from explosion, remove from table
+            tile_helper_functions:break_tile(Position, State#gn_state.tiles_table_name);
+        one_hit -> % tile was hit, but is of two_hit type - update in mnesia table
+            ok = tile_helper_functions:update_to_one_hit(Position, State#gn_state.tiles_table_name) % ! should crash if tile not found
+    end,
+    {noreply, State};
+
+%% * this is a catch-all&ignore clause
+handle_cast(_Request, State = #gn_state{}) -> 
+    {noreply, State}.
+
+%%% ============== Handle info ==============
+
 %% @doc Handling all non call/cast messages
 -spec(handle_info(Info :: timeout() | term(), State :: #gn_state{}) ->
-{noreply, NewState :: #gn_state{}} |
-{noreply, NewState :: #gn_state{}, timeout() | hibernate} |
-{stop, Reason :: term(), NewState :: #gn_state{}}).
+    {noreply, NewState :: #gn_state{}} |
+    {noreply, NewState :: #gn_state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #gn_state{}}).
+
+
+%% * Timer/counter for player movement has finished
+%% * Checks if the player stays in current GNs boundaries:
+%% *    If it changes GNs, transfer the players table entry to the new GN, and update the Player FSM of that change
+%% * Regardless, checks destination for power-ups/explosions
+handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
+        case req_player_move:read_and_update_coord(player, PlayerNum, State#gn_state.players_table_name) of
+            {retain_gn, Player_record} ->
+                req_player_move:check_entered_coord(Player_record, State); %% Player FSM is updated through here
+
+            {switch_gn, Current_GN, New_GN} ->
+                %% transfer records to new GN
+                gen_server:cast(cn_server,
+                    {transfer_records, player, PlayerNum, Current_GN, New_GN}),
+                %% Let player FSM know of the GN change
+                player_fsm:update_target_gn(PlayerNum, New_GN);
+
+            _ -> % ! got an error somewhere, crash the process. this is mostly for debugging as of now
+                erlang:error(failure_when_updating_record, [node(), PlayerNum])
+        end,
+        {noreply, State};
+
+%% * handle bomb explosions
+handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
+    %% Read and remove bomb from mnesia table. Pass record to cn_server to process explosion
+    {atomic, Record} = req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name),
+    gen_server:cast(cn_server, 
+        {query_request, get_registered_name(self()), 
+            {handle_bomb_explosion, Record#mnesia_bombs.position, Record#mnesia_bombs.radius}}),
+    %% Update player's active bombs count, let playerFSM know.
+    notify_owner_of_bomb_explosion(Record#mnesia_bombs.owner, State);
+        
+%% * Handle start-of-game message from CN - pass it to player_fsm to "unlock" it
+handle_info(start_game, State) ->
+    PlayerNumber = req_player_move:node_name_to_number(node()),
+    player_fsm:start_signal(list_to_atom("player_" ++ integer_to_list(PlayerNumber))),
+    {noreply, State};
+
+%% * default, catch-all and ignore
 handle_info(_Info, State = #gn_state{}) ->
 {noreply, State}.
 
-%% @private
 %% @doc This function is called by a gen_server when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
 %% necessary cleaning up. When it returns, the gen_server terminates
@@ -104,7 +330,6 @@ handle_info(_Info, State = #gn_state{}) ->
 terminate(_Reason, _State = #gn_state{}) ->
 ok.
 
-%% @private
 %% @doc Convert process state when code is changed
 -spec(code_change(OldVsn :: term() | {down, term()}, State :: #gn_state{},
 Extra :: term()) ->
@@ -115,7 +340,13 @@ code_change(_OldVsn, State = #gn_state{}, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-%% helper function to create mnesia table names
+
+%% @doc returns the registered name of a Pid
+get_registered_name(Pid) ->
+    {_, Registered_name} = process_info(Pid, registered_name),
+    Registered_name.
+
+%% @doc helper function to create mnesia table names
 generate_atom_table_names(Number, Type) ->
     list_to_atom("gn" ++ integer_to_list(Number) ++ Type).
 
@@ -135,26 +366,60 @@ initialize_tiles(TableName) ->
         end,
     mnesia:activity(transaction, Fun).
 
-initialize_players(TableName, PlayerType, GN_number) ->
-    Player_name = list_to_atom("player_" ++ integer_to_list(GN_number)),
+
+-spec initialize_players(TableName:: atom(), PlayerIsBot:: boolean(), GN_number::1|2|3|4) -> term().
+initialize_players(TableName, PlayerIsBot, GN_number) ->
     %% start io_handler gen_server
-    %% Dumb case to create a boolean for initialization. todo: everything in this init should later be streamlined
-    IsBotBool = case PlayerType of
-                    bot -> true;
-                    _ -> false
-                end,
-    {ok, IO_pid} = io_handler:start_link(GN_number, IsBotBool),
+    {ok, IO_pid} = case PlayerIsBot of
+        true -> % bot
+            %% ? FOR NOW, DIFFICULTY IS SET TO 'EASY' BY DEFAULT. CAN BE RANDOMIZED?
+            bot_handler:start_link(GN_number, easy);
+        false -> % player
+            io_handler:start_link(GN_number)
+    end,
+    %% Initialize player_fsm process based on data within mnesia table (as initialized whe map was created)
     Fun = fun() ->
-        {atomic, [PlayerRecord = #mnesia_players{}]} = mnesia:read(TableName, Player_name),
-        {ok, FSM_pid} = player_fsm:start_link(GN_number, PlayerRecord#mnesia_players.position, self(), IsBotBool, IO_pid),
-        %% update FSM Pid in the IO process
-        ok = io_handler:set_player_pid(IO_pid, FSM_pid),
+        [PlayerRecord = #mnesia_players{}] = mnesia:read(TableName, GN_number),
+        {ok, FSM_pid} = player_fsm:start_link(GN_number, self(), PlayerIsBot, IO_pid),
         %% Update mnesia record
         UpdatedRecord = PlayerRecord#mnesia_players{
-            original_node_id = node(),
-            gn_pid = self(),
+            local_gn = self(),
+            target_gn = self(), % by default starts at his own GN's quarter
             io_handler_pid = IO_pid,
-            pid = FSM_pid},
+            pid = FSM_pid,
+            bot = PlayerIsBot},
         mnesia:write(TableName, UpdatedRecord, write)
         end,
     mnesia:activity(transaction, Fun).
+
+
+notify_owner_of_bomb_explosion(OwnerID, State) ->
+    %% Notifies owner for the bomb's explosion, as well as updates players' mnesia table for bombs_placed
+    case OwnerID of
+        none -> %default bomb, no player owner
+            ok;
+        Pid -> % there's a real player's Pid on the bomb
+            Fun = fun() -> 
+                Result = qlc:eval(qlc:q(
+                    [ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.pid == Pid]
+                )),
+                case Result of
+                    [{player, PlayerRecord}] -> %% update active bomb count in mnesia table
+                        mnesia:write(PlayerRecord#mnesia_players{bombs_placed = (PlayerRecord#mnesia_players.bombs_placed - 1)});
+                    [] -> ok % no player found
+                end,
+                Result % return list back from function
+            end, % fun()'s "end"
+            {atomic, Result} = mnesia:activity(transaction, Fun),
+            case Result of
+                [{player, MatchingPlayerRecord}] -> % player found within GN
+                    player_fsm:bomb_exploded(MatchingPlayerRecord#mnesia_players.pid);
+                [] -> % player not found within GN, forward request to CN
+                    %% send cn_server a request to update active bomb in mnesia, and also notify relevant fsm_player
+                    gen_server:cast(cn_server, 
+                        {player_bomb_exploded, Pid});
+                _ReturnValue -> % ! shouldn't happen - error out, this is for debugging
+                    erlang:error(bad_return_value, [Pid, Result])
+            end,
+            ok
+    end.

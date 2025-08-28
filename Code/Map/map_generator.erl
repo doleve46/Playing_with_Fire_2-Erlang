@@ -3,37 +3,10 @@
 -export([generate_map/0, generate_map/1, generate_map_with_powerups/0, generate_map_with_powerups/1,
          visualize_map/1, get_cell_at/3, export_map/2, test_generation/0]).
 
-%% Tile type definitions (now atoms)
--define(FREE, free).
--define(BREAKABLE, breakable).
--define(UNBREAKABLE, unbreakable).
--define(STRONG, strong).
--define(PLAYER_START, player_start).
-
-%% Power-up definitions (atoms)
--define(NO_POWERUP, none).
--define(MOVE_SPEED, move_speed).
--define(REMOTE_IGNITION, remote_ignition).
--define(REPEAT_BOMBS, repeat_bombs).
--define(KICK_BOMB, kick_bomb).
--define(PHASED, phased).
--define(PLUS_BOMBS, plus_bombs).
--define(BIGGER_EXPLOSION, bigger_explosion).
--define(PLUS_LIFE, plus_life).
--define(FREEZE_BOMB, freeze_bomb).
-
-%% Bomb type definitions (atoms)
--define(NO_BOMB, none).
--define(NORMAL_BOMB, normal_bomb).
--define(REMOTE_BOMB, remote_bomb).
--define(FREEZE_BOMB_ITEM, freeze_bomb_item).
-
-%% Player ID definitions (atoms)
--define(NO_PLAYER, none).
--define(PLAYER_1, player_1).
--define(PLAYER_2, player_2).
--define(PLAYER_3, player_3).
--define(PLAYER_4, player_4).
+%% linux compatible
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
+%% Windows compatible
+-include("../common_parameters.hrl").
 
 -define(MAP_SIZE, 16).
 
@@ -219,7 +192,7 @@ set_borders(Grid) ->
     end, Grid2).
 
 clear_player_areas(Grid) ->
-    Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    Corners = [{1, 1}, {14, 1}, {1, 14}, {14, 14}],
     
     lists:foldl(fun({CX, CY}, AccGrid) ->
         % Clear 2x2 area around each corner
@@ -655,6 +628,28 @@ visualize_map(Grid) ->
     io:format("  1-4 = Players~n").
 
 %% ===================================================================
+%% Port communication for python graphical interface
+%% ===================================================================
+
+%% Start the Python port for graphical interface
+start_grid_port() ->
+    Port = open_port({spawn, "python3 map_live_port.py"}, 
+                     [binary, exit_status, {packet, 4}]),
+    register(grid_port, Port),
+    Port.
+
+%% Send the grid to the Python port for visualization
+send_grid(Grid) ->
+    Bin = term_to_binary(convert_array_grid_to_list(Grid)),
+    grid_port ! {self(), {command, Bin}}.
+
+%% Convert the array grid to a list of lists for Python visualization
+convert_array_grid_to_list(Grid) ->
+    [ [ array:get(Y, array:get(X, Grid)) || Y <- lists:seq(0, ?MAP_SIZE - 1) ]
+        || X <- lists:seq(0, ?MAP_SIZE - 1) ].
+
+
+%% ===================================================================
 %% Export Map to Erlang Module (Enhanced for unified grid)
 %% ===================================================================
 
@@ -768,9 +763,14 @@ test_generation() ->
     
     % Visualize
     visualize_map(Grid),
+
+    % Send to Python port for graphical interface
+    io:format("Starting Python port for visualization...~n"),   % for debugging
+    start_grid_port(),
+    send_grid(Grid),
     
     % Export for testing
-    export_map(Grid, "test_unified_map.erl"),
+    %export_map(Grid, "test_unified_map.erl"),
     
     io:format("✅ Unified grid test complete!~n"),
     Grid.

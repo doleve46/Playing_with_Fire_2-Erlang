@@ -12,14 +12,19 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3]).
+-export([start_link/3, pickup/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
--include("common_parameters.hrl").
 -include("object_records.hrl").
+%% linux compatible
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
+
+%% Windows compatible
+-include("../common_parameters.hrl").
+
 
 
 %%%===================================================================
@@ -28,15 +33,18 @@
 
 %% @doc Spawns the server and registers the local name (unique)
 -spec(start_link(Pos_x::integer, Pos_y::integer,
-    Type:: 'movespeed'|'regular_bomb'|'remote_bomb'|'repeating_bomb'|
-        'bomb_kick'|'freeze_bomb'|'move_through_bomb'|'more_bombs'|'range'|
-        'extra_life') ->
+    Type:: ?MOVE_SPEED|?REMOTE_IGNITION|?REPEAT_BOMBS|?KICK_BOMB|
+        ?PHASED|?PLUS_BOMBS|?BIGGER_EXPLOSION|?PLUS_LIFE|?FREEZE_BOMB) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link(Pos_x, Pos_y, Type) ->
-    Server_name = list_to_atom("powerup_" ++ integer_to_list(Pos_x) ++ "_" ++ integer_to_list(Pos_y)),
+    Name = list_to_atom("powerup_" ++ integer_to_list(Pos_x) ++ "_" ++ integer_to_list(Pos_y)),
     % registers *locally* as atom called 'tile_X_Y' (X,Y - numbers indicating location)
     % TODO: maybe there's no need to register, but just hold at the GN a database of the position, type and Pid of tiles
-    gen_server:start_link({local, Server_name}, ?MODULE, [[Pos_x, Pos_y], Type, node()], []).
+    gen_server:start_link({local, Name}, ?MODULE, [[Pos_x, Pos_y], Type, node()], []).
+
+
+pickup(Pid) ->
+    gen_server:cast(Pid, pickup).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -62,8 +70,6 @@ init([Position, Type, Node_ID]) ->
     {stop, Reason :: term(), NewState :: #powerup_state{}}).
 handle_call(Request, _From, State = #powerup_state{}) ->
     case Request of
-        pickup -> % pick up power-up, terminate process and return power-up type
-            {stop, State#powerup_state.type, State};
         _ -> % todo: catch-all, don't have any other interaction I can think of for now
             {stop, catchall_clause, State}
     end.
@@ -74,6 +80,9 @@ handle_call(Request, _From, State = #powerup_state{}) ->
     {noreply, NewState :: #powerup_state{}} |
     {noreply, NewState :: #powerup_state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #powerup_state{}}).
+handle_cast(pickup, State = #powerup_state{}) ->
+    {stop, normal, State};
+
 handle_cast(_Request, State = #powerup_state{}) ->
     {noreply, State}.
 

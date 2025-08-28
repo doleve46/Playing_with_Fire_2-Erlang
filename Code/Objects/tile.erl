@@ -11,14 +11,17 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4]).
+-export([start_link/4, damage_taken/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
     code_change/3]).
 
 %-define(SERVER, ?MODULE).
--include("common_parameters.hrl").
+%% linux compatible
+%-include_lib("src/clean-repo/Code/common_parameters.hrl").
+%% Windows compatible
+-include("../common_parameters.hrl").
 
 -include("object_records.hrl").
 
@@ -30,14 +33,17 @@
 
 %% @doc Spawns the server and registers the local name (unique)
 -spec(start_link(Pos_x::integer, Pos_y::integer,
-    Type:: 'unbreakable'|'breakable'|'two_hit'|'one_hit',
+    Type:: 'unbreakable'|'breakable'|?STRONG|'one_hit',
     Contains::any() ) -> % todo: update later when finalized
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link(Pos_x, Pos_y, Type, Contains) ->
     Server_name = list_to_atom("tile_" ++ integer_to_list(Pos_x) ++ "_" ++ integer_to_list(Pos_y)),
     % registers *locally* as atom called 'tile_X_Y' (X,Y - numbers indicating location)
-    % TODO: maybe there's no need to register, but just hold at the GN a database of the position, type and Pid of tiles
-    gen_server:start_link({local, Server_name}, ?MODULE, [[Pos_x, Pos_y], Type, Contains], []).
+    % ? maybe there's no need to register, but just hold at the GN a database of the position, type and Pid of tiles
+    gen_server:start_link({global, Server_name}, ?MODULE, [[Pos_x, Pos_y], Type, Contains], []).
+
+damage_taken(TilePid) ->
+    gen_server:cast(TilePid, inflict_damage).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -66,23 +72,9 @@ init([Position, Type, Contains]) ->
     {stop, Reason :: term(), Reply :: term(), NewState :: #tile_state{}} |
     {stop, Reason :: term(), NewState :: #tile_state{}}).
 
-handle_call(Request, _From, State = #tile_state{}) ->
-    % mechanism: stops itself if needs be, returns the 'contains' field
-    case Request of
-        hi -> case State#tile_state.type of
-                     unbreakable -> % damage to unbreakable tile does nothing
-                        {reply, unbreakable, State};
-                     breakable -> % damage to breakable tile breaks it, letting the GN know about the 'drop'
-                         {stop, normal, State#tile_state.contains ,State}; % calls terminate callback function
-                     two_hit -> % moves to 2nd phase of breaking
-                         New_State = State#tile_state{type = one_hit},
-                         {reply, one_hit, New_State};
-                    one_hit -> % being hit again - breaks the tile
-                        {stop, normal, State#tile_state.contains, State} % calls terminate callback function, replies with 'contains'
-                 end;
-        terminate -> {stop, normal, State}
-            % NO BASE CASE - todo: necessary? add later?
-    end.
+handle_call(_Request, _From, State = #tile_state{}) ->
+    %% no handle call is impelemented, default setting
+    {reply, ok, State}.
 
 %% @private
 %% @doc Handling cast messages - async. messaging
@@ -90,6 +82,21 @@ handle_call(Request, _From, State = #tile_state{}) ->
     {noreply, NewState :: #tile_state{}} |
     {noreply, NewState :: #tile_state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #tile_state{}}).
+
+handle_cast(inflict_damage, State = #tile_state{}) ->
+    %% React to being hit by an explosion based on tile type
+    case State#tile_state.type of
+        unbreakable -> % damage to unbreakable tile does nothing
+            {noreply, State};
+        breakable -> % damage to breakable tile breaks it, handled under terminate/2
+            {stop, normal, State};
+        ?STRONG -> % moves to 2nd phase of breaking, notify "rulling" GN
+            New_State = State#tile_state{type = one_hit},
+            notify_gn(New_State, one_hit),
+            {noreply, New_State};
+        one_hit -> % being hit again - breaks the tile
+            {stop, normal, State}
+    end;
 
 handle_cast(_Request, State = #tile_state{}) ->
     {noreply, State}.
@@ -103,8 +110,11 @@ handle_cast(_Request, State = #tile_state{}) ->
 
 handle_info(Info, State = #tile_state{}) ->
     case Info of
-        hibernate -> {noreply, State, hibernate}; % todo: added a hibernation mode - maybe sends a message at the start to all tiles to sleep?
-        _ -> {noreply, State}
+        hibernate ->
+            %% ? added hibernation support - maybe sends a message at the start to all tiles to sleep?
+            {noreply, State, hibernate};
+        _ ->
+            {noreply, State}
     end.
 
 
@@ -116,6 +126,9 @@ handle_info(Info, State = #tile_state{}) ->
 %% with Reason. The return value is ignored.
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #tile_state{}) -> term()).
+
+terminate(normal, State = #tile_state{}) ->
+    notify_gn(State, tile_breaking);
 
 terminate(_Reason, _State = #tile_state{}) -> ok.
 
@@ -134,3 +147,9 @@ code_change(_OldVsn, State = #tile_state{}, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+notify_gn(State = #tile_state{}, Message) ->
+    %% Messages supported: tile_breaking, one_hit
+    [X,Y] = State#tile_state.position,
+    GN_name = req_player_move:get_managing_node_by_coord(X, Y),
+    gen_server:cast(GN_name, {tile_update, Message, State#tile_state.position}),
+    ok.
