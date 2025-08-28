@@ -326,52 +326,123 @@ create_enhanced_python_port(LocalGN) ->
             undefined
     end.
 
-%% Send enhanced map data to Python visualizer
-send_enhanced_map_to_python(undefined, _MapState) ->
-    io:format("âš ï¸ No enhanced Python port available~n");
+json_encode(Data) ->
+    jsx:encode(Data, [
+        {space, 1},           % Pretty printing
+        {indent, 2},          % Indentation
+        return_maps,          % Return maps instead of proplists
+        strict,               % Strict JSON compliance
+        {encoding, utf8}      % Ensure UTF-8 encoding
+    ]).
 
-send_enhanced_map_to_python(Port, MapState) ->
-    try
-        % Send enhanced map state as binary term
-        MapBinary = term_to_binary(MapState),
-        port_command(Port, MapBinary),
-        
-        % Log details about what we're sending (less frequent to reduce spam)
-        case MapState of
-            #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing, active_explosions := Explosions} ->
-                DeadCount = maps:size(DeadPlayers),
-                ExplosionCount = maps:size(Explosions),
-                TimingKeys = maps:keys(Timing),
-                % Only log every 40 updates (every 2 seconds at 50ms intervals)
-                case get(log_counter) of
-                    undefined -> put(log_counter, 1);
-                    Counter when Counter >= 40 ->
-                        io:format("ðŸ“¤ Enhanced map forwarded to Python visualizer (~w, dead: ~w, explosions: ~w, timing: ~w)~n", 
-                                 [LocalGN, DeadCount, ExplosionCount, TimingKeys]),
-                        put(log_counter, 1);
-                    Counter ->
-                        put(log_counter, Counter + 1)
-                end;
-            #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing} ->
-                DeadCount = maps:size(DeadPlayers),
-                TimingKeys = maps:keys(Timing),
-                % Only log every 40 updates (every 2 seconds at 50ms intervals)
-                case get(log_counter) of
-                    undefined -> put(log_counter, 1);
-                    Counter when Counter >= 40 ->
-                        io:format("ðŸ“¤ Enhanced map forwarded to Python visualizer (~w, dead: ~w, timing: ~w)~n", 
-                                 [LocalGN, DeadCount, TimingKeys]),
-                        put(log_counter, 1);
-                    Counter ->
-                        put(log_counter, Counter + 1)
-                end;
-            _ ->
-                ok
-        end
-    catch
-        _:Error ->
-            io:format("âŒ Error sending enhanced data to Python: ~p~n", [Error])
+% Helper function to convert atoms safely
+atom_to_utf8_binary(Atom) when is_atom(Atom) ->
+    unicode:characters_to_binary(atom_to_list(Atom), latin1, utf8);
+atom_to_utf8_binary(Other) ->
+    Other.
+
+% Convert your data structures
+convert_for_json(#{} = Map) ->
+    maps:fold(fun(K, V, Acc) ->
+        NewKey = case is_atom(K) of
+            true -> atom_to_utf8_binary(K);
+            false -> K
+        end,
+        Acc#{NewKey => convert_for_json(V)}
+    end, #{}, Map);
+
+convert_for_json(List) when is_list(List) ->
+    % Check if it's a string (list of integers)
+    case io_lib:printable_unicode_list(List) of
+        true -> unicode:characters_to_binary(List, utf8);
+        false -> [convert_for_json(Item) || Item <- List]
+    end;
+
+convert_for_json(Atom) when is_atom(Atom) ->
+    atom_to_utf8_binary(Atom);
+
+convert_for_json(Other) ->
+    Other.
+
+
+send_enhanced_map_to_python(State) ->
+    if State#state.python_port =/= undefined andalso
+       State#state.current_map_state =/= undefined ->
+        try
+            % Convert to JSON-safe format first
+            JsonSafeData = convert_for_json(State#state.current_map_state),
+            
+            % Encode as UTF-8 JSON
+            JsonBinary = jsx:encode(JsonSafeData, [{encoding, utf8}]),
+            
+            % Send to Python
+            port_command(State#state.python_port, JsonBinary),
+            
+            io:format("📡 JSON data sent to Python visualizer~n")
+        catch
+            _:Error ->
+                io:format("❌ Error encoding JSON: ~p~n", [Error])
+        end;
+    true ->
+        io:format("⚠️ Python port or map state not ready~n")
     end.
+% %% Send enhanced map data to Python visualizer
+% send_enhanced_map_to_python(undefined, _MapState) ->
+%     io:format("âš ï¸ No enhanced Python port available~n");
+
+% send_enhanced_map_to_python(Port, MapState) ->
+%     try
+%         % Send enhanced map state as binary term
+%         MapBinary = term_to_binary(MapState),
+%         port_command(Port, MapBinary),
+        
+%         % Log details about what we're sending (less frequent to reduce spam)
+%         case MapState of
+%             #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing, active_explosions := Explosions} ->
+%                 DeadCount = maps:size(DeadPlayers),
+%                 ExplosionCount = maps:size(Explosions),
+%                 TimingKeys = maps:keys(Timing),
+%                 % Only log every 40 updates (every 2 seconds at 50ms intervals)
+%                 case get(log_counter) of
+%                     undefined -> put(log_counter, 1);
+%                     Counter when Counter >= 40 ->
+%                         io:format("ðŸ“¤ Enhanced map forwarded to Python visualizer (~w, dead: ~w, explosions: ~w, timing: ~w)~n", 
+%                                  [LocalGN, DeadCount, ExplosionCount, TimingKeys]),
+%                         put(log_counter, 1);
+%                     Counter ->
+%                         put(log_counter, Counter + 1)
+%                 end;
+%             #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing} ->
+%                 DeadCount = maps:size(DeadPlayers),
+%                 TimingKeys = maps:keys(Timing),
+%                 % Only log every 40 updates (every 2 seconds at 50ms intervals)
+%                 case get(log_counter) of
+%                     undefined -> put(log_counter, 1);
+%                     Counter when Counter >= 40 ->
+%                         io:format("ðŸ“¤ Enhanced map forwarded to Python visualizer (~w, dead: ~w, timing: ~w)~n", 
+%                                  [LocalGN, DeadCount, TimingKeys]),
+%                         put(log_counter, 1);
+%                     Counter ->
+%                         put(log_counter, Counter + 1)
+%                 end;
+%             _ ->
+%                 ok
+%         end
+%     catch
+%         _:Error ->
+%             io:format("âŒ Error sending enhanced data to Python: ~p~n", [Error])
+%     end.
+
+% For different message types, ensure proper conversion
+send_message_to_python(State, MessageType, Data) ->
+    JsonMessage = #{
+        <<"type">> => atom_to_utf8_binary(MessageType),
+        <<"data">> => convert_for_json(Data),
+        <<"timestamp">> => erlang:system_time(millisecond)
+    },
+    
+    JsonBinary = jsx:encode(JsonMessage, [{encoding, utf8}]),
+    port_command(State#state.python_port, JsonBinary).
 
 %% Send movement confirmation to Python visualizer
 send_movement_confirmation_to_python(undefined, _ConfirmationData) ->
