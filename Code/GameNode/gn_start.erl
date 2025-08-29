@@ -126,16 +126,6 @@ handle_menu_request({exit_clicked}, _Menu_Pid) ->
 %     io:format("GN_start received unknown menu request: ~p~n", [Unknown]),
 %     gn_receive_loop(Menu_Pid).
 
-
-handle_cn_start_request({connected_count, Count}, Menu_Pid) ->
-    io:format("GN_start received connected_count update: ~p~n", [Count]),
-    %% Forward the update to the menu process
-    Menu_Pid ! {cn_start, connection_count, Count};
-handle_cn_start_request({choose_playmode, are_you_bot}, Menu_Pid) ->
-    io:format("GN_start received choose_playmode request~n"),
-    %% Forward the request to the menu process
-    Menu_Pid ! {cn_start, choose_playmode, are_you_bot}.
-
 handle_menu_request({play_as_human}, _Menu_Pid) ->
     io:format("GN_start received play_as_human request~n"),
     %% Forward the request to the cn_server using global name
@@ -161,3 +151,12 @@ handle_menu_request({play_as_bot}, _Menu_Pid) ->
             io:format("CN process not found in global registry. Connected nodes: ~p~n", [nodes()])
     end,
     true. % leave the loop (return bot flag)
+
+handle_cn_start_request({connected_count, Count}, Menu_Pid) ->
+    io:format("GN_start received connected_count update: ~p~n", [Count]),
+    %% Forward the update to the menu process
+    Menu_Pid ! {cn_start, connection_count, Count};
+handle_cn_start_request({choose_playmode, are_you_bot}, Menu_Pid) ->
+    io:format("GN_start received choose_playmode request~n"),
+    %% Forward the request to the menu process
+    Menu_Pid ! {cn_start, choose_playmode, are_you_bot}.
