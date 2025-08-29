@@ -398,7 +398,7 @@ class SocketGNVisualizer:
         print(f"🌐 Will connect to socket port: {self.socket_client.port}")
 
 def determine_local_gn(self):
-    """Determine which GN this visualizer is running on from node name"""
+    """Determine which GN this visualizer is running on from node name or IP"""
     # First try environment variable
     env_gn = os.environ.get('GN_ID')
     if env_gn:
@@ -419,12 +419,12 @@ def determine_local_gn(self):
     
     print(f"🔍 Analyzing node name: {node_name}")
     
-    # Extract GN number from node name pattern "GN#@132.72.81.###"
+    # Extract GN number from node name pattern - try regex first
     patterns = [
-        r'GN(\d)@',           # "GN1@132.72.81.224"
-        r'GN(\d)',            # "GN1" anywhere
-        r'gn(\d)@',           # "gn1@..."
-        r'gn(\d)',            # "gn1" anywhere
+        r"'?GN(\d)@",         # "'GN1@132.72.81.224'" or "GN1@132.72.81.224"
+        r"'?gn(\d)@",         # "'gn1@..." or "gn1@..."
+        r'GN(\d)@',           # Direct match without quotes
+        r'gn(\d)@',           # lowercase version
         r'.*GN(\d)',          # Any prefix + "GN1"
         r'.*gn(\d)'           # Any prefix + "gn1"
     ]
@@ -437,7 +437,52 @@ def determine_local_gn(self):
             print(f"✅ Extracted GN from node name using pattern '{pattern}': {gn_id}")
             return gn_id
     
-    print(f"⚠️ Could not extract GN from node name '{node_name}', defaulting to gn1")
+    # If regex fails, try to match by IP address
+    print("🔍 Regex failed, trying IP-based detection...")
+    ip_to_gn_map = {
+        '132.72.81.224': 'gn1',  # GN1
+        '132.72.81.85': 'gn2',   # GN2  
+        '132.72.81.167': 'gn3',  # GN3
+        '132.72.81.60': 'gn4'    # GN4
+    }
+    
+    # Extract IP from node name (format: GN#@IP.ADDRESS)
+    ip_pattern = r'@(\d+\.\d+\.\d+\.\d+)'
+    ip_match = re.search(ip_pattern, node_name)
+    
+    if ip_match:
+        extracted_ip = ip_match.group(1)
+        print(f"🌐 Extracted IP from node name: {extracted_ip}")
+        
+        if extracted_ip in ip_to_gn_map:
+            gn_id = ip_to_gn_map[extracted_ip]
+            print(f"✅ Matched IP {extracted_ip} to GN: {gn_id}")
+            return gn_id
+        else:
+            print(f"❌ IP {extracted_ip} not found in mapping")
+    
+    # Final fallback: try to get local machine's IP
+    try:
+        import socket as sock
+        # Connect to external address to determine local IP
+        temp_sock = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
+        temp_sock.connect(("8.8.8.8", 80))
+        local_ip = temp_sock.getsockname()[0]
+        temp_sock.close()
+        
+        print(f"🌐 Local machine IP: {local_ip}")
+        
+        if local_ip in ip_to_gn_map:
+            gn_id = ip_to_gn_map[local_ip]
+            print(f"✅ Matched local IP {local_ip} to GN: {gn_id}")
+            return gn_id
+        else:
+            print(f"❌ Local IP {local_ip} not found in GN mapping")
+            
+    except Exception as e:
+        print(f"❌ Could not determine local IP: {e}")
+    
+    print(f"⚠️ Could not determine GN from node name '{node_name}' or IP, defaulting to gn1")
     return "gn1"
 
     def get_local_player_ids(self):
