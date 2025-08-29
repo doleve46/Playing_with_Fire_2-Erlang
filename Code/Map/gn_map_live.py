@@ -419,7 +419,7 @@ class SocketGNVisualizer:
     
     print(f"🔍 Analyzing node name: {node_name}")
     
-    # Extract GN number from node name pattern "GN#@132.72.81.###"
+  # Extract GN number from node name pattern "GN#@132.72.81.###"
     gn_pattern = r'GN(\d)@'
     match = re.search(gn_pattern, node_name)
     
@@ -429,6 +429,16 @@ class SocketGNVisualizer:
         print(f"✅ Extracted GN from node name: {gn_id}")
         return gn_id
     else:
+        # Try alternative patterns
+        alt_patterns = [r'gn(\d)', r'.*gn(\d)', r'GN(\d)']
+        for pattern in alt_patterns:
+            match = re.search(pattern, node_name, re.IGNORECASE)
+            if match:
+                gn_number = match.group(1)
+                gn_id = f"gn{gn_number}"
+                print(f"✅ Extracted GN from alternative pattern: {gn_id}")
+                return gn_id
+        
         print(f"⚠️ Could not extract GN from node name '{node_name}', defaulting to gn1")
         return "gn1"
 
