@@ -92,6 +92,7 @@ handle_call(_Request, _From, State) ->
 %% Handle asynchronous casts
 handle_cast({map_update, EnhancedMapState}, State) ->
     io:format("🗺️ GN Graphics Server received map update!~n"),
+    io:format("🔌 Python socket PID: ~p~n", [State#state.python_socket_pid]),  %debug
     CurrentTime = erlang:system_time(millisecond),
     
     {ActualMapState, DeadPlayers, BackendTiming, ActiveExplosions} = case EnhancedMapState of
@@ -168,7 +169,8 @@ handle_cast({map_update, EnhancedMapState}, State) ->
     },
     
     send_enhanced_map_to_socket(State#state.python_socket_pid, LocalEnhancedMapData),
-    
+    io:format("📤 Attempted to send map to socket~n"),
+            
     NewState = State#state{
         current_map_state = LocalEnhancedMapData,
         dead_players = DeadPlayers,
@@ -484,45 +486,31 @@ gn_socket_client_loop(Socket, MainProcess) ->
 %%%===================================================================
 
 send_enhanced_map_to_socket(undefined, _MapState) ->
+    io:format("⚠️ No socket client connected to send map~n"),
     ok;
 send_enhanced_map_to_socket(ClientPid, MapState) ->
+    io:format("📡 Sending map via socket to PID: ~p~n", [ClientPid]),
     try
+        % Create simpler JSON structure
+        SimpleMapData = create_simple_map_data(MapState),
+        
         JsonMessage = #{
             <<"type">> => <<"map_update">>,
             <<"timestamp">> => erlang:system_time(millisecond),
-            <<"data">> => convert_for_json(MapState)
+            <<"data">> => SimpleMapData
         },
         
-        JsonBinary = jsx:encode(JsonMessage, [
-            {space, 1},
-            {indent, 2},
-            return_maps,
-            strict,
-            {encoding, utf8}
-        ]),
-        
-        % Send length prefix + data
+        JsonBinary = jsx:encode(JsonMessage),
         DataLength = byte_size(JsonBinary),
         LengthPrefix = <<DataLength:32/big>>,
         Message = <<LengthPrefix/binary, JsonBinary/binary>>,
         
         ClientPid ! {send_data, Message},
+        io:format("✅ Map data sent via socket (~w bytes)~n", [DataLength])
         
-        case get(log_counter) of
-            undefined -> put(log_counter, 1);
-            Counter when Counter >= 40 ->
-                DeadCount = maps:size(maps:get(dead_players, MapState, #{})),
-                ExplosionCount = maps:size(maps:get(active_explosions, MapState, #{})),
-                LocalGN = maps:get(local_gn, MapState, unknown),
-                io:format("📤 Enhanced JSON map forwarded to Socket (~w, dead: ~w, explosions: ~w)~n", 
-                         [LocalGN, DeadCount, ExplosionCount]),
-                put(log_counter, 1);
-            Counter ->
-                put(log_counter, Counter + 1)
-        end
     catch
-        _:Error ->
-            io:format("❌ Error sending enhanced JSON data via socket: ~p~n", [Error])
+        Error:Reason ->
+            io:format("❌ Error sending map via socket: ~p:~p~n", [Error, Reason])
     end.
 
 send_movement_confirmation_to_socket(undefined, _ConfirmationData) ->
@@ -630,3 +618,99 @@ atom_to_utf8_binary(Atom) when is_atom(Atom) ->
     unicode:characters_to_binary(atom_to_list(Atom), latin1, utf8);
 atom_to_utf8_binary(Other) ->
     Other.
+
+%%%===================================================================
+%%% Helper Functions
+%%%===================================================================
+
+create_simple_map_data(MapState) ->
+    #{
+        <<"map">> => convert_map_for_gn_socket(maps:get(map, MapState, [])),
+        <<"dead_players">> => #{},
+        <<"update_time">> => erlang:system_time(millisecond),
+        <<"local_gn">> => maps:get(local_gn, MapState, gn1),
+        <<"active_explosions">> => #{},
+        <<"backend_timing">> => #{
+            <<"tick_delay">> => 50,
+            <<"tile_move">> => 1200
+        }
+    }.
+
+convert_map_for_gn_socket([]) ->
+    % Create empty 16x16 grid
+    EmptyCell = [<<"free">>, <<"none">>, <<"none">>, <<"none">>],
+    EmptyRow = [EmptyCell || _ <- lists:seq(1, 16)],
+    [EmptyRow || _ <- lists:seq(1, 16)];
+convert_map_for_gn_socket(Map) when is_list(Map) ->
+    try
+        lists:map(fun(Row) when is_list(Row) ->
+            lists:map(fun(Cell) ->
+                convert_gn_cell_safely(Cell)
+            end, Row);
+        (_) -> 
+            []
+        end, Map)
+    catch
+        _:_ ->
+            % Return empty grid if conversion fails
+            EmptyCell = [<<"free">>, <<"none">>, <<"none">>, <<"none">>],
+            EmptyRow = [EmptyCell || _ <- lists:seq(1, 16)],
+            [EmptyRow || _ <- lists:seq(1, 16)]
+    end.
+
+convert_gn_cell_safely({Tile, Powerup, Bomb, Player, Explosion, Special}) ->
+    [
+        safe_atom_to_binary_gn(Tile),
+        safe_atom_to_binary_gn(Powerup),
+        convert_bomb_safely_gn(Bomb),
+        convert_player_safely_gn(Player)
+    ];
+convert_gn_cell_safely({Tile, Powerup, Bomb, Player}) ->
+    [
+        safe_atom_to_binary_gn(Tile),
+        safe_atom_to_binary_gn(Powerup),
+        convert_bomb_safely_gn(Bomb),
+        convert_player_safely_gn(Player)
+    ];
+convert_gn_cell_safely(_) ->
+    [<<"free">>, <<"none">>, <<"none">>, <<"none">>].
+
+safe_atom_to_binary_gn(Atom) when is_atom(Atom) ->
+    atom_to_binary(Atom, utf8);
+safe_atom_to_binary_gn(Other) when is_binary(Other) ->
+    Other;
+safe_atom_to_binary_gn(Other) when is_list(Other) ->
+    list_to_binary(Other);
+safe_atom_to_binary_gn(_) ->
+    <<"unknown">>.
+
+convert_bomb_safely_gn(none) ->
+    <<"none">>;
+convert_bomb_safely_gn({Type, Ignited, Status, Radius, Owner, Movement, Direction}) ->
+    [
+        safe_atom_to_binary_gn(Type),
+        Ignited,
+        safe_atom_to_binary_gn(Status),
+        Radius,
+        Owner,
+        Movement,
+        safe_atom_to_binary_gn(Direction)
+    ];
+convert_bomb_safely_gn(_) ->
+    <<"none">>.
+
+convert_player_safely_gn(none) ->
+    <<"none">>;
+convert_player_safely_gn({PlayerID, Life, Speed, Direction, Movement, MovementTimer, ImmunityTimer, RequestTimer}) ->
+    [
+        PlayerID,
+        Life,
+        Speed,
+        safe_atom_to_binary_gn(Direction),
+        Movement,
+        MovementTimer,
+        ImmunityTimer,
+        RequestTimer
+    ];
+convert_player_safely_gn(_) ->
+    <<"none">>.
