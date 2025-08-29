@@ -98,7 +98,7 @@ handle_cast({map_update, EnhancedMapState}, State) ->
     {ActualMapState, DeadPlayers, BackendTiming, ActiveExplosions} = case EnhancedMapState of
         #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing, active_explosions := Explosions} ->
             ExplosionCount = maps:size(Explosions),
-            io:format("🗺️ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
+            % io:format("🗺️ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
                       [State#state.update_counter + 1, ExplosionCount]),
             
             NewDeaths = maps:filter(fun(PlayerID, _DeathInfo) ->
@@ -169,7 +169,7 @@ handle_cast({map_update, EnhancedMapState}, State) ->
     },
     
     send_enhanced_map_to_socket(State#state.python_socket_pid, LocalEnhancedMapData),
-    io:format("📤 Attempted to send map to socket~n"),
+    % io:format("📤 Attempted to send map to socket~n"),
             
     NewState = State#state{
         current_map_state = LocalEnhancedMapData,
