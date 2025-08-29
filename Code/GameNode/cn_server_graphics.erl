@@ -1113,22 +1113,22 @@ attempt_gn_graphics_monitoring(NodeList) ->
             case rpc:call(Node, erlang, whereis, [gn_graphics_server], 5000) of
                 {badrpc, Reason} ->
                     io:format("❌ RPC failed to ~w: ~p~n", [Node, Reason]),
-                    Ref = erlang:monitor(process, {gn_graphics_server, Node}),
-                    {Ref, Node};
+                    MonitorRef = erlang:monitor(process, {gn_graphics_server, Node}),
+                    {MonitorRef, Node};
                 undefined ->
                     io:format("⚠️ gn_graphics_server not found on ~w~n", [Node]),
-                    Ref = erlang:monitor(process, {gn_graphics_server, Node}),
-                    {Ref, Node};
+                    MonitorRef = erlang:monitor(process, {gn_graphics_server, Node}),
+                    {MonitorRef, Node};
                 Pid when is_pid(Pid) ->
                     io:format("✅ Found gn_graphics_server on ~w: ~p~n", [Node, Pid]),
-                    Ref = erlang:monitor(process, Pid),
-                    {Ref, Node, Pid}  % Store the PID too!
+                    MonitorRef = erlang:monitor(process, Pid),
+                    {MonitorRef, Node, Pid}  % Store the PID too!
             end
         catch
             _:Error ->
                 io:format("❌ Error monitoring ~w: ~p~n", [Node, Error]),
-                Ref = make_ref(),
-                {Ref, Node}
+                ErrorRef = make_ref(),
+                {ErrorRef, Node}
         end
     end, NodeList),
     
