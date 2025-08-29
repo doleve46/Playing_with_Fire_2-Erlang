@@ -144,6 +144,17 @@ handle_cast({map_update, EnhancedMapState}, State) ->
                       [State#state.update_counter + 1]),
             {EnhancedMapState, State#state.dead_players, State#state.backend_timing, State#state.active_explosions}
     end,
+
+    % If this is the first real map update, signal the menu to start the game
+    case State#state.current_map_state of
+        undefined ->
+            % First map update - signal menu process to start the actual game
+            case whereis(menu) of
+                undefined -> ok;
+                MenuPid -> MenuPid ! {start_actual_game}
+            end;
+        _ -> ok
+    end,
     
     LocalEnhancedMapData = #{
         map => ActualMapState,
