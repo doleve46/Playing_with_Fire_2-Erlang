@@ -321,9 +321,25 @@ determine_local_gn() ->
                 "gn2" ++ _ -> gn2;
                 "gn3" ++ _ -> gn3;
                 "gn4" ++ _ -> gn4;
+                "GN1" ++ _ -> gn1;  % Add uppercase patterns
+                "GN2" ++ _ -> gn2;
+                "GN3" ++ _ -> gn3;
+                "GN4" ++ _ -> gn4;
                 _ ->
-                    io:format("⚠️ Could not determine GN ID from node name ~p, defaulting to gn1~n", [NodeName]),
-                    gn1
+                    % Try regex approach for more flexible matching
+                    case re:run(NodeName, "[Gg][Nn]([1-4])", [{capture, all_but_first, list}]) of
+                        {match, [GNNum]} ->
+                            case GNNum of
+                                "1" -> gn1;
+                                "2" -> gn2;
+                                "3" -> gn3;
+                                "4" -> gn4;
+                                _ -> gn1
+                            end;
+                        nomatch ->
+                            io:format("⚠️ Could not determine GN ID from node name ~p, defaulting to gn1~n", [NodeName]),
+                            gn1
+                    end
             end;
         GNStr ->
             list_to_atom(GNStr)
