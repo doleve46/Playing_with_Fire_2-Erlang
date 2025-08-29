@@ -34,14 +34,7 @@ start() ->
     GNNumber = list_to_integer([lists:nth(3, NodeName)]),
     %% Left the loop after sending response to playmode (bot/human)
     %% Spawn gn_server and gn_graphics_server
-    {ok, _Pid_gn_server} = gn_server:start_link({GNNumber, IsBot}),
-     
-    % Register the graphics server globally so CN can find it
-    global:register_name(gn_graphics_server, GraphicsPid),
-    
-    % Also register locally for monitoring
-    register(gn_graphics_server, GraphicsPid),
-    
+    {ok, _Pid_gn_server} = gn_server:start_link({GNNumber, IsBot}),    
     %% Get the CN node name from the global registry to pass to graphics server
     CNNodeName = case global:whereis_name(cn_start) of
         Pid when is_pid(Pid) -> node(Pid);
