@@ -41,10 +41,10 @@
 %%% API
 %%%===================================================================
 
-%% s the central graphics server
--spec _link(list()) -> {ok, pid()} | ignore | {error, term()}.
-_link(GNNodes) ->
-    gen_server:_link({global, ?MODULE}, ?MODULE, [GNNodes], []).
+%% Starts the central graphics server
+-spec start_link(list()) -> {ok, pid()} | ignore | {error, term()}.
+start_link(GNNodes) ->
+    gen_server:start_link({global, ?MODULE}, ?MODULE, [GNNodes], []).
 
 %% Get current map state
 -spec get_current_map() -> term().
