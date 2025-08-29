@@ -99,7 +99,7 @@ handle_cast({map_update, EnhancedMapState}, State) ->
         #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing, active_explosions := Explosions} ->
             ExplosionCount = maps:size(Explosions),
             % io:format("🗺️ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
-                      [State#state.update_counter + 1, ExplosionCount]),
+                      % [State#state.update_counter + 1, ExplosionCount]),
             
             NewDeaths = maps:filter(fun(PlayerID, _DeathInfo) ->
                 not maps:is_key(PlayerID, State#state.dead_players)
