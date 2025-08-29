@@ -230,6 +230,21 @@ handle_info(start_socket_server, State) ->
             end,
             
             {noreply, UpdatedState};
+        handle_info(start_python_socket_client, State) ->
+    spawn(fun() ->
+        {ok, Cwd} = file:get_cwd(),
+        PythonScript = filename:join([Cwd, "src", "Graphics", "gn_map_live.py"]),
+        case filelib:is_file(PythonScript) of
+            true ->
+                io:format("🚀 Starting GN Python socket visualizer...~n"),
+                Port = open_port({spawn, "python3 " ++ PythonScript}, 
+                    [{cd, filename:dirname(PythonScript)}, binary, exit_status]),
+                io:format("✅ GN Python socket visualizer started~n");
+            false ->
+                io:format("❌ Python socket script not found: ~s~n", [PythonScript])
+        end
+    end),
+    {noreply, State};
         {error, Reason} ->
             io:format("❌ Failed to start GN socket server: ~p~n", [Reason]),
             % Continue without socket server
