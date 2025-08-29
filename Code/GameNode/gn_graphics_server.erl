@@ -242,7 +242,7 @@ handle_info(start_socket_server, State) ->
 handle_info(start_python_socket_client, State) ->
     spawn(fun() ->
         {ok, Cwd} = file:get_cwd(),
-        PythonScript = filename:join([Cwd, "src", "Graphics", "gn_map_live.py"]),
+        PythonScript = filename:join([Cwd, "src", "code", "map", "gn_map_live.py"]),
         case filelib:is_file(PythonScript) of
             true ->
                 io:format("🚀 Starting GN Python socket visualizer...~n"),
