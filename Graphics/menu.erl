@@ -13,7 +13,19 @@ send(Port, Command) ->
     Port ! {self(), {command, list_to_binary(Command ++ "\n")}}.
 
 send_to_gn_start(Request) ->
-    gn_start ! {self(), Request}.
+    case whereis(gn_start) of
+        undefined ->
+            io:format("Warning: gn_start process not found~n"),
+            % Try global registry as backup
+            case global:whereis_name(gn_start) of
+                undefined ->
+                    io:format("Error: gn_start not found globally either~n");
+                Pid ->
+                    Pid ! {self(), Request}
+            end;
+        Pid ->
+            Pid ! {self(), Request}
+    end.
 
 loop(Port, Status) ->
     receive
@@ -22,7 +34,9 @@ loop(Port, Status) ->
             io:format("GUI replied: ~s~n", [Message]),
             NewStatus = handle_gui_event(Port, string:trim(Message), Status),
             case NewStatus of
-                terminate -> ok; % Process should end
+                terminate -> 
+                    io:format("Menu process terminating normally~n"),
+                    ok; % Process should end
                 _ -> loop(Port, NewStatus) % Continue with new status
             end;
 
@@ -68,46 +82,59 @@ handle_gui_event(Port, "return_to_menu", _Status) ->
 handle_gui_event(Port, "play_game_clicked", _Status) ->
     io:format("User chose to play the game~n"),
     send_to_gn_start({play_as_human}),
-    % Close the port immediately to shut down the GUI
-    try 
-        port_close(Port)
-    catch 
-        _:_ -> ok  % Ignore port close errors
-    end,
+    
+    % Wait briefly to ensure message is sent
+    timer:sleep(100),
+    
+    % Show game setup screen before closing
+    send(Port, "show_game_setup"),
+    timer:sleep(2000), % Show for 2 seconds
+    
+    % Close the port
+    close_port_safely(Port),
     terminate;
 
 handle_gui_event(Port, "bot_clicked", _Status) ->
     io:format("User chose bot mode~n"),
     send_to_gn_start({play_as_bot}),
-    % Close the port immediately to shut down the GUI
-    try 
-        port_close(Port)
-    catch 
-        _:_ -> ok  % Ignore port close errors
-    end,
+    
+    % Wait briefly to ensure message is sent
+    timer:sleep(100),
+    
+    % Show game setup screen before closing
+    send(Port, "show_game_setup"),
+    timer:sleep(2000), % Show for 2 seconds
+    
+    % Close the port
+    close_port_safely(Port),
     terminate;
 
 handle_gui_event(Port, "choice_timeout", _Status) ->
     io:format("Player choice timed out — defaulting to bot~n"),
     send(Port, "show_game_setup"),
     send_to_gn_start({play_as_bot}),
+    
+    % Wait to ensure message is processed
+    timer:sleep(100),
     timer:sleep(3000),
-    %% Close port and process after timeout
-    spawn(fun() ->
-        timer:sleep(1000),
-        try 
-            port_close(Port)
-        catch 
-            _:_ -> ok  % Ignore port close errors
-        end,
-        exit(normal)
-    end),
+    
+    % Close port and process after timeout
+    close_port_safely(Port),
     terminate;
 
 handle_gui_event(_, Unknown, Status) ->
     io:format("Unhandled message: ~p~n", [Unknown]),
     Status. % Return current status unchanged
 
+%% Helper function to safely close port
+close_port_safely(Port) ->
+    try 
+        port_close(Port),
+        io:format("Port closed successfully~n")
+    catch 
+        _:Error -> 
+            io:format("Warning: Error closing port: ~p~n", [Error])
+    end.
 
 %% Start 20-second timer for player choice
 start_choice_timer(Port) ->
@@ -115,4 +142,3 @@ start_choice_timer(Port) ->
         timer:sleep(20000), % 20 seconds
         send(Port, "choice_timeout")
     end).
-
