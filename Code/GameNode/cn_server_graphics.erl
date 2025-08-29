@@ -551,6 +551,7 @@ create_simple_json_data(MapState) ->
         }
     }.
 
+%% Convert map to JSON-safe format
 convert_map_safely([]) ->
     [];
 convert_map_safely(Map) when is_list(Map) ->
@@ -565,11 +566,11 @@ convert_map_safely(Map) when is_list(Map) ->
     catch
         _:_ ->
             % Return empty 16x16 grid if conversion fails
-            [[<<"free">>, <<"none">>, <<"none">>, <<"none">>] || _ <- lists:seq(1, 16)] || _ <- lists:seq(1, 16)]
+            [[ [<<"free">>, <<"none">>, <<"none">>, <<"none">>] || _ <- lists:seq(1, 16)] || _ <- lists:seq(1, 16)]
     end;
 convert_map_safely(_) ->
     % Return empty 16x16 grid for invalid input
-    [[[<<"free">>, <<"none">>, <<"none">>, <<"none">>] || _ <- lists:seq(1, 16)] || _ <- lists:seq(1, 16)].
+    [ [<<"free">>, <<"none">>, <<"none">>, <<"none">>] || _ <- lists:seq(1, 16)] || _ <- lists:seq(1, 16).
 
 %% Convert individual cell to JSON-safe format
 convert_cell_safely({Tile, Powerup, Bomb, Player, Explosion, Special}) ->
