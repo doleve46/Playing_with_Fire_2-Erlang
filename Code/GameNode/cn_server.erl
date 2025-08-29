@@ -176,9 +176,10 @@ handle_info({graphics_ready, _GraphicsPid}, State) ->
     io:format("Graphics server is ready~n"),
     %% Notify all GN servers to start the game
     lists:foreach(fun(#gn_data{pid = Pid}) ->
+        io:format("Sending start_game to GN server: ~p~n", [Pid]),
         Pid ! start_game
     end, State),
-    {noreply, State};
+    {noreply, State}
 
 %% @doc Handles failure messages from the monitored processes
 handle_info({'DOWN', Ref, process, Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
