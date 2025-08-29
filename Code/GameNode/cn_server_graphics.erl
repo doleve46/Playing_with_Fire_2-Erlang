@@ -93,6 +93,26 @@ init([GNNodes]) ->
     io:format("✅ Enhanced CN Graphics Server initialized with Socket communication~n"),
     {ok, State}.
 
+%%%===================================================================
+%%% Python Visualizer Startup
+%%%===================================================================
+
+start_python_visualizer() ->
+    spawn(fun() ->
+        timer:sleep(2000), % Wait a bit for socket server to be ready
+        {ok, Cwd} = file:get_cwd(),
+        PythonScript = filename:join([Cwd, "src", "Graphics", "map_live_port.py"]),
+        case filelib:is_file(PythonScript) of
+            true ->
+                io:format("🚀 Starting CN Python visualizer...~n"),
+                Port = open_port({spawn, "python3 " ++ PythonScript}, 
+                    [{cd, filename:dirname(PythonScript)}, binary, exit_status]),
+                io:format("✅ CN Python visualizer started~n");
+            false ->
+                io:format("❌ Python script not found: ~s~n", [PythonScript])
+        end
+    end).
+
 %% Handle synchronous calls
 handle_call(get_current_map, _From, State) ->
     {reply, State#state.current_map_state, State};
@@ -653,26 +673,6 @@ send_death_event_to_socket(ClientPid, DeathData) ->
         _:Error ->
             io:format("❌ Error sending death event via socket: ~p~n", [Error])
     end.
-
-%%%===================================================================
-%%% Start Python
-%%%===================================================================
-
-start_python_visualizer() ->
-    spawn(fun() ->
-        timer:sleep(2000), % Wait a bit for socket server to be ready
-        {ok, Cwd} = file:get_cwd(),
-        PythonScript = filename:join([Cwd, "src", "Graphics", "map_live_port.py"]),
-        case filelib:is_file(PythonScript) of
-            true ->
-                io:format("🚀 Starting CN Python visualizer...~n"),
-                Port = open_port({spawn, "python3 " ++ PythonScript}, 
-                    [{cd, filename:dirname(PythonScript)}, binary, exit_status]),
-                io:format("✅ CN Python visualizer started~n");
-            false ->
-                io:format("❌ Python script not found: ~s~n", [PythonScript])
-        end
-    end).
 
 %%%===================================================================
 %%% JSON Conversion Functions
