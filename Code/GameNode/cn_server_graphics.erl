@@ -235,6 +235,8 @@ handle_info(monitor_gn_graphics_servers, State) ->
 handle_info(periodic_update, State) ->
     CurrentTime = erlang:system_time(millisecond),
     
+    io:format("📡 Periodic update - GN servers list: ~p~n", [State#state.gn_graphics_servers]),
+    
     % Clean up expired explosions
     NewExplosions = maps:filter(fun(_Coord, ExpiryTime) ->
         CurrentTime < ExpiryTime
@@ -258,6 +260,7 @@ handle_info(periodic_update, State) ->
    
     if ShouldSend ->
         send_map_to_all_targets(UpdatedState),
+        io:format("📤 Sent map to all targets including ~w GN servers~n", [length(UpdatedState#state.gn_graphics_servers)]),
         case State#state.update_counter rem 500 == 0 of
             true ->
                 io:format("🔄 Enhanced periodic Socket update #~w sent~n", [UpdatedState#state.update_counter]);
@@ -991,28 +994,31 @@ send_map_to_all_targets(State) ->
     send_enhanced_map_to_gn_servers(State).
 
 send_enhanced_map_to_gn_servers(State) ->
-    io:format("📡 Attempting to send to ~w GN servers~n", [length(State#state.gn_graphics_servers)]), % Debug
+    GNServers = State#state.gn_graphics_servers,
+    io:format("📡 Attempting to send map to ~w GN graphics servers~n", [length(GNServers)]),
+    
     lists:foreach(fun({Node, Pid}) ->
-        io:format("📡 Trying to send to ~w with pid ~p~n", [Node, Pid]),
+        io:format("📡 Sending to Node: ~w, Pid: ~p~n", [Node, Pid]),
         case is_pid(Pid) andalso is_process_alive(Pid) of
             true ->
                 try
-                    gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                    case State#state.update_counter rem 10 == 0 of
-                        true ->
-                            ExplosionCount = maps:size(State#state.active_explosions),
-                            io:format("📡 Enhanced map (~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
-                        false -> ok
-                    end
-            catch
-                _:Error ->
-                    io:format("❌ Error sending data to GN server on ~w: ~p~n", [Node, Error])
-            end;
-        false ->
-                ok
-            % io:format("⚠️ GN server on ~w not alive~n", [Node])
+                    gen_server:cast({gn_graphics_server, Node}, {map_update, State#state.current_map_state}),
+                    io:format("✅ Successfully sent map to ~w~n", [Node])
+                catch
+                    _:Error ->
+                        io:format("❌ Error sending to ~w: ~p~n", [Node, Error])
+                end;
+            false ->
+                % Try alternative method - direct cast to registered name
+                try
+                    gen_server:cast({gn_graphics_server, Node}, {map_update, State#state.current_map_state}),
+                    io:format("✅ Sent via registered name to ~w~n", [Node])
+                catch
+                    _:AltError ->
+                        io:format("❌ Both methods failed for ~w: ~p~n", [Node, AltError])
+                end
         end
-    end, State#state.gn_graphics_servers).
+    end, GNServers).
 
 %%%===================================================================
 %%% Map Creation Functions (Same as before)
