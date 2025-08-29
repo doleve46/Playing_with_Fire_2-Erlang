@@ -5,8 +5,9 @@ import random
 import os
 import time
 import struct
-import select
-import json  # Add this import
+import socket
+import json
+import threading
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
@@ -24,6 +25,12 @@ WINDOW_HEIGHT = MAP_SIZE * TILE_SIZE + POWERUP_PANEL_HEIGHT + 30
 MIN_WINDOW_WIDTH = 1000
 MIN_WINDOW_HEIGHT = 800
 FPS = 60
+
+# Socket Configuration - Must match gn_graphics_server_socket.erl
+SOCKET_PORT_BASE = 8100  # GN1: 8101, GN2: 8102, etc.
+SOCKET_TIMEOUT = 5.0
+RECONNECT_DELAY = 2.0
+MAX_RECONNECT_ATTEMPTS = 10
 
 # Backend Constants (from common_parameters.hrl)
 TILE_MOVE_BASE = 1200
@@ -165,11 +172,147 @@ class GameState:
         self.backend_timing: Dict[str, int] = {}
         self.active_explosions: Dict[tuple, int] = {}
 
-class CleanGNVisualizer:
+class SocketClient:
+    """Socket client to communicate with GN Graphics Server"""
+    
+    def __init__(self, gn_name: str, host: str = 'localhost'):
+        self.gn_name = gn_name
+        self.host = host
+        self.port = self.get_gn_port(gn_name)
+        self.socket = None
+        self.connected = False
+        self.running = True
+        self.receive_buffer = b''
+        self.data_queue = []
+        self.queue_lock = threading.Lock()
+        self.reconnect_attempts = 0
+        
+    def get_gn_port(self, gn_name: str) -> int:
+        """Get port number for specific GN"""
+        port_map = {
+            'gn1': SOCKET_PORT_BASE + 1,  # 8101
+            'gn2': SOCKET_PORT_BASE + 2,  # 8102
+            'gn3': SOCKET_PORT_BASE + 3,  # 8103
+            'gn4': SOCKET_PORT_BASE + 4   # 8104
+        }
+        return port_map.get(gn_name, SOCKET_PORT_BASE + 1)
+    
+    def connect(self) -> bool:
+        """Connect to GN graphics server"""
+        try:
+            print(f"🔌 Connecting to {self.gn_name} server at {self.host}:{self.port}...")
+            
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(SOCKET_TIMEOUT)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            
+            self.socket.connect((self.host, self.port))
+            self.connected = True
+            self.reconnect_attempts = 0
+            
+            print(f"✅ Successfully connected to {self.gn_name} server!")
+            return True
+            
+        except socket.timeout:
+            print(f"⏱️ Connection timeout to {self.gn_name} server")
+            return False
+        except ConnectionRefused:
+            print(f"🚫 Connection refused by {self.gn_name} server (not running?)")
+            return False
+        except Exception as e:
+            print(f"❌ Connection error to {self.gn_name}: {e}")
+            return False
+    
+    def disconnect(self):
+        """Disconnect from server"""
+        self.running = False
+        self.connected = False
+        if self.socket:
+            try:
+                self.socket.close()
+            except:
+                pass
+            self.socket = None
+        print(f"🔌 Disconnected from {self.gn_name} server")
+    
+    def receive_data(self):
+        """Receive data from socket in separate thread"""
+        while self.running:
+            if not self.connected:
+                if self.reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                    print(f"🔄 Attempting to reconnect to {self.gn_name} (attempt {self.reconnect_attempts + 1})...")
+                    if self.connect():
+                        continue
+                    else:
+                        self.reconnect_attempts += 1
+                        time.sleep(RECONNECT_DELAY)
+                        continue
+                else:
+                    print(f"❌ Max reconnection attempts reached for {self.gn_name}")
+                    break
+            
+            try:
+                # Receive data
+                data = self.socket.recv(4096)
+                if not data:
+                    print(f"⚠️ {self.gn_name} server disconnected")
+                    self.connected = False
+                    continue
+                
+                self.receive_buffer += data
+                
+                # Process complete messages
+                while len(self.receive_buffer) >= 4:
+                    # Read length prefix
+                    message_length = struct.unpack('>I', self.receive_buffer[:4])[0]
+                    
+                    if len(self.receive_buffer) >= 4 + message_length:
+                        # Extract complete message
+                        message_data = self.receive_buffer[4:4 + message_length]
+                        self.receive_buffer = self.receive_buffer[4 + message_length:]
+                        
+                        # Parse JSON message
+                        try:
+                            json_data = json.loads(message_data.decode('utf-8'))
+                            
+                            # Add to queue thread-safely
+                            with self.queue_lock:
+                                self.data_queue.append(json_data)
+                                
+                        except json.JSONDecodeError as e:
+                            print(f"❌ JSON decode error: {e}")
+                        except UnicodeDecodeError as e:
+                            print(f"❌ Unicode decode error: {e}")
+                    else:
+                        # Wait for more data
+                        break
+                        
+            except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"❌ Socket receive error: {e}")
+                self.connected = False
+                time.sleep(1)
+    
+    def get_messages(self) -> List[dict]:
+        """Get all queued messages"""
+        with self.queue_lock:
+            messages = self.data_queue.copy()
+            self.data_queue.clear()
+            return messages
+    
+    def start_receiving(self):
+        """Start receiving thread"""
+        receive_thread = threading.Thread(target=self.receive_data, daemon=True)
+        receive_thread.start()
+        print(f"📡 Started receiving thread for {self.gn_name}")
+
+class SocketGNVisualizer:
     def __init__(self):
         # Window setup
         self.screen = pygame.display.set_mode((min(WINDOW_WIDTH, 1200), min(WINDOW_HEIGHT, 900)), pygame.RESIZABLE)
-        pygame.display.set_caption("🎮 Clean GN Visualizer - Live Data Only")
+        pygame.display.set_caption("🔌 Socket GN Visualizer - Full Socket Communication")
         self.clock = pygame.time.Clock()
 
         # Current window dimensions and scaling
@@ -194,6 +337,9 @@ class CleanGNVisualizer:
         self.local_gn = self.determine_local_gn()
         self.local_gn_player_ids = self.get_local_player_ids()
 
+        # Socket client
+        self.socket_client = SocketClient(self.local_gn)
+        
         # Death tracking
         self.you_died_display = None
         self.death_screen_start_time = None
@@ -219,8 +365,7 @@ class CleanGNVisualizer:
             'plus_life': 'plus_life', 'freeze_bomb': 'freeze_bomb'
         }
 
-        # Port communication - ONLY from Erlang port
-        self.port_buffer = b''
+        # Game state
         self.game_state = GameState()
         self.map_initialized = False
 
@@ -240,14 +385,16 @@ class CleanGNVisualizer:
         self.fps_counter = 0
         self.last_fps_time = time.time()
         self.current_fps = 0
+        self.messages_received = 0
+        self.last_message_time = None
 
         # Rendering surfaces
         self.virtual_surface = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
         self.map_surface = pygame.Surface((MAP_SIZE * TILE_SIZE, MAP_SIZE * TILE_SIZE))
 
-        print(f"🎮 Clean GN Visualizer initialized (Local GN: {self.local_gn})")
+        print(f"🔌 Socket GN Visualizer initialized (Local GN: {self.local_gn})")
         print(f"👥 Local players: {self.local_gn_player_ids}")
-        print("⏳ Waiting for live data from GN graphics server...")
+        print(f"🌐 Will connect to socket port: {self.socket_client.port}")
 
     def determine_local_gn(self):
         """Determine which GN this visualizer is running on"""
@@ -262,78 +409,41 @@ class CleanGNVisualizer:
         }
         return gn_to_players.get(self.local_gn, [])
 
-    def read_port_data(self) -> Optional[bytes]:
-        """Read data from Erlang port - NO FALLBACKS"""
-        try:
-            ready, _, _ = select.select([sys.stdin], [], [], 0)
-            if not ready:
-                return None
-
-            data = sys.stdin.buffer.read()
-            if not data:
-                return None
-
-            self.port_buffer += data
-
-            # Process complete packets (4-byte length prefix + data)
-            if len(self.port_buffer) >= 4:
-                packet_length = struct.unpack('>I', self.port_buffer[:4])[0]
-                if len(self.port_buffer) >= 4 + packet_length:
-                    packet_data = self.port_buffer[4:4 + packet_length]
-                    self.port_buffer = self.port_buffer[4 + packet_length:]
-                    return packet_data
-
-            return None
-        except Exception as e:
-            # This is normal when no data is available
-            return None
-
-    def parse_json_data(self, binary_data: bytes):
-        """Parse JSON data from Erlang - CLEAN AND SIMPLE"""
-        try:
-            text = binary_data.decode('utf-8')
-            return json.loads(text)
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON decode error: {e}")
-            print(f"📄 Data received: {binary_data[:200]}...")
-            return None
-        except UnicodeDecodeError as e:
-            print(f"❌ UTF-8 decode error: {e}")
-            return None
-        except Exception as e:
-            print(f"❌ Unexpected parsing error: {e}")
-            return None
-
-def handle_port_data(self, data: bytes):
-    """Handle incoming JSON data from Erlang port"""
-    parsed_data = self.parse_json_data(data)
-    if parsed_data is None:
-        return
-
-    print(f"📨 Received JSON data: {type(parsed_data)}")
-
-    # Handle JSON message format
-    if isinstance(parsed_data, dict):
-        message_type = parsed_data.get('type', 'unknown')
-        message_data = parsed_data.get('data', {})
-        timestamp = parsed_data.get('timestamp', 0)
+    def initialize_socket_connection(self):
+        """Initialize socket connection to GN graphics server"""
+        print(f"🔌 Initializing socket connection to {self.local_gn} graphics server...")
         
-        print(f"📩 JSON Message: {message_type} at {timestamp}")
-        
-        if message_type == 'map_update':
-            self.process_map_update(message_data)
-        elif message_type == 'movement_confirmation':
-            self.handle_movement_confirmation(message_data)
-        elif message_type == 'timer_update':
-            self.handle_timer_update(message_data)
-        elif message_type == 'fsm_update':
-            self.handle_fsm_update(message_data)
-        elif message_type == 'explosion_event':
-            self.handle_explosion_event(message_data)
+        if self.socket_client.connect():
+            self.socket_client.start_receiving()
+            return True
         else:
-            print(f"❓ Unknown message type: {message_type}")
-    else:
-        print(f"❌ Expected JSON dict, got: {type(parsed_data)}")
+            print(f"❌ Failed to connect to {self.local_gn} graphics server")
+            return False
+
+    def process_socket_messages(self):
+        """Process all queued socket messages"""
+        messages = self.socket_client.get_messages()
+        
+        for message in messages:
+            self.messages_received += 1
+            self.last_message_time = time.time()
+            
+            message_type = message.get('type', 'unknown')
+            message_data = message.get('data', {})
+            timestamp = message.get('timestamp', 0)
+            
+            if message_type == 'map_update':
+                self.process_map_update(message_data)
+            elif message_type == 'movement_confirmation':
+                self.handle_movement_confirmation(message_data)
+            elif message_type == 'timer_update':
+                self.handle_timer_update(message_data)
+            elif message_type == 'fsm_update':
+                self.handle_fsm_update(message_data)
+            elif message_type == 'explosion_event':
+                self.handle_explosion_event(message_data)
+            else:
+                print(f"❓ Unknown message type: {message_type}")
 
     def process_map_update(self, update_data):
         """Process map update from GN graphics server"""
@@ -395,8 +505,6 @@ def handle_port_data(self, data: bytes):
         if not erlang_grid or not isinstance(erlang_grid, list):
             print(f"⚠️ Invalid grid data: {type(erlang_grid)}")
             return False
-
-        print(f"🔍 Parsing grid: {len(erlang_grid)} rows")
 
         # Reset current state
         new_players = {}
@@ -1120,24 +1228,48 @@ def handle_port_data(self, data: bytes):
                         (0, 0, TIMER_PANEL_WIDTH, MAP_SIZE * TILE_SIZE), 2)
 
         # Title
-        title_text = f"GN TIMERS ({self.local_gn.upper()})"
+        title_text = f"SOCKET STATUS"
         title_surface = self.font.render(title_text, True, COLORS['TEXT_GOLD'])
         panel_surface.blit(title_surface, (10, 10))
 
-        # Backend info
+        # Socket connection info
         info_y = 40
-        backend_info = [
-            f"Tick Rate: {self.backend_constants.get('tick_delay', TICK_DELAY)}ms",
-            f"Base Move: {self.backend_constants.get('tile_move', TILE_MOVE_BASE)}ms",
-            f"Local Players: {self.local_gn_player_ids}",
+        connection_status = "✅ CONNECTED" if self.socket_client.connected else "❌ DISCONNECTED"
+        connection_color = COLORS['TEXT_GREEN'] if self.socket_client.connected else COLORS['TEXT_RED']
+        
+        socket_info = [
+            f"Status: {connection_status}",
+            f"Host: {self.socket_client.host}:{self.socket_client.port}",
+            f"GN: {self.local_gn.upper()}",
+            f"Messages: {self.messages_received}",
+            f"Attempts: {self.socket_client.reconnect_attempts}"
         ]
         
-        for i, info in enumerate(backend_info):
-            info_surface = self.mini_font.render(info, True, COLORS['TEXT_CYAN'])
+        for i, info in enumerate(socket_info):
+            color = connection_color if i == 0 else COLORS['TEXT_CYAN']
+            info_surface = self.mini_font.render(info, True, color)
             panel_surface.blit(info_surface, (10, info_y + i * 15))
 
+        # Backend timing info
+        timing_start_y = info_y + len(socket_info) * 15 + 20
+        timing_title = "BACKEND TIMING"
+        timing_surface = self.small_font.render(timing_title, True, COLORS['TEXT_WHITE'])
+        panel_surface.blit(timing_surface, (10, timing_start_y))
+        
+        current_y = timing_start_y + 25
+        timing_info = [
+            f"Tick: {self.backend_constants.get('tick_delay', TICK_DELAY)}ms",
+            f"Move: {self.backend_constants.get('tile_move', TILE_MOVE_BASE)}ms",
+            f"Immunity: {self.backend_constants.get('immunity_time', IMMUNITY_TIME)}ms"
+        ]
+        
+        for info in timing_info:
+            info_surface = self.mini_font.render(info, True, COLORS['TEXT_WHITE'])
+            panel_surface.blit(info_surface, (15, current_y))
+            current_y += 15
+
         # Movement timers
-        timer_start_y = info_y + len(backend_info) * 15 + 20
+        timer_start_y = current_y + 20
         movement_title = "MOVEMENT TIMERS"
         movement_surface = self.small_font.render(movement_title, True, COLORS['TEXT_WHITE'])
         panel_surface.blit(movement_surface, (10, timer_start_y))
@@ -1148,15 +1280,15 @@ def handle_port_data(self, data: bytes):
                 color = COLORS['TEXT_CYAN'] if player_id in self.local_gn_player_ids else COLORS['TEXT_WHITE']
                 timer_text = f"P{player_id}: {timer_ms}ms"
                 if player_id in self.local_gn_player_ids:
-                    timer_text += " (LOCAL)"
+                    timer_text += " ★"
                 
                 timer_surface = self.mini_font.render(timer_text, True, color)
                 panel_surface.blit(timer_surface, (15, current_y))
-                current_y += 20
+                current_y += 15
 
         # Performance info
-        performance_y = MAP_SIZE * TILE_SIZE - 60
-        perf_title = f"GN PERFORMANCE"
+        performance_y = MAP_SIZE * TILE_SIZE - 80
+        perf_title = f"PERFORMANCE"
         perf_surface = self.small_font.render(perf_title, True, COLORS['TEXT_WHITE'])
         panel_surface.blit(perf_surface, (10, performance_y))
         
@@ -1165,10 +1297,29 @@ def handle_port_data(self, data: bytes):
         fps_surface = self.mini_font.render(fps_text, True, fps_color)
         panel_surface.blit(fps_surface, (15, performance_y + 20))
         
+        # Last message time
+        if self.last_message_time:
+            time_since = time.time() - self.last_message_time
+            if time_since < 1.0:
+                last_msg_text = "Last: NOW"
+                last_msg_color = COLORS['TEXT_GREEN']
+            elif time_since < 5.0:
+                last_msg_text = f"Last: {time_since:.1f}s"
+                last_msg_color = COLORS['TEXT_CYAN']
+            else:
+                last_msg_text = f"Last: {time_since:.1f}s"
+                last_msg_color = COLORS['TEXT_ORANGE']
+        else:
+            last_msg_text = "Last: NEVER"
+            last_msg_color = COLORS['TEXT_RED']
+            
+        last_msg_surface = self.mini_font.render(last_msg_text, True, last_msg_color)
+        panel_surface.blit(last_msg_surface, (15, performance_y + 35))
+        
         # Data source indicator
-        data_source_text = "Data: Live Port Only"
+        data_source_text = "Data: Socket Only"
         data_surface = self.mini_font.render(data_source_text, True, COLORS['TEXT_GREEN'])
-        panel_surface.blit(data_surface, (15, performance_y + 35))
+        panel_surface.blit(data_surface, (15, performance_y + 50))
 
         self.virtual_surface.blit(panel_surface, (TIMER_OFFSET_X, MAP_OFFSET_Y))
 
@@ -1182,7 +1333,7 @@ def handle_port_data(self, data: bytes):
                         (0, 0, WINDOW_WIDTH - 20, POWERUP_PANEL_HEIGHT), 2)
 
         # Title
-        title_text = f"POWERUPS & GAME STATUS ({self.local_gn.upper()})"
+        title_text = f"GAME STATUS - SOCKET COMMUNICATION ({self.local_gn.upper()})"
         title_surface = self.font.render(title_text, True, COLORS['TEXT_GOLD'])
         panel_surface.blit(title_surface, (10, 10))
 
@@ -1190,6 +1341,7 @@ def handle_port_data(self, data: bytes):
         stats_y = 40
         game_stats = [
             f"Map Initialized: {'✅' if self.map_initialized else '❌'}",
+            f"Socket Connected: {'✅' if self.socket_client.connected else '❌'}",
             f"Active Players: {len(self.game_state.players)}",
             f"Active Bombs: {len(self.game_state.bombs)}",
             f"Active Explosions: {len(self.game_state.explosions)}",
@@ -1197,11 +1349,12 @@ def handle_port_data(self, data: bytes):
         ]
         
         for i, stat in enumerate(game_stats):
-            stat_surface = self.small_font.render(stat, True, COLORS['TEXT_WHITE'])
+            color = COLORS['TEXT_GREEN'] if '✅' in stat else COLORS['TEXT_RED'] if '❌' in stat else COLORS['TEXT_WHITE']
+            stat_surface = self.small_font.render(stat, True, color)
             panel_surface.blit(stat_surface, (10, stats_y + i * 18))
 
         # Powerup locations
-        powerup_x = 300
+        powerup_x = 320
         powerup_title = "POWERUP LOCATIONS"
         powerup_surface = self.small_font.render(powerup_title, True, COLORS['TEXT_WHITE'])
         panel_surface.blit(powerup_surface, (powerup_x, 40))
@@ -1218,28 +1371,30 @@ def handle_port_data(self, data: bytes):
                     powerup_y += 15
                     powerup_count += 1
                     
-                    if powerup_count >= 8:  # Limit display
+                    if powerup_count >= 6:  # Limit display
                         break
-            if powerup_count >= 8:
+            if powerup_count >= 6:
                 break
 
-        # Connection status
-        connection_x = 600
-        connection_title = "CONNECTION STATUS"
-        connection_surface = self.small_font.render(connection_title, True, COLORS['TEXT_WHITE'])
-        panel_surface.blit(connection_surface, (connection_x, 40))
+        # Socket communication details
+        socket_x = 600
+        socket_title = "SOCKET DETAILS"
+        socket_surface = self.small_font.render(socket_title, True, COLORS['TEXT_WHITE'])
+        panel_surface.blit(socket_surface, (socket_x, 40))
         
-        connection_stats = [
-            f"Port Buffer: {len(self.port_buffer)} bytes",
-            f"Last Update: {'Live' if self.map_initialized else 'Waiting'}",
-            f"Local GN: {self.local_gn}",
-            f"Local Players: {self.local_gn_player_ids}"
+        socket_stats = [
+            f"Protocol: TCP Socket",
+            f"Format: JSON + Length Prefix",
+            f"Buffer: {len(self.socket_client.receive_buffer)} bytes",
+            f"Queue: {len(self.socket_client.data_queue)} messages",
+            f"Port: {self.socket_client.port}",
+            f"Threading: Enabled"
         ]
         
-        for i, stat in enumerate(connection_stats):
-            color = COLORS['TEXT_GREEN'] if 'Live' in stat else COLORS['TEXT_CYAN']
+        for i, stat in enumerate(socket_stats):
+            color = COLORS['TEXT_CYAN'] if 'TCP' in stat or 'JSON' in stat else COLORS['TEXT_WHITE']
             stat_surface = self.mini_font.render(stat, True, color)
-            panel_surface.blit(stat_surface, (connection_x, 60 + i * 15))
+            panel_surface.blit(stat_surface, (socket_x, 60 + i * 15))
 
         self.virtual_surface.blit(panel_surface, (10, POWERUP_OFFSET_Y))
 
@@ -1263,6 +1418,13 @@ def handle_port_data(self, data: bytes):
                 elif event.key == pygame.K_F1:
                     # Toggle fullscreen
                     pygame.display.toggle_fullscreen()
+                elif event.key == pygame.K_r:
+                    # Force reconnect
+                    print("🔄 Force reconnecting to socket...")
+                    self.socket_client.disconnect()
+                    time.sleep(0.5)
+                    self.socket_client.connect()
+                    self.socket_client.start_receiving()
         
         return True
 
@@ -1315,11 +1477,14 @@ def handle_port_data(self, data: bytes):
         overlay_y = 10
         
         # Connection status
-        if not self.map_initialized:
-            status_text = "⏳ Waiting for data from GN graphics server..."
+        if not self.socket_client.connected:
+            status_text = f"🔌 Connecting to {self.local_gn.upper()} socket server..."
             status_color = COLORS['TEXT_ORANGE']
+        elif not self.map_initialized:
+            status_text = f"⏳ Connected - Waiting for map data..."
+            status_color = COLORS['TEXT_CYAN']
         else:
-            status_text = f"✅ Live data from {self.local_gn.upper()}"
+            status_text = f"✅ Live socket data from {self.local_gn.upper()}"
             status_color = COLORS['TEXT_GREEN']
         
         status_surface = self.font.render(status_text, True, status_color)
@@ -1337,7 +1502,7 @@ def handle_port_data(self, data: bytes):
 
         # Instructions
         instruction_y = self.current_height - 30
-        instructions = "ESC: Exit | F1: Fullscreen | SPACE: Clear death screen"
+        instructions = "ESC: Exit | F1: Fullscreen | R: Reconnect | SPACE: Clear death screen"
         instruction_surface = self.small_font.render(instructions, True, COLORS['TEXT_GREY'])
         
         instr_bg_rect = instruction_surface.get_rect()
@@ -1351,8 +1516,14 @@ def handle_port_data(self, data: bytes):
         self.screen.blit(instruction_surface, (14, instruction_y))
 
     def run(self):
-        """Main game loop - CLEAN AND SIMPLE"""
-        print("🚀 Starting Clean GN Visualizer main loop...")
+        """Main game loop - Socket Communication Only"""
+        print("🚀 Starting Socket GN Visualizer main loop...")
+        print(f"🔌 Connecting to {self.local_gn} graphics server...")
+        
+        # Initialize socket connection
+        if not self.initialize_socket_connection():
+            print("❌ Failed to initialize socket connection. Retrying in background...")
+        
         running = True
         
         while running:
@@ -1363,10 +1534,8 @@ def handle_port_data(self, data: bytes):
             if not running:
                 break
 
-            # Read data from port (NO FALLBACKS)
-            port_data = self.read_port_data()
-            if port_data:
-                self.handle_port_data(port_data)
+            # Process socket messages
+            self.process_socket_messages()
 
             # Update timing and animations
             self.time = time.time()
@@ -1380,18 +1549,21 @@ def handle_port_data(self, data: bytes):
             # Maintain target FPS
             self.clock.tick(FPS)
 
-        print("🛑 Clean GN Visualizer shutting down...")
+        # Cleanup
+        print("🛑 Socket GN Visualizer shutting down...")
+        self.socket_client.disconnect()
         pygame.quit()
 
 def main():
     """Main entry point"""
-    print("🎮 Clean GN Visualizer Starting...")
-    print("📡 ONLY reads from Erlang port (stdin)")
-    print("🚫 NO file fallbacks, NO compatibility layers")
-    print("✨ Clean, debuggable, single data path")
+    print("🔌 Socket GN Visualizer Starting...")
+    print("📡 100% Socket Communication with GN Graphics Server")
+    print("🚫 NO port communication, NO file fallbacks")
+    print("✨ Pure TCP socket + JSON protocol")
+    print("🧵 Multi-threaded socket handling")
     
     try:
-        visualizer = CleanGNVisualizer()
+        visualizer = SocketGNVisualizer()
         visualizer.run()
     except KeyboardInterrupt:
         print("\n⚠️ Interrupted by user")
