@@ -141,7 +141,10 @@ handle_info(start_socket_server, State) ->
                 socket_acceptor = AcceptorPid,
                 current_map_state = InitialMapState
             },
-            cn_server ! {graphics_ready, self()},
+            
+            % Wait for CN server to be available
+            wait_for_cn_server_and_notify(),
+            
             {noreply, UpdatedState};
         {error, Reason} ->
             io:format("❌ Failed to start CN socket server: ~p~n", [Reason]),
@@ -1176,3 +1179,21 @@ update_map_with_explosion(Map, X, Y) ->
 
 update_cell_explosion({Tile, Powerup, Bomb, Player, _, Special}, ExplosionInfo) ->
     {Tile, Powerup, Bomb, Player, ExplosionInfo, Special}.
+
+wait_for_cn_server_and_notify() ->
+    spawn(fun() ->
+        wait_for_cn_server_loop(50) % Try for 50 attempts (25 seconds max)
+    end).
+
+wait_for_cn_server_loop(0) ->
+    io:format("❌ CN server not found after maximum retries~n");
+wait_for_cn_server_loop(AttemptsLeft) ->
+    case global:whereis_name(cn_server) of
+        undefined ->
+            io:format("⏳ Waiting for CN server... (~w attempts left)~n", [AttemptsLeft]),
+            timer:sleep(500), % Wait 500ms between attempts
+            wait_for_cn_server_loop(AttemptsLeft - 1);
+        Pid ->
+            io:format("✅ Found CN server, sending ready message~n"),
+            Pid ! {graphics_ready, self()}
+    end.
