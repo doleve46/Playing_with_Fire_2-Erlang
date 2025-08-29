@@ -993,13 +993,17 @@ send_map_to_all_targets(State) ->
     send_map_to_socket(State#state.python_socket_pid, State#state.current_map_state),
     send_enhanced_map_to_gn_servers(State).
 
+send_map_to_all_targets(State) ->
+    send_map_to_socket(State#state.python_socket_pid, State#state.current_map_state),
+    send_enhanced_map_to_gn_servers(State).
+
 send_enhanced_map_to_gn_servers(State) ->
     lists:foreach(fun(ServerInfo) ->
         case ServerInfo of
             {_Ref, Node, Pid} when is_pid(Pid) ->
                 % We have the actual PID
                 try
-                    gen_server:cast(Pid, {map_update, State#state.current_map_state}),
+                    gen_server:cast(Pid, {map_update, State#state.current_map_state})
                     % io:format("✅ Sent map to ~w via PID~n", [Node])
                 catch
                     _:Error ->
