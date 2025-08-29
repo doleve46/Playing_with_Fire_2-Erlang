@@ -408,6 +408,7 @@ def determine_local_gn(self):
     # Try to get node name from environment or system
     node_name = os.environ.get('NODE_NAME', '')
     
+    # If not in env, try to determine from hostname or other means
     if not node_name:
         import socket as sock
         try:
@@ -418,25 +419,54 @@ def determine_local_gn(self):
     
     print(f"🔍 Analyzing node name: {node_name}")
     
-    # Super simple: just look for each number in the string
-    for gn_num in ['1', '2', '3', '4']:
-        if f'GN{gn_num}' in node_name.upper() or f'gn{gn_num}' in node_name.lower():
-            gn_id = f"gn{gn_num}"
-            print(f"✅ Found 'GN{gn_num}' in node name, using GN: {gn_id}")
-            return gn_id
+    # Simple approach: find the first digit in the string
+    # For 'GN4@132.72.81.60' -> finds '4'
+    # For 'GN1@132.72.81.224' -> finds '1'
+    import re
+    digit_match = re.search(r'(\d)', node_name)
     
-    # If GN pattern not found, look for the IPs directly
+    if digit_match:
+        gn_number = digit_match.group(1)
+        # Validate it's a reasonable GN number (1-4)
+        if gn_number in ['1', '2', '3', '4']:
+            gn_id = f"gn{gn_number}"
+            print(f"✅ Found first digit '{gn_number}' in node name, using GN: {gn_id}")
+            return gn_id
+        else:
+            print(f"⚠️ Found digit '{gn_number}' but it's not a valid GN number (1-4)")
+    
+    # Fallback: try IP-based detection if digit approach fails
+    print("🔍 Digit search failed, trying IP-based detection...")
     ip_to_gn_map = {
-        '132.72.81.224': 'gn1',
-        '132.72.81.85': 'gn2',  
-        '132.72.81.167': 'gn3',
-        '132.72.81.60': 'gn4'
+        '132.72.81.224': 'gn1',  # GN1
+        '132.72.81.85': 'gn2',   # GN2  
+        '132.72.81.167': 'gn3',  # GN3
+        '132.72.81.60': 'gn4'    # GN4
     }
     
+    # Look for any IP address in the node name
     for ip, gn_id in ip_to_gn_map.items():
         if ip in node_name:
             print(f"✅ Found IP {ip} in node name, using GN: {gn_id}")
             return gn_id
+    
+    # Final fallback: try to get local machine's IP
+    try:
+        import socket as sock
+        temp_sock = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
+        temp_sock.connect(("8.8.8.8", 80))
+        local_ip = temp_sock.getsockname()[0]
+        temp_sock.close()
+        
+        print(f"🌐 Local machine IP: {local_ip}")
+        
+        for ip, gn_id in ip_to_gn_map.items():
+            if local_ip == ip:
+                print(f"✅ Matched local IP {local_ip} to GN: {gn_id}")
+                return gn_id
+                
+    except Exception as e:
+        print(f"❌ Could not determine local IP: {e}")
     
     print(f"⚠️ Could not determine GN from node name '{node_name}', defaulting to gn1")
     return "gn1"
