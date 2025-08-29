@@ -8,14 +8,6 @@ IP_ADDRESS=$(hostname -I | awk '{print $1}')
 
 echo "Detected IP Address: $IP_ADDRESS"
 
-# Set environment variables to prevent GUI startup on headless servers
-export HEADLESS=true
-export HEADLESS_MODE=true
-export NODE_NAME="CN@$IP_ADDRESS"
-export SDL_VIDEODRIVER=dummy
-echo "Set headless mode - GUIs will not start on this server"
-echo "Environment: HEADLESS=$HEADLESS, NODE_NAME=$NODE_NAME"
-
 # Navigate to the specified folder
 PROJECT_PATH="$HOME/Desktop/dolev_roi/playing_with_fire"
 
@@ -44,8 +36,8 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Starting Erlang shell with name CN@$IP_ADDRESS..."
-echo "Will automatically run cn_start:cn_bootstrap() after shell starts..."
+echo "Starting Erlang shell with name GN1@$IP_ADDRESS..."
+echo "Will automatically run gn_start:start() after shell starts..."
 
 echo "Commands will be executed automatically. Press Ctrl+C to exit when done."
 sleep 1
