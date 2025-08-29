@@ -1000,7 +1000,7 @@ send_enhanced_map_to_gn_servers(State) ->
                 % We have the actual PID
                 try
                     gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                    io:format("✅ Sent map to ~w via PID~n", [Node])
+                    % io:format("✅ Sent map to ~w via PID~n", [Node])
                 catch
                     _:Error ->
                         io:format("❌ PID cast failed to ~w: ~p~n", [Node, Error])
