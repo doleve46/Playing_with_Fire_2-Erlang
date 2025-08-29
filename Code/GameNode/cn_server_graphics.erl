@@ -991,7 +991,9 @@ send_map_to_all_targets(State) ->
     send_enhanced_map_to_gn_servers(State).
 
 send_enhanced_map_to_gn_servers(State) ->
+    io:format("📡 Attempting to send to ~w GN servers~n", [length(State#state.gn_graphics_servers)]), % Debug
     lists:foreach(fun({Node, Pid}) ->
+        io:format("📡 Trying to send to ~w with pid ~p~n", [Node, Pid]),
         case is_pid(Pid) andalso is_process_alive(Pid) of
             true ->
                 try
@@ -1101,6 +1103,8 @@ gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
 
 attempt_gn_graphics_monitoring(NodeList) ->
     RefsList = lists:map(fun(Node) ->
+        ProcessName = {gn_graphics_server, Node}, % Make sure this matches the registration
+        io:format("🔍 Attempting to monitor ~p on node ~w~n", [ProcessName, Node]),
         Ref = erlang:monitor(process, {gn_graphics_server, Node}),
         io:format("Sent request to monitor process ~w~n", [Node]),
         {Ref, Node} end, NodeList),
