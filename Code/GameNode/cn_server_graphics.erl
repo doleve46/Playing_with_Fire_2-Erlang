@@ -260,7 +260,7 @@ handle_info(periodic_update, State) ->
    
     if ShouldSend ->
         send_map_to_all_targets(UpdatedState),
-        io:format("📤 Sent map to all targets including ~w GN servers~n", [length(UpdatedState#state.gn_graphics_servers)]),
+        % io:format("📤 Sent map to all targets including ~w GN servers~n", [length(UpdatedState#state.gn_graphics_servers)]),
         case State#state.update_counter rem 500 == 0 of
             true ->
                 io:format("🔄 Enhanced periodic Socket update #~w sent~n", [UpdatedState#state.update_counter]);
