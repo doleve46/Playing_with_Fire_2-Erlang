@@ -11,7 +11,7 @@
 
 %% API
 -export([cn_bootstrap/1, discover_GNs/1, discover_GNs_improved/1]).
--export([start/1, initial_mnesia_load/1]).
+-export([start/1, initial_mnesia_load/2]).
 
 %% ! NOTE: when terminating, need to use application:stop(mnesia)
 %% ! NOTE: for super-massive debugging use sys:trace(Pid, true).
@@ -26,7 +26,7 @@
 %% --------------------------------------------------------------
 cn_bootstrap(IP_prefix) ->
     %% Discover all GNs in the local network
-    GN_list = discover_GNs(IP_prefix),
+    GN_list = discover_GNs_improved(IP_prefix),
     io:format("Discovered GN nodes: ~p~n", [GN_list]),
     spawn(cn_start, start, [GN_list]). % spawn cn_start process
 
@@ -126,8 +126,9 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     %% Load map into mnesia - in parallel processes
     Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
     %% Await GNs decisions to play as bot or human
+    io:format("📋 Waiting for player decisions from 4 GN nodes...~n"),
     GNs_decisions = await_players_decisions(4, [], ConnectedNodeNames),
-    io:format("GNs decisions received: ~p~n", [GNs_decisions]),
+    io:format("✅ GNs decisions received: ~p~n", [GNs_decisions]),
     %% Verify mnesia loading process has finished
     case erlang:is_process_alive(Mnesia_loading_pid) of
         true ->
@@ -139,9 +140,17 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
             io:format("Mnesia loading process already finished.~n")
     end,
     %% Open cn_server and cn_graphics_server
+    io:format("🚀 Starting CN server and CN graphics server...~n"),
     {ok, _Pid_cn_server} = cn_server:start_link(GNs_decisions),
+    io:format("✅ CN server started successfully~n"),
     {ok, _Pid_cn_graphics_server} = cn_server_graphics:start_link(ConnectedNodeNames),
-    ok. % Startup process ends gracefully
+    io:format("✅ CN graphics server started successfully~n"),
+    
+    % Keep this process alive so linked servers don't terminate
+    io:format("🔄 CN startup complete, keeping process alive...~n"),
+    receive
+        stop -> ok
+    end.
 
 %% =================== Helper Functions ======================
 
@@ -190,17 +199,21 @@ broadcast_current_connections(Counter, ListOfNodeNames) ->
     ok.
 
 %% @doc recieve-block that catches all decisions from GNs and returns a sorted list of tuples {1, true, Node_1_ID}, {2, false, Node_1_ID} ...
-await_players_decisions(0, Acc, _GN_list) -> lists:sort(fun({A,_,_}, {B,_,_}) -> A =< B end, Acc);
+await_players_decisions(0, Acc, _GN_list) -> 
+    io:format("📋 All player decisions collected!~n"),
+    lists:sort(fun({A,_,_}, {B,_,_}) -> A =< B end, Acc);
 await_players_decisions(N, Acc, GN_list) ->
+    io:format("📋 Still waiting for ~w more player decisions...~n", [N]),
     receive
         {Pid, playmode, Answer} when is_pid(Pid), is_boolean(Answer) ->
             case lists:member(node(Pid),GN_list) of
                 true ->
                     GN_number = list_to_integer([lists:nth(3, atom_to_list(node(Pid)))]),
+                    io:format("📋 Received decision from GN~w: ~p~n", [GN_number, Answer]),
                     await_players_decisions(N-1, [{GN_number, Answer, node(Pid)} | Acc ], GN_list);
                 false -> % an error - shouldn't catch such messages
                     %% print this to the screen, and for now continue as normal
-                    io:format("Unexpected message from ~p: {~p, ~p}~n", [Pid, playmode, Answer]),
+                    io:format("⚠️ Unexpected message from ~p: {~p, ~p}~n", [Pid, playmode, Answer]),
                     await_players_decisions(N, Acc, GN_list)
             end
     end.
