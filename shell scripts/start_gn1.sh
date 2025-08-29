@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 
 # Get the current IP address (using the default route interface)
 IP_ADDRESS=$(hostname -I | awk '{print $1}')
@@ -7,6 +7,15 @@ IP_ADDRESS=$(hostname -I | awk '{print $1}')
 # IP_ADDRESS=$(ip route get 8.8.8.8 | awk -F"src " 'NR==1{split($2,a," ");print a[1]}')
 
 echo "Detected IP Address: $IP_ADDRESS"
+
+# Set environment variables to prevent GUI startup on headless servers
+export HEADLESS=true
+export HEADLESS_MODE=true
+export GN_ID=gn1
+export NODE_NAME="GN1@$IP_ADDRESS"
+export SDL_VIDEODRIVER=dummy
+echo "Set headless mode - GUIs will not start on this server"
+echo "Environment: HEADLESS=$HEADLESS, GN_ID=$GN_ID, NODE_NAME=$NODE_NAME"
 
 # Navigate to the specified folder
 PROJECT_PATH="$HOME/Desktop/dolev_roi/playing_with_fire"
