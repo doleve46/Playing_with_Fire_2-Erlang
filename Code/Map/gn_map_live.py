@@ -8,6 +8,7 @@ import struct
 import socket
 import json
 import threading
+import re
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
@@ -396,11 +397,40 @@ class SocketGNVisualizer:
         print(f"👥 Local players: {self.local_gn_player_ids}")
         print(f"🌐 Will connect to socket port: {self.socket_client.port}")
 
-    def determine_local_gn(self):
-        """Determine which GN this visualizer is running on"""
-        gn_id = os.environ.get('GN_ID', 'gn1')
-        print(f"🏠 Detected local GN: {gn_id}")
+   def determine_local_gn(self):
+    """Determine which GN this visualizer is running on from node name"""
+    # First try environment variable
+    env_gn = os.environ.get('GN_ID')
+    if env_gn:
+        print(f"🏠 Using GN from environment: {env_gn}")
+        return env_gn
+    
+    # Try to get node name from environment or system
+    node_name = os.environ.get('NODE_NAME', '')
+    
+    # If not in env, try to determine from hostname or other means
+    if not node_name:
+        import socket as sock
+        try:
+            hostname = sock.gethostname()
+            node_name = hostname
+        except:
+            node_name = "unknown"
+    
+    print(f"🔍 Analyzing node name: {node_name}")
+    
+    # Extract GN number from node name pattern "GN#@132.72.81.###"
+    gn_pattern = r'GN(\d)@'
+    match = re.search(gn_pattern, node_name)
+    
+    if match:
+        gn_number = match.group(1)
+        gn_id = f"gn{gn_number}"
+        print(f"✅ Extracted GN from node name: {gn_id}")
         return gn_id
+    else:
+        print(f"⚠️ Could not extract GN from node name '{node_name}', defaulting to gn1")
+        return "gn1"
 
     def get_local_player_ids(self):
         """Get the player IDs that belong to this GN"""
