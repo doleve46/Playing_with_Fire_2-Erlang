@@ -2,7 +2,10 @@
 -export([start/0, send/2, send_to_gn_start/1]).
 
 start() ->
-    Port = open_port({spawn, "python3 PWF2_GN_GUI.py"}, [binary, exit_status]),
+    % Get the current directory
+    {ok, Cwd} = file:get_cwd(),
+    GuiPath = filename:join([Cwd, "src", "Graphics", "PWF2_GN_GUI.py"]),
+    Port = open_port({spawn, "python3 " ++ GuiPath}, [{cd, filename:dirname(GuiPath)}, binary, exit_status]),
     send(Port, "show_main_menu"),
     loop(Port, idle).
 
@@ -64,28 +67,24 @@ handle_gui_event(Port, "return_to_menu", _Status) ->
 
 handle_gui_event(Port, "play_game_clicked", _Status) ->
     io:format("User chose to play the game~n"),
-    send(Port, "show_game_setup"),
     send_to_gn_start({play_as_human}),
-    timer:sleep(3000), % Simulate game setup time
-    %% Close port and process 1 second after playmode selection
-    spawn(fun() ->
-        timer:sleep(1000),
-        port_close(Port),
-        exit(normal)
-    end),
+    % Close the port immediately to shut down the GUI
+    try 
+        port_close(Port)
+    catch 
+        _:_ -> ok  % Ignore port close errors
+    end,
     terminate;
 
 handle_gui_event(Port, "bot_clicked", _Status) ->
     io:format("User chose bot mode~n"),
-    send(Port, "show_game_setup"),
     send_to_gn_start({play_as_bot}),
-    timer:sleep(3000), % Simulate game setup time
-    %% Close port and process after playmode selection
-    spawn(fun() ->
-        timer:sleep(1000),
-        port_close(Port),
-        exit(normal)
-    end),
+    % Close the port immediately to shut down the GUI
+    try 
+        port_close(Port)
+    catch 
+        _:_ -> ok  % Ignore port close errors
+    end,
     terminate;
 
 handle_gui_event(Port, "choice_timeout", _Status) ->
@@ -96,7 +95,11 @@ handle_gui_event(Port, "choice_timeout", _Status) ->
     %% Close port and process after timeout
     spawn(fun() ->
         timer:sleep(1000),
-        port_close(Port),
+        try 
+            port_close(Port)
+        catch 
+            _:_ -> ok  % Ignore port close errors
+        end,
         exit(normal)
     end),
     terminate;
@@ -112,5 +115,4 @@ start_choice_timer(Port) ->
         timer:sleep(20000), % 20 seconds
         send(Port, "choice_timeout")
     end).
-
 
