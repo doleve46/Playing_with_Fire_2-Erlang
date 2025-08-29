@@ -397,46 +397,43 @@ class SocketGNVisualizer:
         print(f"👥 Local players: {self.local_gn_player_ids}")
         print(f"🌐 Will connect to socket port: {self.socket_client.port}")
 
+
 def determine_local_gn(self):
         """Determine which GN this visualizer is running on from node name"""
         # First try environment variable
         env_gn = os.environ.get('GN_ID')
         if env_gn:
-            print(f"🏠 Using GN from environment: {env_gn}")
+            print(f"Using GN from environment: {env_gn}")
             return env_gn
         
-        # Try to get node name from environment or system
+        # Try to get node name from environment
         node_name = os.environ.get('NODE_NAME', '')
         
-        # If not in env, try to determine from hostname or other means
+        # If not in env, try hostname
         if not node_name:
             import socket as sock
             try:
                 hostname = sock.gethostname()
                 node_name = hostname
+                print(f"Using hostname as node name: {node_name}")
             except:
                 node_name = "unknown"
         
-        print(f"🔍 Analyzing node name: {node_name}")
+        print(f"Analyzing node name: {node_name}")
         
-        # Simple approach: find the first digit in the string
-        # For 'GN4@132.72.81.60' -> finds '4'
-        # For 'GN1@132.72.81.224' -> finds '1'
+        # Look for GN pattern specifically
         import re
-        digit_match = re.search(r'GN(\d)', node_name)  # More specific pattern
+        gn_match = re.search(r'GN(\d)@', node_name)
         
-        if digit_match:
-            gn_number = digit_match.group(1)
-            # Validate it's a reasonable GN number (1-4)
+        if gn_match:
+            gn_number = gn_match.group(1)
             if gn_number in ['1', '2', '3', '4']:
                 gn_id = f"gn{gn_number}"
-                print(f"✅ Found GN digit '{gn_number}' in node name, using GN: {gn_id}")
+                print(f"Found GN pattern: GN{gn_number}@ -> using {gn_id}")
                 return gn_id
-            else:
-                print(f"⚠️ Found digit '{gn_number}' but it's not a valid GN number (1-4)")
         
-        # Fallback: try IP-based detection if digit approach fails
-        print("🔍 GN pattern search failed, trying IP-based detection...")
+        # Fallback: IP-based detection
+        print("GN pattern not found, trying IP-based detection...")
         ip_to_gn_map = {
             '132.72.81.224': 'gn1',  # GN1
             '132.72.81.85': 'gn2',   # GN2  
@@ -444,13 +441,13 @@ def determine_local_gn(self):
             '132.72.81.60': 'gn4'    # GN4
         }
         
-        # Look for any IP address in the node name
+        # Check if any known IP is in the node name
         for ip, gn_id in ip_to_gn_map.items():
             if ip in node_name:
-                print(f"✅ Found IP {ip} in node name, using GN: {gn_id}")
+                print(f"Found IP {ip} in node name -> using {gn_id}")
                 return gn_id
         
-        # Final fallback: try to get local machine's IP
+        # Final fallback: try to get local machine's actual IP
         try:
             import socket as sock
             temp_sock = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
@@ -458,17 +455,17 @@ def determine_local_gn(self):
             local_ip = temp_sock.getsockname()[0]
             temp_sock.close()
             
-            print(f"🌐 Local machine IP: {local_ip}")
+            print(f"Local machine IP: {local_ip}")
             
-            for ip, gn_id in ip_to_gn_map.items():
-                if local_ip == ip:
-                    print(f"✅ Matched local IP {local_ip} to GN: {gn_id}")
-                    return gn_id
+            if local_ip in ip_to_gn_map:
+                gn_id = ip_to_gn_map[local_ip]
+                print(f"Matched local IP {local_ip} -> using {gn_id}")
+                return gn_id
                     
         except Exception as e:
-            print(f"❌ Could not determine local IP: {e}")
+            print(f"Could not determine local IP: {e}")
         
-        print(f"⚠️ Could not determine GN from node name '{node_name}', defaulting to gn1")
+        print(f"Could not determine GN from node name '{node_name}', defaulting to gn1")
         return "gn1"
 
     def get_local_player_ids(self):
