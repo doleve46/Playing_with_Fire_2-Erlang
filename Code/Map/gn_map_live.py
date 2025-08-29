@@ -431,9 +431,11 @@ class SocketGNVisualizer:
     def initialize_socket_connection(self):
         """Initialize socket connection to GN graphics server"""
         print(f"🔌 Initializing socket connection to {self.local_gn} graphics server...")
+        print(f"🌐 Attempting to connect to localhost:{self.socket_client.port}")
         
         if self.socket_client.connect():
             self.socket_client.start_receiving()
+            print(f"✅ Socket connection successful!")                    
             return True
         else:
             print(f"❌ Failed to connect to {self.local_gn} graphics server")
