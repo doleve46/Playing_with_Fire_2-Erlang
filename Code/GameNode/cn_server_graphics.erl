@@ -41,10 +41,10 @@
 %%% API
 %%%===================================================================
 
-%% Starts the central graphics server
--spec start_link(list()) -> {ok, pid()} | ignore | {error, term()}.
-start_link(GNNodes) ->
-    gen_server:start_link({global, ?MODULE}, ?MODULE, [GNNodes], []).
+%% s the central graphics server
+-spec _link(list()) -> {ok, pid()} | ignore | {error, term()}.
+_link(GNNodes) ->
+    gen_server:_link({global, ?MODULE}, ?MODULE, [GNNodes], []).
 
 %% Get current map state
 -spec get_current_map() -> term().
@@ -86,6 +86,9 @@ init([GNNodes]) ->
     erlang:send_after(5000, self(), cleanup_expired_elements),
     
     process_flag(trap_exit, true),
+
+    % Start Python visualizer
+    start_python_visualizer(),
     
     io:format("✅ Enhanced CN Graphics Server initialized with Socket communication~n"),
     {ok, State}.
@@ -650,6 +653,26 @@ send_death_event_to_socket(ClientPid, DeathData) ->
         _:Error ->
             io:format("❌ Error sending death event via socket: ~p~n", [Error])
     end.
+
+%%%===================================================================
+%%% Start Python
+%%%===================================================================
+
+start_python_visualizer() ->
+    spawn(fun() ->
+        timer:sleep(2000), % Wait a bit for socket server to be ready
+        {ok, Cwd} = file:get_cwd(),
+        PythonScript = filename:join([Cwd, "src", "Graphics", "map_live_port.py"]),
+        case filelib:is_file(PythonScript) of
+            true ->
+                io:format("🚀 Starting CN Python visualizer...~n"),
+                Port = open_port({spawn, "python3 " ++ PythonScript}, 
+                    [{cd, filename:dirname(PythonScript)}, binary, exit_status]),
+                io:format("✅ CN Python visualizer started~n");
+            false ->
+                io:format("❌ Python script not found: ~s~n", [PythonScript])
+        end
+    end).
 
 %%%===================================================================
 %%% JSON Conversion Functions
