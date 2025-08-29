@@ -214,7 +214,7 @@ handle_info(start_socket_server, State) ->
     
     io:format("🔌 Starting socket server for ~w on port ~w...~n", [LocalGN, SocketPort]),
     
-    case start_gn_socket_listener(SocketPort) of
+   case start_gn_socket_listener(SocketPort) of
         {ok, {ListenSocket, AcceptorPid}} ->
             io:format("✅ GN Socket server started successfully on port ~w~n", [SocketPort]),
             UpdatedState = State#state{
@@ -229,8 +229,17 @@ handle_info(start_socket_server, State) ->
                     io:format("✅ Socket server ready and current map state will be sent when client connects~n")
             end,
             
+            % Start the Python socket client after 2 seconds
+            erlang:send_after(2000, self(), start_python_socket_client),
+            
             {noreply, UpdatedState};
-        handle_info(start_python_socket_client, State) ->
+        {error, Reason} ->
+            io:format("❌ Failed to start GN socket server: ~p~n", [Reason]),
+            % Continue without socket server
+            {noreply, State}
+    end;
+
+handle_info(start_python_socket_client, State) ->
     spawn(fun() ->
         {ok, Cwd} = file:get_cwd(),
         PythonScript = filename:join([Cwd, "src", "Graphics", "gn_map_live.py"]),
@@ -245,11 +254,6 @@ handle_info(start_socket_server, State) ->
         end
     end),
     {noreply, State};
-        {error, Reason} ->
-            io:format("❌ Failed to start GN socket server: ~p~n", [Reason]),
-            % Continue without socket server
-            {noreply, State}
-    end;
 
 handle_info({socket_connected, ClientSocket, ClientPid}, State) ->
     io:format("🔗 Python client connected to GN ~w via socket~n", [State#state.local_gn_name]),
