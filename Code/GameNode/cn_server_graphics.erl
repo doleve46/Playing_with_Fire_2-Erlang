@@ -235,7 +235,7 @@ handle_info(monitor_gn_graphics_servers, State) ->
 handle_info(periodic_update, State) ->
     CurrentTime = erlang:system_time(millisecond),
     
-    io:format("📡 Periodic update - GN servers list: ~p~n", [State#state.gn_graphics_servers]),
+    % io:format("📡 Periodic update - GN servers list: ~p~n", [State#state.gn_graphics_servers]),
     
     % Clean up expired explosions
     NewExplosions = maps:filter(fun(_Coord, ExpiryTime) ->
