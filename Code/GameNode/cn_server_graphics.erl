@@ -1,4 +1,4 @@
--module(cn_server_graphics_socket).
+-module(cn_server_graphics).
 -behaviour(gen_server).
 
 %% API
