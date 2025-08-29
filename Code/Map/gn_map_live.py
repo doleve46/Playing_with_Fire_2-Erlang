@@ -397,7 +397,7 @@ class SocketGNVisualizer:
         print(f"👥 Local players: {self.local_gn_player_ids}")
         print(f"🌐 Will connect to socket port: {self.socket_client.port}")
 
-   def determine_local_gn(self):
+def determine_local_gn(self):
     """Determine which GN this visualizer is running on from node name"""
     # First try environment variable
     env_gn = os.environ.get('GN_ID')
@@ -419,28 +419,26 @@ class SocketGNVisualizer:
     
     print(f"🔍 Analyzing node name: {node_name}")
     
-  # Extract GN number from node name pattern "GN#@132.72.81.###"
-    gn_pattern = r'GN(\d)@'
-    match = re.search(gn_pattern, node_name)
+    # Extract GN number from node name pattern "GN#@132.72.81.###"
+    patterns = [
+        r'GN(\d)@',           # "GN1@132.72.81.224"
+        r'GN(\d)',            # "GN1" anywhere
+        r'gn(\d)@',           # "gn1@..."
+        r'gn(\d)',            # "gn1" anywhere
+        r'.*GN(\d)',          # Any prefix + "GN1"
+        r'.*gn(\d)'           # Any prefix + "gn1"
+    ]
     
-    if match:
-        gn_number = match.group(1)
-        gn_id = f"gn{gn_number}"
-        print(f"✅ Extracted GN from node name: {gn_id}")
-        return gn_id
-    else:
-        # Try alternative patterns
-        alt_patterns = [r'gn(\d)', r'.*gn(\d)', r'GN(\d)']
-        for pattern in alt_patterns:
-            match = re.search(pattern, node_name, re.IGNORECASE)
-            if match:
-                gn_number = match.group(1)
-                gn_id = f"gn{gn_number}"
-                print(f"✅ Extracted GN from alternative pattern: {gn_id}")
-                return gn_id
-        
-        print(f"⚠️ Could not extract GN from node name '{node_name}', defaulting to gn1")
-        return "gn1"
+    for pattern in patterns:
+        match = re.search(pattern, node_name, re.IGNORECASE)
+        if match:
+            gn_number = match.group(1)
+            gn_id = f"gn{gn_number}"
+            print(f"✅ Extracted GN from node name using pattern '{pattern}': {gn_id}")
+            return gn_id
+    
+    print(f"⚠️ Could not extract GN from node name '{node_name}', defaulting to gn1")
+    return "gn1"
 
     def get_local_player_ids(self):
         """Get the player IDs that belong to this GN"""
