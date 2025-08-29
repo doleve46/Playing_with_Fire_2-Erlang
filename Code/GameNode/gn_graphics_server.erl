@@ -91,8 +91,8 @@ handle_call(_Request, _From, State) ->
 
 %% Handle asynchronous casts
 handle_cast({map_update, EnhancedMapState}, State) ->
-    io:format("🗺️ GN Graphics Server received map update!~n"),
-    io:format("🔌 Python socket PID: ~p~n", [State#state.python_socket_pid]),  %debug
+    % io:format("🗺️ GN Graphics Server received map update!~n"),
+    % io:format("🔌 Python socket PID: ~p~n", [State#state.python_socket_pid]),  %debug
     CurrentTime = erlang:system_time(millisecond),
     
     {ActualMapState, DeadPlayers, BackendTiming, ActiveExplosions} = case EnhancedMapState of
@@ -505,7 +505,7 @@ gn_socket_client_loop(Socket, MainProcess) ->
 %%%===================================================================
 
 send_enhanced_map_to_socket(undefined, _MapState) ->
-    io:format("⚠️ No socket client connected to send map~n"),
+    % io:format("⚠️ No socket client connected to send map~n"),
     ok;
 send_enhanced_map_to_socket(ClientPid, MapState) ->
     io:format("📡 Sending map via socket to PID: ~p~n", [ClientPid]),
