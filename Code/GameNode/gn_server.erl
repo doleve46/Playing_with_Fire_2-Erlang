@@ -72,6 +72,10 @@ init([GN_number, PlayerType]) ->
     {stop, Reason :: term(), NewState :: #gn_state{}}).
 handle_call(_Request, _From, State = #gn_state{}) ->
     {reply, ok, State}.
+handle_call({set_player_pid, PlayerPid}, _From, State) ->
+    % Handle player PID registration
+    io:format("Setting player PID: ~p~n", [PlayerPid]),
+    {reply, ok, State};
 
 %%% ============== Handle cast ==============
 
