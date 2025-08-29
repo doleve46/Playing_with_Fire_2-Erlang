@@ -35,7 +35,7 @@ if [ $? -ne 0 ]; then
     echo "Error: rebar3 compile failed!"
     exit 1
 fi
-echo "Starting Erlang shell with name GN1@$IP_ADDRESS..."
+echo "Starting Erlang shell with name GN2@$IP_ADDRESS..."
 echo "Will automatically run gn_start:start() after shell starts..."
 
 # Create a temporary script file
