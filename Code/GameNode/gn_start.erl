@@ -135,3 +135,29 @@ handle_cn_start_request({choose_playmode, are_you_bot}, Menu_Pid) ->
     io:format("GN_start received choose_playmode request~n"),
     %% Forward the request to the menu process
     Menu_Pid ! {cn_start, choose_playmode, are_you_bot}.
+
+handle_menu_request({play_as_human}, _Menu_Pid) ->
+    io:format("GN_start received play_as_human request~n"),
+    %% Forward the request to the cn_server using global name
+    case global:whereis_name(cn_start) of
+        Pid when is_pid(Pid) ->
+            io:format("Found CN process, sending playmode request (human)~n"),
+            Pid ! {self(), playmode, false},
+            io:format("Playmode message sent successfully~n");
+        undefined ->
+            io:format("CN process not found in global registry. Connected nodes: ~p~n", [nodes()])
+    end,
+    false; % leave the loop
+
+handle_menu_request({play_as_bot}, _Menu_Pid) ->
+    io:format("GN_start received play_as_bot request~n"),
+    %% Forward the request to the cn_server using global name
+    case global:whereis_name(cn_start) of
+        Pid when is_pid(Pid) ->
+            io:format("Found CN process, sending playmode request (bot)~n"),
+            Pid ! {self(), playmode, true},
+            io:format("Playmode message sent successfully~n");
+        undefined ->
+            io:format("CN process not found in global registry. Connected nodes: ~p~n", [nodes()])
+    end,
+    true. % leave the loop (return bot flag)
