@@ -398,75 +398,28 @@ class SocketGNVisualizer:
         print(f"🌐 Will connect to socket port: {self.socket_client.port}")
 
 
-def determine_local_gn(self):
-        """Determine which GN this visualizer is running on from node name"""
-        # First try environment variable
-        env_gn = os.environ.get('GN_ID')
-        if env_gn:
-            print(f"Using GN from environment: {env_gn}")
-            return env_gn
+# Try environment first
+        gn_id = os.environ.get('GN_ID')
+        if gn_id:
+            print(f"Using GN_ID from environment: {gn_id}")
+            return gn_id
         
-        # Try to get node name from environment
-        node_name = os.environ.get('NODE_NAME', '')
+        # Get node name from environment or hostname
+        node_name = os.environ.get('NODE_NAME', socket.gethostname())
+        print(f"Node name: '{node_name}'")
         
-        # If not in env, try hostname
-        if not node_name:
-            import socket as sock
-            try:
-                hostname = sock.gethostname()
-                node_name = hostname
-                print(f"Using hostname as node name: {node_name}")
-            except:
-                node_name = "unknown"
+        # Simple string matching
+        if '224' in node_name or 'GN1' in node_name:
+            return 'gn1'
+        elif '85' in node_name or 'GN2' in node_name:
+            return 'gn2'  
+        elif '167' in node_name or 'GN3' in node_name:
+            return 'gn3'
+        elif '60' in node_name or 'GN4' in node_name:
+            return 'gn4'
         
-        print(f"Analyzing node name: {node_name}")
-        
-        # Look for GN pattern specifically
-        import re
-        gn_match = re.search(r'GN(\d)@', node_name)
-        
-        if gn_match:
-            gn_number = gn_match.group(1)
-            if gn_number in ['1', '2', '3', '4']:
-                gn_id = f"gn{gn_number}"
-                print(f"Found GN pattern: GN{gn_number}@ -> using {gn_id}")
-                return gn_id
-        
-        # Fallback: IP-based detection
-        print("GN pattern not found, trying IP-based detection...")
-        ip_to_gn_map = {
-            '132.72.81.224': 'gn1',  # GN1
-            '132.72.81.85': 'gn2',   # GN2  
-            '132.72.81.167': 'gn3',  # GN3
-            '132.72.81.60': 'gn4'    # GN4
-        }
-        
-        # Check if any known IP is in the node name
-        for ip, gn_id in ip_to_gn_map.items():
-            if ip in node_name:
-                print(f"Found IP {ip} in node name -> using {gn_id}")
-                return gn_id
-        
-        # Final fallback: try to get local machine's actual IP
-        try:
-            import socket as sock
-            temp_sock = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
-            temp_sock.connect(("8.8.8.8", 80))
-            local_ip = temp_sock.getsockname()[0]
-            temp_sock.close()
-            
-            print(f"Local machine IP: {local_ip}")
-            
-            if local_ip in ip_to_gn_map:
-                gn_id = ip_to_gn_map[local_ip]
-                print(f"Matched local IP {local_ip} -> using {gn_id}")
-                return gn_id
-                    
-        except Exception as e:
-            print(f"Could not determine local IP: {e}")
-        
-        print(f"Could not determine GN from node name '{node_name}', defaulting to gn1")
-        return "gn1"
+        print(f"No match found for '{node_name}', defaulting to gn1")
+        return 'gn1'
 
     def get_local_player_ids(self):
         """Get the player IDs that belong to this GN"""
