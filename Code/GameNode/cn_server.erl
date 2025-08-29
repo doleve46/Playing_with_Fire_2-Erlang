@@ -158,12 +158,13 @@ handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
         fun(Index) -> 
             Individual_table_names = generate_table_names(Index),
             PidA = lists:nth(Index, GN_pids_list),
+            [TilesTable, BombsTable, PowerupsTable, PlayersTable] = Individual_table_names,
             #gn_data{
                 pid = PidA,
-                tiles = lists:hd(Individual_table_names),
-                bombs = lists:nth(2, Individual_table_names),
-                powerups = lists:nth(3, Individual_table_names),
-                players = lists:last(Individual_table_names)
+                tiles = TilesTable,
+                bombs = BombsTable,
+                powerups = PowerupsTable,
+                players = PlayersTable
             }
         end, lists:seq(1,4)),
     io:format("Successfully linked to all gn_servers ~w~n", [GN_pids_list]),
@@ -362,7 +363,7 @@ find_in_player_tables(Pid, [Table| T]) ->
 link_GNs_loop(NodeNumbers) ->
     io:format("Attempt to link to all gn_servers..~n"),
     Pids = lists:map(fun(NodeNum) ->
-       GN_server_name = list_to_atom("gn" ++ integer_to_list(NodeNum) ++ "_server"),
+       GN_server_name = list_to_atom("GN" ++ integer_to_list(NodeNum) ++ "_server"),
        link_with_retry(GN_server_name, 0)
     end, NodeNumbers),
     Pids. % return list of linked PIDs
@@ -370,10 +371,10 @@ link_GNs_loop(NodeNumbers) ->
 link_with_retry(GN_server_name, RetryCount) when RetryCount > 4 ->
     erlang:error({link_failed_after_retries, GN_server_name, RetryCount});
 link_with_retry(GN_server_name, RetryCount) ->
-    Pid = whereis(GN_server_name),
+    Pid = global:whereis_name(GN_server_name),
     case Pid of
         undefined ->
-            io:format("Process ~p not found, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+            io:format("Process ~p not found globally, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
             timer:sleep(500),
             link_with_retry(GN_server_name, RetryCount + 1);
         _ ->
