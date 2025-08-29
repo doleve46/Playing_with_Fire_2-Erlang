@@ -562,7 +562,7 @@ convert_map_safely(Map) when is_list(Map) ->
             end, Row);
         (_) -> 
             []
-        end, Map)
+        end, Map);
     catch
         _:_ ->
             % Return empty 16x16 grid if conversion fails
