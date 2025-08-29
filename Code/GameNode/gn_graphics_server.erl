@@ -91,6 +91,7 @@ handle_call(_Request, _From, State) ->
 
 %% Handle asynchronous casts
 handle_cast({map_update, EnhancedMapState}, State) ->
+    io:format("🗺️ GN Graphics Server received map update!~n"),
     CurrentTime = erlang:system_time(millisecond),
     
     {ActualMapState, DeadPlayers, BackendTiming, ActiveExplosions} = case EnhancedMapState of
