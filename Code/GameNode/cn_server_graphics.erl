@@ -870,7 +870,7 @@ send_enhanced_map_to_gn_servers(State) ->
                     io:format("❌ Error sending data to GN server on ~w: ~p~n", [Node, Error])
             end;
         false ->
-            io:format("⚠️ GN server on ~w not alive~n", [Node])
+            % io:format("⚠️ GN server on ~w not alive~n", [Node])
         end
     end, State#state.gn_graphics_servers).
 
