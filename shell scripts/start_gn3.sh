@@ -36,7 +36,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Starting Erlang shell with name GN1@$IP_ADDRESS..."
+echo "Starting Erlang shell with name GN3@$IP_ADDRESS..."
 echo "Will automatically run gn_start:start() after shell starts..."
 
 # Create a temporary script file
