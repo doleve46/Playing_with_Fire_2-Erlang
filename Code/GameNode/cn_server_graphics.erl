@@ -1003,7 +1003,7 @@ send_enhanced_map_to_gn_servers(State) ->
                     % io:format("✅ Sent map to ~w via PID~n", [Node])
                 catch
                     _:Error ->
-                        io:format("❌ PID cast failed to ~w: ~p~n", [Node, Error]),
+                        io:format("❌ PID cast failed to ~w: ~p~n", [Node, Error])
                 end;
             {_Ref, Node} ->
                 % Fall back to registered name
