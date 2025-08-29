@@ -840,7 +840,7 @@ monitor_gn_graphics_servers(GNNodes)->
 %% Create enhanced Python visualizer port
 create_python_visualizer_port() ->
     try
-        Port = open_port({spawn, "python3 src/Graphics/map_live_port.py"},
+        Port = open_port({spawn, "python3 src/Graphics/map_live.py"},
                         [binary, exit_status, {packet, 4}]),
         io:format("✅ Enhanced Python port created: ~p~n", [Port]),
         Port
