@@ -504,19 +504,15 @@ send_map_to_socket(undefined, _MapState) ->
     ok;
 send_map_to_socket(ClientPid, MapState) ->
     try
-        JsonMessage = #{
-            <<"type">> => <<"map_update">>,
-            <<"timestamp">> => erlang:system_time(millisecond),
-            <<"data">> => convert_for_json(MapState)
+        % Create simple JSON-compatible data structure
+        SimpleMessage = #{
+            type => <<"map_update">>,
+            timestamp => erlang:system_time(millisecond),
+            data => create_simple_json_data(MapState)
         },
         
-        JsonBinary = jsx:encode(JsonMessage, [
-            {space, 1},
-            {indent, 2},
-            return_maps,
-            strict,
-            {encoding, utf8}
-        ]),
+        % Encode to JSON
+        JsonBinary = jsx:encode(SimpleMessage),
         
         % Send length prefix + data
         DataLength = byte_size(JsonBinary),
@@ -525,21 +521,133 @@ send_map_to_socket(ClientPid, MapState) ->
         
         ClientPid ! {send_data, Message},
         
+        % Simple logging
         case get(cn_log_counter) of
             undefined -> put(cn_log_counter, 1);
             Counter when Counter >= 40 ->
-                ExplosionCount = maps:size(maps:get(active_explosions, MapState, #{})),
-                DeadCount = maps:size(maps:get(dead_players, MapState, #{})),
-                io:format("🗺️ Enhanced JSON map (~w explosions, ~w dead) sent via socket~n", 
-                         [ExplosionCount, DeadCount]),
+                io:format("🗺️ JSON map sent via socket~n"),
                 put(cn_log_counter, 1);
             Counter ->
                 put(cn_log_counter, Counter + 1)
         end
     catch
-        _:Error ->
-            io:format("❌ Error sending JSON data via socket: ~p~n", [Error])
+        Error:Reason ->
+            io:format("❌ Error sending JSON data: ~p:~p~n", [Error, Reason])
     end.
+
+
+%% Helper function to create JSON-safe data
+create_simple_json_data(MapState) ->
+    #{
+        map => convert_map_safely(maps:get(map, MapState, [])),
+        dead_players => #{},
+        update_time => erlang:system_time(millisecond),
+        active_explosions => #{},
+        backend_timing => #{
+            tick_delay => 50,
+            tile_move => 1200,
+            ms_reduction => 200,
+            immunity_time => 3000
+        }
+    }.
+
+convert_map_safely([]) ->
+    [];
+convert_map_safely(Map) when is_list(Map) ->
+    try
+        lists:map(fun(Row) when is_list(Row) ->
+            lists:map(fun(Cell) ->
+                convert_cell_safely(Cell)
+            end, Row);
+        (_) -> 
+            []
+        end, Map)
+    catch
+        _:_ ->
+            % Return empty 16x16 grid if conversion fails
+            [[<<"free">>, <<"none">>, <<"none">>, <<"none">>] || _ <- lists:seq(1, 16)] || _ <- lists:seq(1, 16)]
+    end;
+convert_map_safely(_) ->
+    % Return empty 16x16 grid for invalid input
+    [[[<<"free">>, <<"none">>, <<"none">>, <<"none">>] || _ <- lists:seq(1, 16)] || _ <- lists:seq(1, 16)].
+
+%% Convert individual cell to JSON-safe format
+convert_cell_safely({Tile, Powerup, Bomb, Player, Explosion, Special}) ->
+    [
+        safe_atom_to_binary(Tile),
+        safe_atom_to_binary(Powerup),
+        convert_bomb_safely(Bomb),
+        convert_player_safely(Player)
+    ];
+convert_cell_safely(_) ->
+    [<<"free">>, <<"none">>, <<"none">>, <<"none">>].
+
+%% Safe atom to binary conversion
+safe_atom_to_binary(Atom) when is_atom(Atom) ->
+    try
+        atom_to_binary(Atom, utf8)
+    catch
+        _:_ -> <<"unknown">>
+    end;
+safe_atom_to_binary(Other) when is_binary(Other) ->
+    Other;
+safe_atom_to_binary(Other) when is_list(Other) ->
+    try
+        list_to_binary(Other)
+    catch
+        _:_ -> <<"unknown">>
+    end;
+safe_atom_to_binary(_) ->
+    <<"unknown">>.
+
+%% Convert bomb info safely
+convert_bomb_safely(none) ->
+    <<"none">>;
+convert_bomb_safely({Type, Ignited, Status, Radius, Owner, Movement, Direction}) ->
+    [
+        safe_atom_to_binary(Type),
+        Ignited,
+        safe_atom_to_binary(Status),
+        ensure_integer(Radius),
+        ensure_integer(Owner),
+        Movement,
+        safe_atom_to_binary(Direction)
+    ];
+convert_bomb_safely(_) ->
+    <<"none">>.
+
+%% Convert player info safely
+convert_player_safely(none) ->
+    <<"none">>;
+convert_player_safely({PlayerID, Life, Speed, Direction, Movement, MovementTimer, ImmunityTimer, RequestTimer}) ->
+    [
+        ensure_integer(PlayerID),
+        ensure_integer(Life),
+        ensure_integer(Speed),
+        safe_atom_to_binary(Direction),
+        Movement,
+        ensure_integer(MovementTimer),
+        ensure_integer(ImmunityTimer),
+        ensure_integer(RequestTimer)
+    ];
+convert_player_safely(_) ->
+    <<"none">>.
+
+%% Ensure value is an integer
+ensure_integer(Val) when is_integer(Val) -> Val;
+ensure_integer(Val) when is_list(Val) ->
+    try
+        list_to_integer(Val)
+    catch
+        _:_ -> 0
+    end;
+ensure_integer(Val) when is_binary(Val) ->
+    try
+        binary_to_integer(Val)
+    catch
+        _:_ -> 0
+    end;
+ensure_integer(_) -> 0.
 
 send_movement_confirmation_to_socket(State, EntityType, EntityData) ->
     if State#state.python_socket_pid =/= undefined ->
