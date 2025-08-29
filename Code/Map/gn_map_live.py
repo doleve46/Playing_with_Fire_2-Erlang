@@ -397,8 +397,9 @@ class SocketGNVisualizer:
         print(f"👥 Local players: {self.local_gn_player_ids}")
         print(f"🌐 Will connect to socket port: {self.socket_client.port}")
 
-
-# Try environment first
+    def determine_local_gn(self):
+        """Determine which GN this instance belongs to"""
+        # Try environment first
         gn_id = os.environ.get('GN_ID')
         if gn_id:
             print(f"Using GN_ID from environment: {gn_id}")
@@ -410,12 +411,16 @@ class SocketGNVisualizer:
         
         # Simple string matching
         if '224' in node_name or 'GN1' in node_name:
+            print("Detected as GN1")
             return 'gn1'
         elif '85' in node_name or 'GN2' in node_name:
+            print("Detected as GN2")
             return 'gn2'  
         elif '167' in node_name or 'GN3' in node_name:
+            print("Detected as GN3")
             return 'gn3'
         elif '60' in node_name or 'GN4' in node_name:
+            print("Detected as GN4")
             return 'gn4'
         
         print(f"No match found for '{node_name}', defaulting to gn1")
