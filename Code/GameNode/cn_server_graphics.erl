@@ -1,14 +1,6 @@
--module(cn_server_graphics).
+-module(cn_server_graphics_socket).
 -behaviour(gen_server).
-%%% ------------------------------------------------------------------------------------------------------
-%%% DOLEV - CHANGES MADE:
-%% The CN server graphics does NOT spawn the GN graphics servers anymore.
-%% They spawn from within their respective node, and have a locally-registered name "cn_server_graphics".
-%% This Process tries to monitor al 4 of them - when he is successful he sends a 'ready' 
-%% message to cn_server, and proceed to work as before.
-%% Added explosion visualization support with direct function call interface.
-%% NOW USING JSON FOR ALL PYTHON COMMUNICATION
-%%% ------------------------------------------------------------------------------------------------------
+
 %% API
 -export([start_link/1, get_current_map/0, show_explosion/1]).
 
@@ -22,19 +14,27 @@
 -define(DEATH_DISPLAY_TIME, 10000). % Show dead players for 10 seconds
 -define(EXPLOSION_DISPLAY_TIME, 1000). % Show explosions for 1 second
 
+%% Socket configuration
+-define(PYTHON_SOCKET_PORT, 8080).
+-define(SOCKET_TIMEOUT, 5000).
+-define(SOCKET_BACKLOG, 5).
+
 -record(state, {
     gn_graphics_servers = [],     % List of {Node, Pid} for GN graphics servers
-    python_port,                  % Port to Python visualizer (JSON communication)
+    python_socket,                % Socket to Python visualizer
+    python_socket_pid,            % Socket handler PID
+    listen_socket,                % Listen socket
     current_map_state,            % Current unified map state
     gn_nodes,                     % List of GN nodes
     subscribed_tables = [],       % List of tables subscribed to
     update_counter = 0,           % Counter for updates (debugging)
     movement_states = #{},        % Track active player movements with real timing
     bomb_movements = #{},         % Track active bomb movements
-    dead_players = #{},           % Track recently deceased players: PlayerID => {DeathTime, LastKnownState, LocalGN}
+    dead_players = #{},           % Track recently deceased players
     last_known_players = #{},     % Track last known player states for death detection
     timer_subscribers = #{},      % Track timer update subscriptions
-    active_explosions = #{}       % Track active explosions: Coord => ExpiryTime
+    active_explosions = #{},      % Track active explosions: Coord => ExpiryTime
+    socket_acceptor               % Socket acceptor process PID
 }).
 
 %%%===================================================================
@@ -51,14 +51,11 @@ start_link(GNNodes) ->
 get_current_map() ->
     gen_server:call(?MODULE, get_current_map).
 
-%% Direct function to show explosions - called directly from cn_server
+%% Direct function to show explosions
 -spec show_explosion(list()) -> ok.
 show_explosion(Coordinates) ->
-    
     io:format("💥 Direct explosion call: ~w coordinates will display for ~wms~n", 
               [length(Coordinates), ?EXPLOSION_DISPLAY_TIME]),
-    
-    %% Add explosions directly to the server state
     gen_server:cast(?MODULE, {add_explosions_direct, Coordinates}),
     ok.
 
@@ -68,7 +65,7 @@ show_explosion(Coordinates) ->
 
 %% Initialize the graphics server
 init([GNNodes]) ->
-    io:format("🎨 Enhanced CN Graphics Server starting with JSON communication...~n"),
+    io:format("🎨 Enhanced CN Graphics Server starting with Socket communication...~n"),
    
     % Create initial state
     State = #state{gn_nodes = GNNodes},
@@ -79,19 +76,18 @@ init([GNNodes]) ->
     % Monitoring of gn graphics servers
     erlang:send_after(?TICK_DELAY, self(), monitor_gn_graphics_servers),
    
-    % Create Python port
-    erlang:send(self(), create_python_port),
+    % Start socket server
+    erlang:send(self(), start_socket_server),
    
-    % Start periodic updates (faster for better timer sync)
+    % Start periodic updates
     erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
    
     % Clean up dead players and explosions periodically
     erlang:send_after(5000, self(), cleanup_expired_elements),
     
-    %% trap exits
     process_flag(trap_exit, true),
     
-    io:format("✅ Enhanced CN Graphics Server initialized with JSON communication~n"),
+    io:format("✅ Enhanced CN Graphics Server initialized with Socket communication~n"),
     {ok, State}.
 
 %% Handle synchronous calls
@@ -103,29 +99,25 @@ handle_call(_Request, _From, State) ->
 
 %% Handle asynchronous casts
 handle_cast(force_update, State) ->
-    io:format("🔄 Updating enhanced map state with JSON...~n"),
+    io:format("🔄 Updating enhanced map state with Socket...~n"),
     NewMapState = create_enhanced_map_state(State),
     UpdatedState = State#state{current_map_state = NewMapState},
     send_map_to_all_targets(UpdatedState),
     {noreply, UpdatedState};
 
-%% Handle direct explosion additions
 handle_cast({add_explosions_direct, Coordinates}, State) ->
-    %% Add all explosion coordinates with expiration time
     Timestamp = erlang:system_time(millisecond),
     ExpiryTime = Timestamp + ?EXPLOSION_DISPLAY_TIME,
     NewExplosions = lists:foldl(fun(Coord, AccMap) ->
         maps:put(Coord, ExpiryTime, AccMap)
     end, State#state.active_explosions, Coordinates),
     
-    %% Force immediate map update to show explosions
     NewState = State#state{active_explosions = NewExplosions},
     UpdatedMapState = create_enhanced_map_state(NewState),
     FinalState = NewState#state{current_map_state = UpdatedMapState},
     send_map_to_all_targets(FinalState),
     
-    %% Send direct explosion event to Python as JSON
-    send_explosion_event_to_python(FinalState#state.python_port, #{
+    send_explosion_event_to_socket(FinalState#state.python_socket_pid, #{
         coordinates => Coordinates,
         explosion_type => direct,
         timestamp => Timestamp,
@@ -138,6 +130,69 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% Handle messages
+handle_info(start_socket_server, State) ->
+    io:format("🔌 Starting CN socket server on port ~w...~n", [?PYTHON_SOCKET_PORT]),
+    case start_cn_socket_listener() of
+        {ok, {ListenSocket, AcceptorPid}} ->
+            io:format("✅ CN Socket server started successfully~n"),
+            InitialMapState = create_enhanced_map_state(State),
+            UpdatedState = State#state{
+                listen_socket = ListenSocket,
+                socket_acceptor = AcceptorPid,
+                current_map_state = InitialMapState
+            },
+            cn_server ! {graphics_ready, self()},
+            {noreply, UpdatedState};
+        {error, Reason} ->
+            io:format("❌ Failed to start CN socket server: ~p~n", [Reason]),
+            {stop, {socket_server_failed, Reason}, State}
+    end;
+
+handle_info({socket_connected, ClientSocket, ClientPid}, State) ->
+    io:format("🔗 Python client connected to CN via socket~n"),
+    NewState = State#state{
+        python_socket = ClientSocket,
+        python_socket_pid = ClientPid
+    },
+    % Send initial map state
+    case State#state.current_map_state of
+        undefined -> ok;
+        MapState -> send_map_to_socket(ClientPid, MapState)
+    end,
+    {noreply, NewState};
+
+handle_info({socket_disconnected, ClientPid}, State) 
+    when ClientPid == State#state.python_socket_pid ->
+    io:format("⚠️ CN Python socket disconnected~n"),
+    NewState = State#state{
+        python_socket = undefined,
+        python_socket_pid = undefined
+    },
+    {noreply, NewState};
+
+handle_info({'EXIT', Pid, Reason}, State) when Pid == State#state.socket_acceptor ->
+    io:format("❌ Socket acceptor crashed: ~p. Restarting...~n", [Reason]),
+    case start_cn_socket_listener() of
+        {ok, {ListenSocket, AcceptorPid}} ->
+            io:format("✅ Socket acceptor restarted~n"),
+            NewState = State#state{
+                listen_socket = ListenSocket,
+                socket_acceptor = AcceptorPid
+            },
+            {noreply, NewState};
+        {error, RestartReason} ->
+            io:format("❌ Failed to restart socket acceptor: ~p~n", [RestartReason]),
+            {stop, {socket_restart_failed, RestartReason}, State}
+    end;
+
+handle_info({'EXIT', Pid, Reason}, State) when Pid == State#state.python_socket_pid ->
+    io:format("⚠️ Python socket handler crashed: ~p~n", [Reason]),
+    NewState = State#state{
+        python_socket = undefined,
+        python_socket_pid = undefined
+    },
+    {noreply, NewState};
+
 handle_info(setup_subscriptions, State) ->
     io:format("📡 Setting up enhanced mnesia subscriptions...~n"),
     Tables = get_all_tables(),
@@ -150,22 +205,6 @@ handle_info(monitor_gn_graphics_servers, State) ->
     ReferencesList = monitor_gn_graphics_servers(State#state.gn_nodes),
     io:format("✅ Monitoring was successful!: ~p~n", [length(ReferencesList)]),
     {noreply, State#state{gn_graphics_servers = ReferencesList}};
-
-handle_info(create_python_port, State) ->
-    io:format("🐍 Creating enhanced Python port with JSON communication...~n"),
-    Port = create_json_python_visualizer_port(),
-    % Create initial enhanced map state
-    InitialMapState = create_enhanced_map_state(State),
-    UpdatedState = State#state{
-        python_port = Port,
-        current_map_state = InitialMapState
-    },
-    % Send initial state as JSON
-    send_map_to_all_targets(UpdatedState),
-    io:format("✅ Enhanced Python port created with JSON and initial map sent~n"),
-    %% Send ready message to cn_server
-    cn_server ! {graphics_ready, self()},
-    {noreply, UpdatedState};
 
 handle_info(periodic_update, State) ->
     CurrentTime = erlang:system_time(millisecond),
@@ -181,7 +220,6 @@ handle_info(periodic_update, State) ->
     true -> ok
     end,
     
-    % Enhanced periodic update every TICK_DELAY milliseconds for better timer sync
     NewMapState = create_enhanced_map_state(State#state{active_explosions = NewExplosions}),
     UpdatedState = State#state{
         current_map_state = NewMapState,
@@ -189,34 +227,29 @@ handle_info(periodic_update, State) ->
         active_explosions = NewExplosions
     },
    
-    % Send more frequently for real-time timer updates
     ShouldSend = (NewMapState =/= State#state.current_map_state) orelse
-                 (State#state.update_counter rem 2 == 0), % Every 2nd update = every 100ms
+                 (State#state.update_counter rem 2 == 0),
    
     if ShouldSend ->
         send_map_to_all_targets(UpdatedState),
-        % Only log every 20th update to reduce spam
         case State#state.update_counter rem 20 == 0 of
             true ->
-                io:format("🔄 Enhanced periodic JSON update #~w sent~n", [UpdatedState#state.update_counter]);
+                io:format("🔄 Enhanced periodic Socket update #~w sent~n", [UpdatedState#state.update_counter]);
             false -> ok
         end;
     true -> ok
     end,
    
-    % Schedule next update using actual backend timing
     erlang:send_after(?TICK_DELAY, self(), periodic_update),
     {noreply, UpdatedState};
 
 handle_info(cleanup_expired_elements, State) ->
     CurrentTime = erlang:system_time(millisecond),
     
-    % Remove dead players that have been shown long enough
     NewDeadPlayers = maps:filter(fun(_PlayerID, {DeathTime, _LastState, _LocalGN}) ->
         CurrentTime - DeathTime < ?DEATH_DISPLAY_TIME
     end, State#state.dead_players),
     
-    % Remove expired explosions
     NewExplosions = maps:filter(fun(_Coord, ExpiryTime) ->
         CurrentTime < ExpiryTime
     end, State#state.active_explosions),
@@ -234,37 +267,33 @@ handle_info(cleanup_expired_elements, State) ->
     true -> ok
     end,
     
-    % Schedule next cleanup
     erlang:send_after(5000, self(), cleanup_expired_elements),
     {noreply, State#state{dead_players = NewDeadPlayers, active_explosions = NewExplosions}};
 
-% Enhanced mnesia table event handling with real-time timer tracking
+% Enhanced mnesia table event handling
 handle_info({mnesia_table_event, {write, Table, Record, _ActivityId}}, State) ->
     NewState = case Record of
         #mnesia_players{} ->
-            % Enhanced player state tracking with all timers
             PlayerID = Record#mnesia_players.player_number,
             NewLastKnown = maps:put(PlayerID, Record, State#state.last_known_players),
             
-            % Check for movement changes with real timing
             case detect_enhanced_player_movement_change(Record, State#state.current_map_state) of
                 {movement_started, PlayerData} ->
-                    send_movement_confirmation_to_python(State, player, PlayerData),
+                    send_movement_confirmation_to_socket(State, player, PlayerData),
                     State#state{last_known_players = NewLastKnown};
                 {timer_update, TimerData} ->
-                    send_timer_update_to_python(State, player, TimerData),
+                    send_timer_update_to_socket(State, player, TimerData),
                     State#state{last_known_players = NewLastKnown};
                 no_movement_change ->
                     State#state{last_known_players = NewLastKnown}
             end;
         #mnesia_bombs{} ->
-            % Enhanced bomb state tracking with FSM information
             case detect_enhanced_bomb_movement_change(Record, State#state.current_map_state) of
                 {movement_started, BombData} ->
-                    send_movement_confirmation_to_python(State, bomb, BombData),
+                    send_movement_confirmation_to_socket(State, bomb, BombData),
                     State;
                 {fsm_state_change, FSMData} ->
-                    send_fsm_update_to_python(State, bomb, FSMData),
+                    send_fsm_update_to_socket(State, bomb, FSMData),
                     State;
                 no_movement_change ->
                     State
@@ -278,7 +307,6 @@ handle_info({mnesia_table_event, {delete, Table, Key, _ActivityId}}, State) ->
     NewState = case Table of
         TableName when TableName == gn1_players; TableName == gn2_players; 
                        TableName == gn3_players; TableName == gn4_players ->
-            % Enhanced player death detection
             case extract_player_id_from_key(Key) of
                 {ok, PlayerID} ->
                     handle_enhanced_player_death(PlayerID, Table, State);
@@ -292,21 +320,9 @@ handle_info({mnesia_table_event, {delete, Table, Key, _ActivityId}}, State) ->
     handle_mnesia_update(NewState);
 
 handle_info({mnesia_table_event, _Event}, State) ->
-    % Other mnesia events
     handle_mnesia_update(State);
 
-% Handle Python port messages
-handle_info({Port, {data, Data}}, State) when Port == State#state.python_port ->
-    io:format("🐍 Message from enhanced Python: ~p~n", [Data]),
-    {noreply, State};
-
-handle_info({Port, closed}, State) when Port == State#state.python_port ->
-    io:format("⚠️ Enhanced Python port closed, attempting to restart...~n"),
-    NewPort = create_json_python_visualizer_port(),
-    {noreply, State#state{python_port = NewPort}};
-
 handle_info({'DOWN', MonitorRef, process, RemotePid, noconnection}, State) ->
-    %% TODO: deal with GN graphics servers disconnecting.
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -317,9 +333,20 @@ handle_info(Info, State) ->
 terminate(Reason, State) ->
     io:format("🛑 Enhanced CN Graphics Server terminating: ~p~n", [Reason]),
    
-    % Close Python port
-    if State#state.python_port =/= undefined ->
-        port_close(State#state.python_port);
+    % Close sockets
+    if State#state.python_socket =/= undefined ->
+        gen_tcp:close(State#state.python_socket);
+    true -> ok
+    end,
+    
+    if State#state.listen_socket =/= undefined ->
+        gen_tcp:close(State#state.listen_socket);
+    true -> ok
+    end,
+   
+    % Stop socket acceptor
+    if State#state.socket_acceptor =/= undefined ->
+        exit(State#state.socket_acceptor, shutdown);
     true -> ok
     end,
    
@@ -339,70 +366,124 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
-%%% JSON Conversion and Communication Functions (NEW)
+%%% Socket Server Functions
 %%%===================================================================
 
-%% Convert Erlang data structures to JSON-safe format (same as GN)
-convert_for_json(#{} = Map) ->
-    maps:fold(fun(K, V, Acc) ->
-        NewKey = case is_atom(K) of
-            true -> atom_to_utf8_binary(K);
-            false -> K
-        end,
-        Acc#{NewKey => convert_for_json(V)}
-    end, #{}, Map);
-
-convert_for_json(List) when is_list(List) ->
-    % Check if it's a string (list of integers)
-    case io_lib:printable_unicode_list(List) of
-        true -> unicode:characters_to_binary(List, utf8);
-        false -> [convert_for_json(Item) || Item <- List]
-    end;
-
-convert_for_json(Atom) when is_atom(Atom) ->
-    atom_to_utf8_binary(Atom);
-
-convert_for_json(Tuple) when is_tuple(Tuple) ->
-    % Convert tuples to lists for JSON compatibility
-    convert_for_json(tuple_to_list(Tuple));
-
-convert_for_json(Other) ->
-    Other.
-
-%% Helper function to convert atoms safely to UTF-8 binaries
-atom_to_utf8_binary(Atom) when is_atom(Atom) ->
-    unicode:characters_to_binary(atom_to_list(Atom), latin1, utf8);
-atom_to_utf8_binary(Other) ->
-    Other.
-
-%% Create JSON Python visualizer port (instead of binary term port)
-create_json_python_visualizer_port() ->
-    try
-        % Use the updated Python visualizer that expects JSON input
-        Port = open_port({spawn, "python3 map_live_port.py"},
-                        [binary, exit_status, {packet, 4}]),
-        io:format("✅ Enhanced JSON Python port created: ~p~n", [Port]),
-        Port
-    catch
-        _:Error ->
-            io:format("❌ Failed to create enhanced JSON Python port: ~p~n", [Error]),
-            undefined
+start_cn_socket_listener() ->
+    case gen_tcp:listen(?PYTHON_SOCKET_PORT, [
+        binary, 
+        {packet, 0}, 
+        {active, false}, 
+        {reuseaddr, true},
+        {nodelay, true},
+        {keepalive, true},
+        {backlog, ?SOCKET_BACKLOG}
+    ]) of
+        {ok, ListenSocket} ->
+            MainProcess = self(),
+            AcceptorPid = spawn_link(fun() -> 
+                cn_socket_acceptor_loop(ListenSocket, MainProcess) 
+            end),
+            {ok, {ListenSocket, AcceptorPid}};
+        {error, Reason} ->
+            {error, Reason}
     end.
 
-%% Send map to Python visualizer as JSON
-send_enhanced_map_to_python(undefined, _MapState) ->
-    io:format("⚠️ Python port or map state not ready~n");
+cn_socket_acceptor_loop(ListenSocket, MainProcess) ->
+    io:format("🔌 CN Socket acceptor listening on port ~w~n", [?PYTHON_SOCKET_PORT]),
+    accept_cn_connections(ListenSocket, MainProcess).
 
-send_enhanced_map_to_python(Port, MapState) ->
+accept_cn_connections(ListenSocket, MainProcess) ->
+    case gen_tcp:accept(ListenSocket, infinity) of
+        {ok, ClientSocket} ->
+            io:format("🔗 New CN client connected~n"),
+            
+            % Set socket options
+            inet:setopts(ClientSocket, [
+                binary,
+                {active, false},
+                {nodelay, true},
+                {keepalive, true}
+            ]),
+            
+            % Spawn client handler
+            ClientPid = spawn_link(fun() -> 
+                handle_cn_socket_client(ClientSocket, MainProcess) 
+            end),
+            
+            % Transfer socket control to client handler
+            gen_tcp:controlling_process(ClientSocket, ClientPid),
+            
+            % Notify main process
+            MainProcess ! {socket_connected, ClientSocket, ClientPid},
+            
+            % Continue accepting
+            accept_cn_connections(ListenSocket, MainProcess);
+        {error, Reason} ->
+            io:format("❌ CN Accept failed: ~p~n", [Reason]),
+            timer:sleep(1000),
+            accept_cn_connections(ListenSocket, MainProcess)
+    end.
+
+handle_cn_socket_client(Socket, MainProcess) ->
+    inet:setopts(Socket, [{active, once}]),
+    cn_socket_client_loop(Socket, MainProcess).
+
+cn_socket_client_loop(Socket, MainProcess) ->
+    receive
+        {tcp, Socket, Data} ->
+            io:format("📨 CN received data from client: ~p bytes~n", [byte_size(Data)]),
+            inet:setopts(Socket, [{active, once}]),
+            cn_socket_client_loop(Socket, MainProcess);
+        {tcp_closed, Socket} ->
+            io:format("🔌 CN client disconnected~n"),
+            MainProcess ! {socket_disconnected, self()},
+            gen_tcp:close(Socket);
+        {tcp_error, Socket, Reason} ->
+            io:format("❌ CN socket error: ~p~n", [Reason]),
+            MainProcess ! {socket_disconnected, self()},
+            gen_tcp:close(Socket);
+        {send_data, Data} ->
+            case gen_tcp:send(Socket, Data) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    io:format("❌ CN failed to send data: ~p~n", [Reason]),
+                    MainProcess ! {socket_disconnected, self()},
+                    gen_tcp:close(Socket)
+            end,
+            cn_socket_client_loop(Socket, MainProcess);
+        shutdown ->
+            gen_tcp:close(Socket);
+        Other ->
+            io:format("⚠️ CN socket client received unexpected message: ~p~n", [Other]),
+            cn_socket_client_loop(Socket, MainProcess)
+    after 30000 ->
+        % 30 second keepalive
+        case gen_tcp:send(Socket, <<>>) of
+            ok ->
+                cn_socket_client_loop(Socket, MainProcess);
+            {error, _} ->
+                io:format("🔌 CN client keepalive failed, disconnecting~n"),
+                MainProcess ! {socket_disconnected, self()},
+                gen_tcp:close(Socket)
+        end
+    end.
+
+%%%===================================================================
+%%% Socket Communication Functions
+%%%===================================================================
+
+send_map_to_socket(undefined, _MapState) ->
+    ok;
+send_map_to_socket(ClientPid, MapState) ->
     try
-        % Create JSON message structure
         JsonMessage = #{
             <<"type">> => <<"map_update">>,
             <<"timestamp">> => erlang:system_time(millisecond),
             <<"data">> => convert_for_json(MapState)
         },
         
-        % Encode as UTF-8 JSON
         JsonBinary = jsx:encode(JsonMessage, [
             {space, 1},
             {indent, 2},
@@ -411,16 +492,19 @@ send_enhanced_map_to_python(Port, MapState) ->
             {encoding, utf8}
         ]),
         
-        % Send to Python
-        port_command(Port, JsonBinary),
+        % Send length prefix + data
+        DataLength = byte_size(JsonBinary),
+        LengthPrefix = <<DataLength:32/big>>,
+        Message = <<LengthPrefix/binary, JsonBinary/binary>>,
         
-        % Log details (less frequent to reduce spam)
+        ClientPid ! {send_data, Message},
+        
         case get(cn_log_counter) of
             undefined -> put(cn_log_counter, 1);
             Counter when Counter >= 40 ->
                 ExplosionCount = maps:size(maps:get(active_explosions, MapState, #{})),
                 DeadCount = maps:size(maps:get(dead_players, MapState, #{})),
-                io:format("🗺️ Enhanced JSON map (with timers, FSM state & ~w explosions, ~w dead) sent to Python visualizer~n", 
+                io:format("🗺️ Enhanced JSON map (~w explosions, ~w dead) sent via socket~n", 
                          [ExplosionCount, DeadCount]),
                 put(cn_log_counter, 1);
             Counter ->
@@ -428,12 +512,11 @@ send_enhanced_map_to_python(Port, MapState) ->
         end
     catch
         _:Error ->
-            io:format("❌ Error sending enhanced JSON data to Python: ~p~n", [Error])
+            io:format("❌ Error sending JSON data via socket: ~p~n", [Error])
     end.
 
-%% Send movement confirmation to Python as JSON
-send_movement_confirmation_to_python(State, EntityType, EntityData) ->
-    if State#state.python_port =/= undefined ->
+send_movement_confirmation_to_socket(State, EntityType, EntityData) ->
+    if State#state.python_socket_pid =/= undefined ->
         try
             JsonMessage = #{
                 <<"type">> => <<"movement_confirmation">>,
@@ -445,29 +528,31 @@ send_movement_confirmation_to_python(State, EntityType, EntityData) ->
             },
             
             JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
-            port_command(State#state.python_port, JsonBinary),
+            DataLength = byte_size(JsonBinary),
+            Message = <<DataLength:32/big, JsonBinary/binary>>,
+            
+            State#state.python_socket_pid ! {send_data, Message},
             
             case EntityType of
                 player ->
                     PlayerID = maps:get(player_id, EntityData),
                     Duration = maps:get(total_duration, EntityData),
-                    io:format("🏃 Enhanced JSON player movement confirmation sent for player ~w (duration: ~wms)~n",
+                    io:format("🏃 JSON player movement confirmation sent for player ~w (duration: ~wms)~n",
                              [PlayerID, Duration]);
                 bomb ->
                     Pos = maps:get(from_pos, EntityData),
-                    io:format("💣 Enhanced JSON bomb movement confirmation sent for bomb at ~w~n", [Pos])
+                    io:format("💣 JSON bomb movement confirmation sent for bomb at ~w~n", [Pos])
             end
         catch
             _:Error ->
-                io:format("❌ Error sending enhanced JSON movement confirmation: ~p~n", [Error])
+                io:format("❌ Error sending movement confirmation via socket: ~p~n", [Error])
         end;
     true ->
         ok
     end.
 
-%% Send timer updates to Python as JSON
-send_timer_update_to_python(State, EntityType, TimerData) ->
-    if State#state.python_port =/= undefined ->
+send_timer_update_to_socket(State, EntityType, TimerData) ->
+    if State#state.python_socket_pid =/= undefined ->
         try
             JsonMessage = #{
                 <<"type">> => <<"timer_update">>,
@@ -479,18 +564,20 @@ send_timer_update_to_python(State, EntityType, TimerData) ->
             },
             
             JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
-            port_command(State#state.python_port, JsonBinary)
+            DataLength = byte_size(JsonBinary),
+            Message = <<DataLength:32/big, JsonBinary/binary>>,
+            
+            State#state.python_socket_pid ! {send_data, Message}
         catch
             _:Error ->
-                io:format("❌ Error sending JSON timer update: ~p~n", [Error])
+                io:format("❌ Error sending timer update via socket: ~p~n", [Error])
         end;
     true ->
         ok
     end.
 
-%% Send FSM state updates to Python as JSON
-send_fsm_update_to_python(State, EntityType, FSMData) ->
-    if State#state.python_port =/= undefined ->
+send_fsm_update_to_socket(State, EntityType, FSMData) ->
+    if State#state.python_socket_pid =/= undefined ->
         try
             JsonMessage = #{
                 <<"type">> => <<"fsm_update">>,
@@ -502,20 +589,21 @@ send_fsm_update_to_python(State, EntityType, FSMData) ->
             },
             
             JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
-            port_command(State#state.python_port, JsonBinary)
+            DataLength = byte_size(JsonBinary),
+            Message = <<DataLength:32/big, JsonBinary/binary>>,
+            
+            State#state.python_socket_pid ! {send_data, Message}
         catch
             _:Error ->
-                io:format("❌ Error sending JSON FSM update: ~p~n", [Error])
+                io:format("❌ Error sending FSM update via socket: ~p~n", [Error])
         end;
     true ->
         ok
     end.
 
-%% Send explosion event to Python as JSON
-send_explosion_event_to_python(undefined, _ExplosionData) ->
+send_explosion_event_to_socket(undefined, _ExplosionData) ->
     ok;
-
-send_explosion_event_to_python(Port, ExplosionData) ->
+send_explosion_event_to_socket(ClientPid, ExplosionData) ->
     try
         JsonMessage = #{
             <<"type">> => <<"explosion_event">>,
@@ -524,20 +612,79 @@ send_explosion_event_to_python(Port, ExplosionData) ->
         },
         
         JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
-        port_command(Port, JsonBinary),
+        DataLength = byte_size(JsonBinary),
+        Message = <<DataLength:32/big, JsonBinary/binary>>,
+        
+        ClientPid ! {send_data, Message},
         
         Coordinates = maps:get(coordinates, ExplosionData, []),
-        io:format("💥 JSON explosion event sent: ~w coordinates~n", [length(Coordinates)])
+        io:format("💥 JSON explosion event sent via socket: ~w coordinates~n", [length(Coordinates)])
     catch
         _:Error ->
-            io:format("❌ Error sending JSON explosion event to Python: ~p~n", [Error])
+            io:format("❌ Error sending explosion event via socket: ~p~n", [Error])
+    end.
+
+send_death_event_to_socket(undefined, _DeathData) ->
+    ok;
+send_death_event_to_socket(ClientPid, DeathData) ->
+    try
+        JsonMessage = #{
+            <<"type">> => <<"death_event">>,
+            <<"timestamp">> => erlang:system_time(millisecond),
+            <<"data">> => convert_for_json(DeathData)
+        },
+        
+        JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
+        DataLength = byte_size(JsonBinary),
+        Message = <<DataLength:32/big, JsonBinary/binary>>,
+        
+        ClientPid ! {send_data, Message},
+        
+        PlayerID = maps:get(player_id, DeathData),
+        LocalGN = maps:get(local_gn, DeathData),
+        io:format("💀 JSON death event sent via socket for player ~w on ~w~n", [PlayerID, LocalGN])
+    catch
+        _:Error ->
+            io:format("❌ Error sending death event via socket: ~p~n", [Error])
     end.
 
 %%%===================================================================
-%%% Enhanced Death Detection Functions (UNCHANGED)
+%%% JSON Conversion Functions
 %%%===================================================================
 
-%% Extract player ID from mnesia delete key
+convert_for_json(#{} = Map) ->
+    maps:fold(fun(K, V, Acc) ->
+        NewKey = case is_atom(K) of
+            true -> atom_to_utf8_binary(K);
+            false -> K
+        end,
+        Acc#{NewKey => convert_for_json(V)}
+    end, #{}, Map);
+
+convert_for_json(List) when is_list(List) ->
+    case io_lib:printable_unicode_list(List) of
+        true -> unicode:characters_to_binary(List, utf8);
+        false -> [convert_for_json(Item) || Item <- List]
+    end;
+
+convert_for_json(Atom) when is_atom(Atom) ->
+    atom_to_utf8_binary(Atom);
+
+convert_for_json(Tuple) when is_tuple(Tuple) ->
+    convert_for_json(tuple_to_list(Tuple));
+
+convert_for_json(Other) ->
+    Other.
+
+atom_to_utf8_binary(Atom) when is_atom(Atom) ->
+    unicode:characters_to_binary(atom_to_list(Atom), latin1, utf8);
+atom_to_utf8_binary(Other) ->
+    Other.
+
+%%%===================================================================
+%%% Helper Functions (Enhanced Death Detection)
+%%%===================================================================
+
 extract_player_id_from_key(Key) ->
     try
         case Key of
@@ -550,14 +697,10 @@ extract_player_id_from_key(Key) ->
         _:_ -> error
     end.
 
-%% Enhanced player death handling with more details
 handle_enhanced_player_death(PlayerID, Table, State) ->
     CurrentTime = erlang:system_time(millisecond),
-    
-    % Get last known state with all timer information
     LastKnownState = maps:get(PlayerID, State#state.last_known_players, undefined),
     
-    % Determine which GN this player belonged to based on table name
     LocalGN = case Table of
         gn1_players -> gn1;
         gn2_players -> gn2;
@@ -566,14 +709,10 @@ handle_enhanced_player_death(PlayerID, Table, State) ->
         _ -> unknown
     end,
     
-    % Create enhanced death record with more information
     DeathRecord = {CurrentTime, LastKnownState, LocalGN},
     NewDeadPlayers = maps:put(PlayerID, DeathRecord, State#state.dead_players),
-    
-    % Remove from last known players since they're now dead
     NewLastKnown = maps:remove(PlayerID, State#state.last_known_players),
     
-    % Enhanced death logging
     if LastKnownState =/= undefined ->
         #mnesia_players{
             position = Position,
@@ -587,10 +726,7 @@ handle_enhanced_player_death(PlayerID, Table, State) ->
         io:format("💀 Player ~w died! (was on ~w, no last known state)~n", [PlayerID, LocalGN])
     end,
     
-    io:format("🕕 Death recorded at ~w~n", [CurrentTime]),
-    
-    % Send death event to Python as JSON
-    send_death_event_to_python(State#state.python_port, #{
+    send_death_event_to_socket(State#state.python_socket_pid, #{
         player_id => PlayerID,
         death_time => CurrentTime,
         local_gn => LocalGN,
@@ -610,34 +746,6 @@ handle_enhanced_player_death(PlayerID, Table, State) ->
         last_known_players = NewLastKnown
     }.
 
-%% Send death event to Python as JSON
-send_death_event_to_python(undefined, _DeathData) ->
-    ok;
-
-send_death_event_to_python(Port, DeathData) ->
-    try
-        JsonMessage = #{
-            <<"type">> => <<"death_event">>,
-            <<"timestamp">> => erlang:system_time(millisecond),
-            <<"data">> => convert_for_json(DeathData)
-        },
-        
-        JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
-        port_command(Port, JsonBinary),
-        
-        PlayerID = maps:get(player_id, DeathData),
-        LocalGN = maps:get(local_gn, DeathData),
-        io:format("💀 JSON death event sent for player ~w on ~w~n", [PlayerID, LocalGN])
-    catch
-        _:Error ->
-            io:format("❌ Error sending JSON death event to Python: ~p~n", [Error])
-    end.
-
-%%%===================================================================
-%%% Enhanced Movement and Timer Detection (UNCHANGED)
-%%%===================================================================
-
-%% Enhanced player movement detection with real backend timing
 detect_enhanced_player_movement_change(NewRecord, CurrentMapState) ->
     #mnesia_players{
         player_number = PlayerNum,
@@ -650,10 +758,8 @@ detect_enhanced_player_movement_change(NewRecord, CurrentMapState) ->
         request_timer = RequestTimer
     } = NewRecord,
    
-    % Check if movement field changed from false to true with timer
     case Movement of
         true when Direction =/= none, MovementTimer > 0 ->
-            % Movement just started - calculate real duration using backend constants
             TotalDuration = ?TILE_MOVE - (Speed - 1) * ?MS_REDUCTION,
             Destination = calculate_destination([X, Y], Direction),
             PlayerData = #{
@@ -670,7 +776,6 @@ detect_enhanced_player_movement_change(NewRecord, CurrentMapState) ->
             },
             {movement_started, PlayerData};
         _ ->
-            % Check for timer updates without movement
             if MovementTimer > 0 orelse ImmunityTimer > 0 orelse RequestTimer > 0 ->
                 TimerData = #{
                     player_id => PlayerNum,
@@ -686,7 +791,6 @@ detect_enhanced_player_movement_change(NewRecord, CurrentMapState) ->
             end
     end.
 
-%% Enhanced bomb movement detection
 detect_enhanced_bomb_movement_change(NewRecord, CurrentMapState) ->
     #mnesia_bombs{
         position = [X, Y],
@@ -699,10 +803,8 @@ detect_enhanced_bomb_movement_change(NewRecord, CurrentMapState) ->
         ignited = Ignited
     } = NewRecord,
    
-    % Check if movement field changed from false to true
     case Movement of
         true when Direction =/= none ->
-            % Bomb movement just started (kicked!)
             Destination = calculate_destination([X, Y], Direction),
             BombData = #{
                 bomb_id => [X, Y],
@@ -718,7 +820,6 @@ detect_enhanced_bomb_movement_change(NewRecord, CurrentMapState) ->
             },
             {movement_started, BombData};
         _ ->
-            % Check for FSM state changes
             FSMData = #{
                 bomb_id => [X, Y],
                 position => [X, Y],
@@ -731,32 +832,58 @@ detect_enhanced_bomb_movement_change(NewRecord, CurrentMapState) ->
             {fsm_state_change, FSMData}
     end.
 
+calculate_destination([X, Y], Direction) ->
+    case Direction of
+        up -> [X, Y-1];
+        down -> [X, Y+1];
+        left -> [X-1, Y];
+        right -> [X+1, Y]
+    end.
+
+handle_mnesia_update(State) ->
+    NewMapState = create_enhanced_map_state(State),
+    UpdatedState = State#state{current_map_state = NewMapState},
+    send_map_to_all_targets(UpdatedState),
+    {noreply, UpdatedState}.
+
+send_map_to_all_targets(State) ->
+    send_map_to_socket(State#state.python_socket_pid, State#state.current_map_state),
+    send_enhanced_map_to_gn_servers(State).
+
+send_enhanced_map_to_gn_servers(State) ->
+    lists:foreach(fun({Node, Pid}) ->
+        case is_pid(Pid) andalso is_process_alive(Pid) of
+            true ->
+                try
+                    gen_server:cast(Pid, {map_update, State#state.current_map_state}),
+                    case State#state.update_counter rem 40 == 0 of
+                        true ->
+                            ExplosionCount = maps:size(State#state.active_explosions),
+                            io:format("📡 Enhanced map (~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
+                        false -> ok
+                    end
+            catch
+                _:Error ->
+                    io:format("❌ Error sending data to GN server on ~w: ~p~n", [Node, Error])
+            end;
+        false ->
+            io:format("⚠️ GN server on ~w not alive~n", [Node])
+        end
+    end, State#state.gn_graphics_servers).
+
 %%%===================================================================
-%%% Enhanced Map Creation with Full Backend State and Explosions (UNCHANGED)
+%%% Map Creation Functions (Same as before)
 %%%===================================================================
 
-%% Create enhanced unified map state with all backend information including explosions
 create_enhanced_map_state(State) ->
     try
-        % Initialize empty map
         EmptyMap = create_empty_map(),
-       
-        % Add tiles from all GN tables
         MapWithTiles = add_tiles_to_map(EmptyMap),
-       
-        % Add powerups
         MapWithPowerups = add_powerups_to_map(MapWithTiles),
-       
-        % Add bombs with enhanced FSM information
         MapWithBombs = add_enhanced_bombs_to_map(MapWithPowerups),
-       
-        % Add players with full timer information
         MapWithPlayers = add_enhanced_players_to_map(MapWithBombs),
-        
-        % Add explosions to map
         MapWithExplosions = add_explosions_to_map(MapWithPlayers, State#state.active_explosions),
        
-        % Create enhanced map state with all backend data
         #{
             map => MapWithExplosions,
             dead_players => State#state.dead_players,
@@ -783,88 +910,12 @@ create_enhanced_map_state(State) ->
             }
     end.
 
-%% Add explosions to the map
-add_explosions_to_map(Map, ActiveExplosions) ->
-    maps:fold(fun([X, Y], _ExpiryTime, AccMap) ->
-        update_map_with_explosion(AccMap, X, Y)
-    end, Map, ActiveExplosions).
-
-%% Update map cell with explosion
-update_map_with_explosion(Map, X, Y) ->
-    if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
-        Row = lists:nth(X + 1, Map),
-        OldCell = lists:nth(Y + 1, Row),
-        NewCell = update_cell_explosion(OldCell, explosion),
-        NewRow = replace_list_element(Row, Y + 1, NewCell),
-        replace_list_element(Map, X + 1, NewRow);
-    true ->
-        io:format("⚠️ Invalid explosion position: ~w, ~w~n", [X, Y]),
-        Map
-    end.
-
-%% Update cell with explosion information
-update_cell_explosion({Tile, Powerup, Bomb, Player, _, Special}, ExplosionInfo) ->
-    {Tile, Powerup, Bomb, Player, ExplosionInfo, Special}.
-
-%% Calculate destination position
-calculate_destination([X, Y], Direction) ->
-    case Direction of
-        up -> [X, Y-1];
-        down -> [X, Y+1];
-        left -> [X-1, Y];
-        right -> [X+1, Y]
-    end.
-
-%% Handle mnesia updates by recreating enhanced map state
-handle_mnesia_update(State) ->
-    NewMapState = create_enhanced_map_state(State),
-    UpdatedState = State#state{current_map_state = NewMapState},
-    send_map_to_all_targets(UpdatedState),
-    {noreply, UpdatedState}.
-
-%% Send enhanced map to all targets (Python and GN servers) - UPDATED FOR JSON
-send_map_to_all_targets(State) ->
-    % Send to Python visualizer as JSON
-    send_enhanced_map_to_python(State#state.python_port, State#state.current_map_state),
-   
-    % Send to GN graphics servers (they still expect Erlang terms)
-    send_enhanced_map_to_gn_servers(State).
-
-%% Send enhanced map to all GN graphics servers (UNCHANGED - still Erlang terms)
-send_enhanced_map_to_gn_servers(State) ->
-    lists:foreach(fun({Node, Pid}) ->
-        case is_pid(Pid) andalso is_process_alive(Pid) of
-            true ->
-                try
-                    % Send enhanced map state with full backend information
-                    gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                    case State#state.update_counter rem 40 == 0 of  % Log every 2 seconds
-                        true ->
-                            ExplosionCount = maps:size(State#state.active_explosions),
-                            io:format("📡 Enhanced map (with timers, FSM state & ~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
-                        false -> ok
-                    end
-            catch
-                _:Error ->
-                    io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
-            end;
-        false ->
-            io:format("⚠️ GN server on ~w not alive~n", [Node])
-        end
-    end, State#state.gn_graphics_servers).
-
-%%%===================================================================
-%%% Existing Helper Functions (UNCHANGED - keeping all existing functions)
-%%%===================================================================
-
-%% Get all table names that we need to monitor
 get_all_tables() ->
     [gn1_tiles, gn2_tiles, gn3_tiles, gn4_tiles,
      gn1_bombs, gn2_bombs, gn3_bombs, gn4_bombs,
      gn1_powerups, gn2_powerups, gn3_powerups, gn4_powerups,
      gn1_players, gn2_players, gn3_players, gn4_players].
 
-%% Set up mnesia subscriptions for all relevant tables
 setup_mnesia_subscriptions(Tables) ->
     lists:foldl(fun(Table, Acc) ->
         case mnesia:subscribe({table, Table, simple}) of
@@ -877,8 +928,6 @@ setup_mnesia_subscriptions(Tables) ->
         end
     end, [], Tables).
 
-%% Monitor enhanced graphics servers on all GN nodes
--spec monitor_gn_graphics_servers(GNNodes::list()) -> [{reference(), atom()}].
 monitor_gn_graphics_servers(GNNodes)->
     RefsList = attempt_gn_graphics_monitoring(GNNodes),
     gn_monitoring_receive_loop(RefsList, []).
@@ -887,23 +936,23 @@ gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
     receive
         {'DOWN', Ref, process, _Pid, noproc} ->
             case lists:keyfind(Ref, 1, RefsList) of
-                false -> % unknown message - unsure what to do with it
+                false ->
                     io:format("❌ *Unknown monitoring failure message received:~n~w~n",[{'DOWN', Ref, process, _Pid, noproc}]),
                     gn_monitoring_receive_loop(RefsList, ServersNotFound);
-                {_, NodeName} -> % a monitoring to NodeName has failed - add to failed servers
+                {_, NodeName} ->
                     io:format("❌ *A monitoring request has failed on node ~w. Accumulating before retrying..~n",[NodeName]),
                     gn_monitoring_receive_loop(lists:keydelete(Ref, 1, RefsList), [NodeName | ServersNotFound])
             end;
-        AnythingElse -> % re-send to self in 5 seconds
+        AnythingElse ->
             erlang:send_after(5000, self(), AnythingElse),
             gn_monitoring_receive_loop(RefsList, ServersNotFound)
-     after 1500 -> % timeout is 1.5sec
+     after 1500 ->
         case length(ServersNotFound) =/= 0 of
             true ->
                 io:format("❌ Failed to monitor ~p servers. The following were not monitored:~w~n", [length(ServersNotFound), ServersNotFound]),
                 NewRefs = monitor_gn_graphics_servers(ServersNotFound),
                 NewRefs ++ RefsList;
-            false -> % every server was successfully monitored
+            false ->
                 io:format("✅ All GN graphics server were monitored successfully!~n"),
                 RefsList
          end
@@ -914,22 +963,19 @@ attempt_gn_graphics_monitoring(NodeList) ->
         Ref = erlang:monitor(process, {gn_graphics_server, Node}),
         io:format("Sent request to monitor process ~w~n", [Node]),
         {Ref, Node} end, NodeList),
-    timer:sleep(1000), % wait for 1 second before looking at the messages we received
+    timer:sleep(1000),
     RefsList.
 
-%% Create empty 16x16 map with free tiles (enhanced format)
 create_empty_map() ->
     [[{free, none, none, none, none, none} || _ <- lists:seq(1, ?MAP_SIZE)]
      || _ <- lists:seq(1, ?MAP_SIZE)].
 
-%% Add tiles from all GN tables to the map
 add_tiles_to_map(Map) ->
     TileTables = [gn1_tiles, gn2_tiles, gn3_tiles, gn4_tiles],
     lists:foldl(fun(Table, AccMap) ->
         add_tiles_from_table(Table, AccMap)
     end, Map, TileTables).
 
-%% Add tiles from a specific table
 add_tiles_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_tiles{_ = '_'}, [], ['$_']}])
@@ -945,7 +991,6 @@ add_tiles_from_table(Table, Map) ->
             Map
     end.
 
-%% Update map with tile information
 update_map_with_tile(Map, TileRecord) ->
     #mnesia_tiles{position = [X, Y], type = Type, contains = Contains} = TileRecord,
    
@@ -960,14 +1005,20 @@ update_map_with_tile(Map, TileRecord) ->
         Map
     end.
 
-%% Add powerups from all tables
+update_cell_tile({_, Powerup, Bomb, Player, Explosion, Special}, TileType, Contains) ->
+    ActualPowerup = if Contains =/= none -> Contains; true -> Powerup end,
+    {TileType, ActualPowerup, Bomb, Player, Explosion, Special}.
+
+replace_list_element(List, Pos, NewElement) ->
+    {Before, [_|After]} = lists:split(Pos - 1, List),
+    Before ++ [NewElement] ++ After.
+
 add_powerups_to_map(Map) ->
     PowerupTables = [gn1_powerups, gn2_powerups, gn3_powerups, gn4_powerups],
     lists:foldl(fun(Table, AccMap) ->
         add_powerups_from_table(Table, AccMap)
     end, Map, PowerupTables).
 
-%% Add powerups from a specific table
 add_powerups_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_powerups{_ = '_'}, [], ['$_']}])
@@ -983,7 +1034,6 @@ add_powerups_from_table(Table, Map) ->
             Map
     end.
 
-%% Update map with powerup information
 update_map_with_powerup(Map, PowerupRecord) ->
     #mnesia_powerups{position = [X, Y], type = Type} = PowerupRecord,
    
@@ -998,29 +1048,15 @@ update_map_with_powerup(Map, PowerupRecord) ->
         Map
     end.
 
-%% Update cell with tile information
-update_cell_tile({_, Powerup, Bomb, Player, Explosion, Special}, TileType, Contains) ->
-    % If tile contains a powerup, update powerup field
-    ActualPowerup = if Contains =/= none -> Contains; true -> Powerup end,
-    {TileType, ActualPowerup, Bomb, Player, Explosion, Special}.
-
-%% Update cell with powerup information
 update_cell_powerup({Tile, _, Bomb, Player, Explosion, Special}, PowerupType) ->
     {Tile, PowerupType, Bomb, Player, Explosion, Special}.
 
-%% Replace element in list at specific position (1-indexed)
-replace_list_element(List, Pos, NewElement) ->
-    {Before, [_|After]} = lists:split(Pos - 1, List),
-    Before ++ [NewElement] ++ After.
-
-%% Add players with enhanced timer and state information
 add_enhanced_players_to_map(Map) ->
     PlayerTables = [gn1_players, gn2_players, gn3_players, gn4_players],
     lists:foldl(fun(Table, AccMap) ->
         add_enhanced_players_from_table(Table, AccMap)
     end, Map, PlayerTables).
 
-%% Add enhanced players from a specific table
 add_enhanced_players_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_players{_ = '_'}, [], ['$_']}])
@@ -1036,7 +1072,6 @@ add_enhanced_players_from_table(Table, Map) ->
             Map
     end.
 
-%% Update map with enhanced player information including all timers
 update_map_with_enhanced_player(Map, PlayerRecord) ->
     #mnesia_players{
         position = [X, Y], 
@@ -1054,7 +1089,6 @@ update_map_with_enhanced_player(Map, PlayerRecord) ->
         Row = lists:nth(X + 1, Map),
         OldCell = lists:nth(Y + 1, Row),
         
-        % Enhanced player info with all backend state
         EnhancedPlayerInfo = {
             PlayerID, Life, Speed, Direction, Movement, 
             MovementTimer, ImmunityTimer, RequestTimer
@@ -1068,14 +1102,15 @@ update_map_with_enhanced_player(Map, PlayerRecord) ->
         Map
     end.
 
-%% Add bombs with enhanced FSM state information
+update_cell_enhanced_player({Tile, Powerup, Bomb, _, Explosion, Special}, EnhancedPlayerInfo) ->
+    {Tile, Powerup, Bomb, EnhancedPlayerInfo, Explosion, Special}.
+
 add_enhanced_bombs_to_map(Map) ->
     BombTables = [gn1_bombs, gn2_bombs, gn3_bombs, gn4_bombs],
     lists:foldl(fun(Table, AccMap) ->
         add_enhanced_bombs_from_table(Table, AccMap)
     end, Map, BombTables).
 
-%% Add enhanced bombs from a specific table
 add_enhanced_bombs_from_table(Table, Map) ->
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_bombs{_ = '_'}, [], ['$_']}])
@@ -1091,7 +1126,6 @@ add_enhanced_bombs_from_table(Table, Map) ->
             Map
     end.
 
-%% Update map with enhanced bomb information including FSM state
 update_map_with_enhanced_bomb(Map, BombRecord) ->
     #mnesia_bombs{
         position = [X, Y], 
@@ -1108,7 +1142,6 @@ update_map_with_enhanced_bomb(Map, BombRecord) ->
         Row = lists:nth(X + 1, Map),
         OldCell = lists:nth(Y + 1, Row),
         
-        % Enhanced bomb info with FSM state and movement information
         EnhancedBombInfo = {
             Type, Ignited, Status, Radius, Owner, Movement, Direction
         },
@@ -1121,10 +1154,25 @@ update_map_with_enhanced_bomb(Map, BombRecord) ->
         Map
     end.
 
-%% Update cell with enhanced player information
-update_cell_enhanced_player({Tile, Powerup, Bomb, _, Explosion, Special}, EnhancedPlayerInfo) ->
-    {Tile, Powerup, Bomb, EnhancedPlayerInfo, Explosion, Special}.
-
-%% Update cell with enhanced bomb information
 update_cell_enhanced_bomb({Tile, Powerup, _, Player, Explosion, Special}, EnhancedBombInfo) ->
     {Tile, Powerup, EnhancedBombInfo, Player, Explosion, Special}.
+
+add_explosions_to_map(Map, ActiveExplosions) ->
+    maps:fold(fun([X, Y], _ExpiryTime, AccMap) ->
+        update_map_with_explosion(AccMap, X, Y)
+    end, Map, ActiveExplosions).
+
+update_map_with_explosion(Map, X, Y) ->
+    if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
+        Row = lists:nth(X + 1, Map),
+        OldCell = lists:nth(Y + 1, Row),
+        NewCell = update_cell_explosion(OldCell, explosion),
+        NewRow = replace_list_element(Row, Y + 1, NewCell),
+        replace_list_element(Map, X + 1, NewRow);
+    true ->
+        io:format("⚠️ Invalid explosion position: ~w, ~w~n", [X, Y]),
+        Map
+    end.
+
+update_cell_explosion({Tile, Powerup, Bomb, Player, _, Special}, ExplosionInfo) ->
+    {Tile, Powerup, Bomb, Player, ExplosionInfo, Special}.
