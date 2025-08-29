@@ -75,7 +75,7 @@ handle_call(_Request, _From, State = #gn_state{}) ->
 handle_call({set_player_pid, PlayerPid}, _From, State) ->
     % Handle player PID registration
     io:format("Setting player PID: ~p~n", [PlayerPid]),
-    {reply, ok, State}.
+    {reply, ok, State};
 
 %%% ============== Handle cast ==============
 
