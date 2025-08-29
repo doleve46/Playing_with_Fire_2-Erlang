@@ -1000,7 +1000,8 @@ send_enhanced_map_to_gn_servers(State) ->
                         true ->
                             ExplosionCount = maps:size(State#state.active_explosions),
                             io:format("📡 Enhanced map (~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
-                        false -> ok
+                        false -> io:format("❌ Error sending data to GN server on ~w: ~p~n", [Node, Error]),
+                            ok
                     end
             catch
                 _:Error ->
