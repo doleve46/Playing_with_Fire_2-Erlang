@@ -994,31 +994,28 @@ send_map_to_all_targets(State) ->
     send_enhanced_map_to_gn_servers(State).
 
 send_enhanced_map_to_gn_servers(State) ->
-    GNServers = State#state.gn_graphics_servers,
-    io:format("📡 Attempting to send map to ~w GN graphics servers~n", [length(GNServers)]),
-    
-    lists:foreach(fun({Node, Pid}) ->
-        io:format("📡 Sending to Node: ~w, Pid: ~p~n", [Node, Pid]),
-        case is_pid(Pid) andalso is_process_alive(Pid) of
-            true ->
+    lists:foreach(fun(ServerInfo) ->
+        case ServerInfo of
+            {_Ref, Node, Pid} when is_pid(Pid) ->
+                % We have the actual PID
                 try
-                    gen_server:cast({gn_graphics_server, Node}, {map_update, State#state.current_map_state}),
-                    io:format("✅ Successfully sent map to ~w~n", [Node])
+                    gen_server:cast(Pid, {map_update, State#state.current_map_state}),
+                    io:format("✅ Sent map to ~w via PID~n", [Node])
                 catch
                     _:Error ->
-                        io:format("❌ Error sending to ~w: ~p~n", [Node, Error])
+                        io:format("❌ PID cast failed to ~w: ~p~n", [Node, Error])
                 end;
-            false ->
-                % Try alternative method - direct cast to registered name
+            {_Ref, Node} ->
+                % Fall back to registered name
                 try
                     gen_server:cast({gn_graphics_server, Node}, {map_update, State#state.current_map_state}),
-                    io:format("✅ Sent via registered name to ~w~n", [Node])
+                    io:format("✅ Sent map to ~w via registered name~n", [Node])
                 catch
-                    _:AltError ->
-                        io:format("❌ Both methods failed for ~w: ~p~n", [Node, AltError])
+                    _:Error ->
+                        io:format("❌ Registered name cast failed to ~w: ~p~n", [Node, Error])
                 end
         end
-    end, GNServers).
+    end, State#state.gn_graphics_servers).
 
 %%%===================================================================
 %%% Map Creation Functions (Same as before)
@@ -1108,12 +1105,33 @@ gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
     end.
 
 attempt_gn_graphics_monitoring(NodeList) ->
+    io:format("🔍 Attempting to monitor GN graphics servers on nodes: ~p~n", [NodeList]),
+    
     RefsList = lists:map(fun(Node) ->
-        ProcessName = {gn_graphics_server, Node}, % Make sure this matches the registration
-        io:format("🔍 Attempting to monitor ~p on node ~w~n", [ProcessName, Node]),
-        Ref = erlang:monitor(process, {gn_graphics_server, Node}),
-        io:format("Sent request to monitor process ~w~n", [Node]),
-        {Ref, Node} end, NodeList),
+        try
+            % Try to get the actual PID first
+            case rpc:call(Node, erlang, whereis, [gn_graphics_server], 5000) of
+                {badrpc, Reason} ->
+                    io:format("❌ RPC failed to ~w: ~p~n", [Node, Reason]),
+                    Ref = erlang:monitor(process, {gn_graphics_server, Node}),
+                    {Ref, Node};
+                undefined ->
+                    io:format("⚠️ gn_graphics_server not found on ~w~n", [Node]),
+                    Ref = erlang:monitor(process, {gn_graphics_server, Node}),
+                    {Ref, Node};
+                Pid when is_pid(Pid) ->
+                    io:format("✅ Found gn_graphics_server on ~w: ~p~n", [Node, Pid]),
+                    Ref = erlang:monitor(process, Pid),
+                    {Ref, Node, Pid}  % Store the PID too!
+            end
+        catch
+            _:Error ->
+                io:format("❌ Error monitoring ~w: ~p~n", [Node, Error]),
+                Ref = make_ref(),
+                {Ref, Node}
+        end
+    end, NodeList),
+    
     timer:sleep(1000),
     RefsList.
 
