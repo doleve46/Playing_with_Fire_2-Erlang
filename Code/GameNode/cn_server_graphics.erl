@@ -993,10 +993,6 @@ send_map_to_all_targets(State) ->
     send_map_to_socket(State#state.python_socket_pid, State#state.current_map_state),
     send_enhanced_map_to_gn_servers(State).
 
-send_map_to_all_targets(State) ->
-    send_map_to_socket(State#state.python_socket_pid, State#state.current_map_state),
-    send_enhanced_map_to_gn_servers(State).
-
 send_enhanced_map_to_gn_servers(State) ->
     lists:foreach(fun(ServerInfo) ->
         case ServerInfo of
