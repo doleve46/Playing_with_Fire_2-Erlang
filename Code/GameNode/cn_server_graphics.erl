@@ -237,7 +237,7 @@ handle_info(periodic_update, State) ->
         send_map_to_all_targets(UpdatedState),
         case State#state.update_counter rem 20 == 0 of
             true ->
-                io:format("🔄 Enhanced periodic Socket update #~w sent~n", [UpdatedState#state.update_counter]);
+                % io:format("🔄 Enhanced periodic Socket update #~w sent~n", [UpdatedState#state.update_counter]);
             false -> ok
         end;
     true -> ok
