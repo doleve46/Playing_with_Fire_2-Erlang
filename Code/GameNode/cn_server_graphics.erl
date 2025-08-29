@@ -996,12 +996,11 @@ send_enhanced_map_to_gn_servers(State) ->
             true ->
                 try
                     gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                    case State#state.update_counter rem 40 == 0 of
+                    case State#state.update_counter rem 10 == 0 of
                         true ->
                             ExplosionCount = maps:size(State#state.active_explosions),
                             io:format("📡 Enhanced map (~w explosions) sent to GN server on ~w~n", [ExplosionCount, Node]);
-                        false -> io:format("❌ Error sending data to GN server on ~w: ~p~n", [Node, Error]),
-                            ok
+                        false -> ok
                     end
             catch
                 _:Error ->
