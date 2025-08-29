@@ -238,6 +238,13 @@ def listen_for_commands():
 
 
 def main():
+    # Check for headless mode first - exit gracefully if running on server
+    if (os.environ.get('HEADLESS') == 'true' or 
+        os.environ.get('HEADLESS_MODE') == 'true' or
+        not os.environ.get('DISPLAY')):
+        print("Headless mode detected - GUI disabled, exiting gracefully")
+        sys.exit(0)
+    
     global current_screen
     listen_for_commands()
     current_screen = "show_main_menu"
