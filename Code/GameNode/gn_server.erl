@@ -333,11 +333,13 @@ handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
         {query_request, get_registered_name(self()), 
             {handle_bomb_explosion, Record#mnesia_bombs.position, Record#mnesia_bombs.radius}}),
     %% Update player's active bombs count, let playerFSM know.
-    notify_owner_of_bomb_explosion(Record#mnesia_bombs.owner, State);
+    notify_owner_of_bomb_explosion(Record#mnesia_bombs.owner, State),
+    {noreply, State};
         
 %% * Handle start-of-game message from CN - pass it to player_fsm to "unlock" it
 handle_info(start_game, State) ->
     PlayerNumber = req_player_move:node_name_to_number(node()),
+    io:format("**GN SERVER: received 'start_game' from CN - Starting game for player ~p~n", [PlayerNumber]),
     player_fsm:start_signal(list_to_atom("player_" ++ integer_to_list(PlayerNumber))),
     {noreply, State};
 

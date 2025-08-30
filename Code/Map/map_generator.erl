@@ -1,7 +1,7 @@
 -module(map_generator).
 
 -export([generate_map/0, generate_map/1, generate_map_with_powerups/0, generate_map_with_powerups/1,
-         visualize_map/1, get_cell_at/3, export_map/2, test_generation/0]).
+         visualize_map/1, get_cell_at/3, export_map/2, test_generation/0, create_map/0]).
 
 %% linux compatible
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
@@ -774,3 +774,12 @@ test_generation() ->
     
     io:format("✅ Unified grid test complete!~n"),
     Grid.
+
+
+create_map() ->
+    % Generate map with full state
+    MapState = generate_map_with_powerups(),
+    Grid = MapState#map_state.grid,
+    io:format("✅ Map creation complete!~n"),
+    Grid.
+

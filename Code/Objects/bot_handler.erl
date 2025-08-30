@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2, set_player_pid/2, set_difficulty/2]).
+-export([start_link/2, set_player_pid/2, set_difficulty/2, game_start/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -42,6 +42,9 @@ set_player_pid(BotHandlerPid, PlayerPid) ->
 set_difficulty(BotHandlerPid, Difficulty) ->
     gen_server:call(BotHandlerPid, {set_difficulty, Difficulty}).
 
+game_start(BotHandlerPid) ->
+    gen_server:cast(BotHandlerPid, game_start).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -53,8 +56,7 @@ init([PlayerNumber, Difficulty]) ->
     },
     
     % Start bot action timer
-    schedule_next_action(State),
-    
+    io:format("**##**BOT HANDLER FINISHED INIT **##**~n"),
     {ok, State}.
 
 handle_call({set_player_pid, PlayerPid}, _From, State) ->
@@ -83,6 +85,12 @@ handle_cast({player_ack, Response}, State) ->
             UpdatedState = NewState#bot_state{action_buffer = Rest},
             process_bot_action(NextAction, UpdatedState)
     end;
+
+handle_cast(game_start, State) ->
+    % Start the bot's action loop
+    io:format("**BOT HANDLER: Bot ~p: Game started!~n", [State#bot_state.player_number]),
+    schedule_next_action(State),
+    {noreply, State};
 
 handle_cast(_Request, State) ->
     {noreply, State}.

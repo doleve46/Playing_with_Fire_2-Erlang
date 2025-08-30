@@ -122,7 +122,7 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
             create_tables(lists:nth(X, ConnectedNodeNames), node(), X)
         end, lists:seq(1,length(ConnectedNodeNames))),
     %% Create map
-    Map = map_generator:test_generation(), % ! this is a temporary call - should be something else
+    Map = map_generator:create_map(),
     %% Load map into mnesia - in parallel processes
     Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
     %% Await GNs decisions to play as bot or human

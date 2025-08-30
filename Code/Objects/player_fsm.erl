@@ -137,7 +137,7 @@ init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
         true -> 
             bot_handler:set_player_pid(IOHandlerPid, self())
     end,
-
+    io:format("**##**PLAYER FSM FINISHED INIT **##**~n"),
     %% move to start-up state - leave when given a message that the game starts
     {ok, startup, Data}.
 
@@ -150,11 +150,12 @@ init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
 %%% -------------------------------------------------------------------
 %% @doc Start-up state - awaiting starting signal before allowing inputs.
 %% when receiving said start signal, updates io/bot handler they can start
-startup(cast, {game_start}, Data) ->
+startup(cast, {game_start}, Data) -> %% TODO: this message does not arrive - check why
     %% Notify I/O and bot handlers that the game has started
+    io:format("**## PLAYER FSM RECEIVED 'game_start'~n"),
     ok = if
         Data#player_data.bot == false -> 
-            io_handler:game_start(Data#player_data.io_handler_pid);
+            io_handler:game_start(Data#player_data.io_handler_pid); %% TODO: these functions do NOT EXIST
         true -> 
             bot_handler:game_start(Data#player_data.io_handler_pid)
     end,

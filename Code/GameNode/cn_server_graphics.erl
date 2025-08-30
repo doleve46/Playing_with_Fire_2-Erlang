@@ -1360,6 +1360,6 @@ wait_for_cn_server_loop(AttemptsLeft) ->
             timer:sleep(500), % Wait 500ms between attempts
             wait_for_cn_server_loop(AttemptsLeft - 1);
         Pid ->
-            io:format("✅ Found CN server, sending ready message~n"),
+            io:format("**CN_GRAPHICS: Found CN server, sending ready message~n"),
             Pid ! {graphics_ready, self()}
     end.

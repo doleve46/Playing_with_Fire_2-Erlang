@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, send_input/2, set_player_pid/2]).
+-export([start_link/1, send_input/2, set_player_pid/2, game_start/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -39,7 +39,7 @@
 start_link(PlayerNumber) ->
     ServerName = list_to_atom("io_handler_" ++ integer_to_list(PlayerNumber)),
     gen_server:start_link({local, ServerName}, ?MODULE, 
-        [PlayerNumber, true], []).  % true = keyboard mode for human players
+        [PlayerNumber], []).  % true = keyboard mode for human players
 
 %% @doc Send input (for testing)
 send_input(PlayerNumber, Input) ->
@@ -50,28 +50,24 @@ send_input(PlayerNumber, Input) ->
 set_player_pid(IOHandlerPid, PlayerPid) ->
     gen_server:call(IOHandlerPid, {set_player_pid, PlayerPid}).
 
+game_start(IOHandlerPid) ->
+    gen_server:cast(IOHandlerPid, game_start).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-init([PlayerNumber, KeyboardMode]) ->
+init([PlayerNumber]) ->
     State = #io_state{
-        player_number = PlayerNumber,
-        keyboard_mode = KeyboardMode
+        player_number = PlayerNumber
     },
-    
-    % Start input polling if in keyboard mode
-    case KeyboardMode of
-        true -> 
-            % Spawn a separate process for blocking keyboard input
-            spawn_link(fun() -> keyboard_input_loop(self()) end),
-            erlang:send_after(?TICK_DELAY, self(), poll_input);
-        false -> ok
-    end,
-    
+
+    %% Await 'start_game' message before starting input polling
+    io:format("**##**IO HANDLER FINISHED INIT **##**~n"),
     {ok, State}.
 
 handle_call({set_player_pid, PlayerPid}, _From, State) ->
+    io:format("**##**IO HANDLER: Player PID set to ~p**##**~n", [PlayerPid]),
     NewState = State#io_state{player_pid = PlayerPid},
     {reply, ok, NewState};
 
@@ -96,6 +92,12 @@ handle_cast({player_ack, Response}, State) ->
             UpdatedState = NewState#io_state{input_buffer = Rest},
             process_input(NextInput, UpdatedState)
     end;
+
+handle_cast(game_start, State) ->
+    io:format("**##**IO HANDLER: Game started for player ~p**##**~n", [State#io_state.player_number]),
+    spawn_link(fun() -> keyboard_input_loop(self()) end),
+    erlang:send_after(?TICK_DELAY, self(), poll_input),
+    {noreply, State};
 
 handle_cast(_Request, State) ->
     {noreply, State}.

@@ -173,10 +173,10 @@ handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
 
 %% @doc Receiving ready message from cn_server_graphics
 handle_info({graphics_ready, _GraphicsPid}, State) ->
-    io:format("Graphics server is ready~n"),
+    io:format("**CN_SERVER: Graphics server is ready~n"),
     %% Notify all GN servers to start the game
     lists:foreach(fun(#gn_data{pid = Pid}) ->
-        io:format("Sending start_game to GN server: ~p~n", [Pid]),
+        io:format("**CN_SERVER: Sending start_game to GN server: ~p~n", [Pid]),
         Pid ! start_game
     end, State),
     {noreply, State};
