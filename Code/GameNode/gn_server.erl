@@ -339,8 +339,17 @@ handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
 %% * Handle start-of-game message from CN - pass it to player_fsm to "unlock" it
 handle_info(start_game, State) ->
     PlayerNumber = req_player_move:node_name_to_number(node()),
-    io:format("**GN SERVER: received 'start_game' from CN - Starting game for player ~p~n", [PlayerNumber]),
-    player_fsm:start_signal(list_to_atom("player_" ++ integer_to_list(PlayerNumber))),
+    io:format("**GN SERVER: received 'start_game' from CN - Trying to start game for player ~p~n", [PlayerNumber]),
+
+    % Get the actual PID of the player FSM using its global name
+    PlayerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
+    case global:whereis_name(PlayerName) of
+        undefined ->
+            io:format("**GN SERVER ERROR: Player FSM ~p not found globally!~n", [PlayerName]);
+        PlayerPid ->
+            io:format("**GN SERVER: Sending game_start to player FSM ~p (PID: ~p)~n", [PlayerName, PlayerPid]),
+            player_fsm:start_signal(PlayerPid)
+    end,
     {noreply, State};
 
 %% * default, catch-all and ignore
