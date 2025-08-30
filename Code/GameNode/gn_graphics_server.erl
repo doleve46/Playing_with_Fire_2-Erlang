@@ -235,24 +235,53 @@ handle_info(start_socket_server, State) ->
 handle_info(start_python_socket_client, State) ->
     spawn(fun() ->
         {ok, Cwd} = file:get_cwd(),
+        io:format("🔍 Current working directory: ~s~n", [Cwd]),
+        
         MapDir = filename:join([Cwd, "src", "code", "map"]),
+        io:format("🔍 Calculated map directory: ~s~n", [MapDir]),
+        
+        % Check if directory exists
+        case filelib:is_dir(MapDir) of
+            true ->
+                io:format("✅ Directory exists: ~s~n", [MapDir]);
+            false ->
+                io:format("❌ Directory does not exist: ~s~n", [MapDir]),
+                io:format("🔍 Let's check what directories DO exist...~n"),
+                
+                % Check parent directories
+                SrcDir = filename:join([Cwd, "src"]),
+                CodeDir = filename:join([Cwd, "src", "code"]),
+                
+                io:format("   src exists: ~p~n", [filelib:is_dir(SrcDir)]),
+                io:format("   src/code exists: ~p~n", [filelib:is_dir(CodeDir)]),
+                
+                % Try to list what's actually there
+                case file:list_dir(Cwd) of
+                    {ok, Files} -> io:format("   Files in CWD: ~p~n", [Files]);
+                    {error, _} -> io:format("   Cannot list CWD~n")
+                end
+        end,
         
         % Create node_id.txt file with the GN ID
         NodeIdFile = filename:join([MapDir, "node_id.txt"]),
         GNId = atom_to_list(State#state.local_gn_name),
         
-        io:format("🔍 Writing GN ID '~s' to file: ~s~n", [GNId, NodeIdFile]),
+        io:format("🔍 Target file path: ~s~n", [NodeIdFile]),
+        io:format("🔍 Writing GN ID '~s' to file~n", [GNId]),
+        
         case file:write_file(NodeIdFile, GNId) of
             ok ->
                 io:format("✅ Node ID file created successfully~n"),
                 
                 % Now start the Python script
                 PythonScript = filename:join([MapDir, "gn_map_live.py"]),
+                io:format("🔍 Python script path: ~s~n", [PythonScript]),
                 Command = "python3 " ++ PythonScript,
                 
                 io:format("🚀 Starting Python visualizer: ~s~n", [Command]),
                 case filelib:is_file(PythonScript) of
                     true ->
+                        io:format("✅ Python script found~n"),
                         Port = open_port({spawn, Command}, 
                             [{cd, MapDir}, binary, exit_status, stderr_to_stdout]),
                         monitor_python_output(Port);
@@ -260,7 +289,15 @@ handle_info(start_python_socket_client, State) ->
                         io:format("❌ Python script not found: ~s~n", [PythonScript])
                 end;
             {error, Reason} ->
-                io:format("❌ Failed to create node ID file: ~p~n", [Reason])
+                io:format("❌ Failed to create node ID file: ~p~n", [Reason]),
+                
+                % Additional debugging
+                case file:read_file_info(MapDir) of
+                    {ok, FileInfo} ->
+                        io:format("🔍 Directory info: ~p~n", [FileInfo]);
+                    {error, InfoReason} ->
+                        io:format("❌ Cannot get directory info: ~p~n", [InfoReason])
+                end
         end
     end),
     {noreply, State};
