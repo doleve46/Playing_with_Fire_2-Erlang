@@ -220,22 +220,32 @@ handle_info(start_python_socket_client, State) ->
                 GNId = atom_to_list(State#state.local_gn_name),
                 Command = "python3 " ++ PythonScript ++ " " ++ GNId,
                 io:format("🚀 Starting GN Python visualizer with command: ~s~n", [Command]),
+                % Capture output from Python
                 Port = open_port({spawn, Command}, 
-                    [{cd, filename:dirname(PythonScript)}, binary, exit_status]),
-                io:format("✅ GN Python socket visualizer started, Port: ~p~n", [Port]);
+                    [{cd, filename:dirname(PythonScript)}, binary, exit_status, stderr_to_stdout]),
+                io:format("✅ GN Python socket visualizer started, Port: ~p~n", [Port]),
+                % Monitor the port for output
+                monitor_python_output(Port);
             false ->
-                io:format("❌ Python socket script not found at: ~s~n", [PythonScript]),
-                % List directory contents to help debug
-                Dir = filename:dirname(PythonScript),
-                case file:list_dir(Dir) of
-                    {ok, Files} ->
-                        io:format("🔍 Directory contents of ~s: ~p~n", [Dir, Files]);
-                    {error, Reason} ->
-                        io:format("❌ Could not list directory ~s: ~p~n", [Dir, Reason])
-                end
+                io:format("❌ Python socket script not found at: ~s~n", [PythonScript])
         end
     end),
     {noreply, State};
+
+% Add this helper function
+monitor_python_output(Port) ->
+    receive
+        {Port, {data, Data}} ->
+            io:format("🐍 Python output: ~s~n", [Data]),
+            monitor_python_output(Port);
+        {Port, {exit_status, Status}} ->
+            io:format("🐍 Python exited with status: ~p~n", [Status]);
+        Other ->
+            io:format("🐍 Python port message: ~p~n", [Other]),
+            monitor_python_output(Port)
+    after 30000 ->
+        io:format("🐍 Python output monitoring timeout~n")
+    end.
 
 handle_info({socket_connected, ClientSocket, ClientPid}, State) ->
     io:format("🔗 Python client connected to GN ~w via socket~n", [State#state.local_gn_name]),
