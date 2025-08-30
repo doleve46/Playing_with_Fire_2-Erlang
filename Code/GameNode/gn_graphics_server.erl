@@ -208,59 +208,34 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% Handle messages
-handle_info(start_socket_server, State) ->
-    LocalGN = State#state.local_gn_name,
-    SocketPort = get_gn_socket_port(LocalGN),
-    
-    io:format("🔌 Starting socket server for ~w on port ~w...~n", [LocalGN, SocketPort]),
-    
-   case start_gn_socket_listener(SocketPort) of
-        {ok, {ListenSocket, AcceptorPid}} ->
-            io:format("✅ GN Socket server started successfully on port ~w~n", [SocketPort]),
-            UpdatedState = State#state{
-                listen_socket = ListenSocket,
-                socket_acceptor = AcceptorPid
-            },
-            
-            case State#state.current_map_state of
-                undefined ->
-                    io:format("✅ Socket server ready, waiting for first CN update~n");
-                MapState ->
-                    io:format("✅ Socket server ready and current map state will be sent when client connects~n")
-            end,
-            
-            % Start the Python socket client after 2 seconds
-            erlang:send_after(2000, self(), start_python_socket_client),
-            
-            {noreply, UpdatedState};
-        {error, Reason} ->
-            io:format("❌ Failed to start GN socket server: ~p~n", [Reason]),
-            % Continue without socket server
-            {noreply, State}
-    end;
-
-handle_info(start_socket_server, State) ->
-    LocalGN = State#state.local_gn_name,
-    SocketPort = get_gn_socket_port(LocalGN),
-    
-    io:format("🔌 Starting socket server for ~w on port ~w...~n", [LocalGN, SocketPort]),
-    
-    case start_gn_socket_listener(SocketPort) of
-        {ok, {ListenSocket, AcceptorPid}} ->
-            io:format("✅ GN Socket server started successfully on port ~w~n", [SocketPort]),
-            UpdatedState = State#state{
-                listen_socket = ListenSocket,
-                socket_acceptor = AcceptorPid
-            },
-            
-            % Give socket server more time to be ready before starting Python
-            erlang:send_after(3000, self(), start_python_socket_client),  % Changed from 2000 to 3000
-            
-            {noreply, UpdatedState};
-        {error, Reason} ->
-            io:format("❌ Failed to start GN socket server: ~p~n", [Reason]),
-            {noreply, State}
-    end;
+handle_info(start_python_socket_client, State) ->
+    io:format("🔍 DEBUG: Received start_python_socket_client message~n"),
+    spawn(fun() ->
+        {ok, Cwd} = file:get_cwd(),
+        io:format("🔍 DEBUG: Current working directory: ~s~n", [Cwd]),
+        PythonScript = filename:join([Cwd, "src", "code", "map", "gn_map_live.py"]),
+        io:format("🔍 DEBUG: Looking for Python script at: ~s~n", [PythonScript]),
+        case filelib:is_file(PythonScript) of
+            true ->
+                GNId = atom_to_list(State#state.local_gn_name),
+                Command = "python3 " ++ PythonScript ++ " " ++ GNId,
+                io:format("🚀 Starting GN Python visualizer with command: ~s~n", [Command]),
+                Port = open_port({spawn, Command}, 
+                    [{cd, filename:dirname(PythonScript)}, binary, exit_status]),
+                io:format("✅ GN Python socket visualizer started, Port: ~p~n", [Port]);
+            false ->
+                io:format("❌ Python socket script not found at: ~s~n", [PythonScript]),
+                % List directory contents to help debug
+                Dir = filename:dirname(PythonScript),
+                case file:list_dir(Dir) of
+                    {ok, Files} ->
+                        io:format("🔍 Directory contents of ~s: ~p~n", [Dir, Files]);
+                    {error, Reason} ->
+                        io:format("❌ Could not list directory ~s: ~p~n", [Dir, Reason])
+                end
+        end
+    end),
+    {noreply, State};
 
 handle_info({socket_connected, ClientSocket, ClientPid}, State) ->
     io:format("🔗 Python client connected to GN ~w via socket~n", [State#state.local_gn_name]),
