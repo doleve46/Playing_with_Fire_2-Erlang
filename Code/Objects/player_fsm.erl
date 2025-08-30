@@ -193,6 +193,7 @@ idle(info, timer_tick, Data) ->
     handle_tick(idle, Data);
 
 idle(cast, {input_command, Command}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received input command ~p**##**~n", [idle, Command]),
     %% return value is determined in the handle function
     handle_input_command(Command, Data);
 
@@ -262,11 +263,12 @@ idle(Type, Event, Data) ->
 waiting_for_response(info, timer_tick, Data) ->
     handle_tick(waiting_for_response, Data);
 
-waiting_for_response(cast, {input_command, _Command}, Data) ->
+waiting_for_response(cast, {input_command, Command}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received input command ~p**##**~n", [waiting_for_response, Command]),
     %% Unexpected input command in waiting_for_response state - ignore and log
     {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
-    io:format("[~2..0B:~2..0B:~2..0B]: Unexpected input command in waiting_for_response state: ~p~n", [Hour, Min, Sec, {input_command, _Command}]),
-    error_logger:info_msg("Unexpected input command in waiting_for_response state: ~p", [{input_command, _Command}]),
+    io:format("[~2..0B:~2..0B:~2..0B]: Unexpected input command in waiting_for_response state: ~p~n", [Hour, Min, Sec, {input_command, Command}]),
+    error_logger:info_msg("Unexpected input command in waiting_for_response state: ~p", [{input_command, Command}]),
     {keep_state, Data};
 
 waiting_for_response(cast, {gn_response, Response}, Data) ->
@@ -333,6 +335,7 @@ immunity_idle(info, timer_tick, Data) ->
     handle_tick(immunity_idle, Data);
 
 immunity_idle(cast, {input_command, Command}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received input command ~p**##**~n", [immunity_idle, Command]),
     %% return value is determined in the handle function
     handle_input_command(Command, Data);
 
@@ -387,6 +390,7 @@ immunity_waiting_for_response(info, timer_tick, Data) ->
     handle_tick(immunity_waiting_for_response, Data);
 
 immunity_waiting_for_response(cast, {input_command, _Command}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received input command ~p**##**~n", [waiting_for_response, _Command]),
     %% Unexpected input command in immunity_waiting_for_response state - ignore and log
     {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
     io:format("[~2..0B:~2..0B:~2..0B]: Unexpected input command in immunity_waiting_for_response state: ~p~n", [Hour, Min, Sec, {input_command, _Command}]),

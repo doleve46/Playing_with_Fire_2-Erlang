@@ -150,6 +150,7 @@ process_input(Input, State) ->
                             {noreply, State};
                         PlayerPid ->
                             player_fsm:input_command(PlayerPid, Command),
+                            io:format("***IO_HANDLER: Sent command ~p to player ~p~n", [Command, PlayerPid]),
                             NewState = State#io_state{waiting_for_ack = true},
                             {noreply, NewState}
                     end
