@@ -117,6 +117,11 @@ COLORS = {
     'STUN_COLOR': (255, 255, 100),
     'FREEZE_COLOR': (150, 200, 255),
     'SPEED_BOOST_COLOR': (255, 255, 100),
+    
+    # Glowing power-ups with animation
+    'POWERUP_GLOW': (255, 255, 150),
+    'POWERUP_CORE': (255, 215, 0),
+    'POWERUP_PULSE': (255, 255, 100),
 
     # Enhanced bomb and explosion colors
     'BOMB_BLACK': (40, 40, 40),
@@ -135,9 +140,10 @@ COLORS = {
     'TIMER_BAR_BG': (50, 50, 50),
     'TIMER_BAR_FILL': (100, 255, 100),
     'TIMER_BAR_DANGER': (255, 100, 100),
+}
     
     # YOU DIED overlay colors
-    'DEATH_OVERLAY_BG': (0, 0, 0, 180),
+    'DEATH_OVERLAY_BG': (0, 0, 0),
     'DEATH_TEXT': (255, 50, 50),
     'DEATH_SHADOW': (100, 0, 0),
 }
