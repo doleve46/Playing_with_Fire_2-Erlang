@@ -133,10 +133,10 @@ COLORS = {
     'EXPLOSION_SPARK': (255, 255, 255),
 
     # Enhanced special effects
-    'SHADOW': (0, 0, 0, 60),
-    'HIGHLIGHT': (255, 255, 255, 100),
-    'SELECTION': (255, 255, 0, 150),
-    'GRID_LINE': (0, 0, 0, 40),
+    ''SHADOW': (0, 0, 0),           # ✅ RGB only
+    'HIGHLIGHT': (255, 255, 255),  # ✅ RGB only  
+    'SELECTION': (255, 255, 0),    # ✅ RGB only
+    'GRID_LINE': (0, 0, 0),        # ✅ RGB only
     'TIMER_BAR_BG': (50, 50, 50),
     'TIMER_BAR_FILL': (100, 255, 100),
     'TIMER_BAR_DANGER': (255, 100, 100),
@@ -1117,7 +1117,7 @@ class GNGameVisualizer:
         """Enhanced brick wall with realistic depth and texture"""
         # Drop shadow
         shadow_surf = pygame.Surface((TILE_SIZE + 6, TILE_SIZE + 6), pygame.SRCALPHA)
-        pygame.draw.rect(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 6, TILE_SIZE + 6))
+        pygame.draw.rect(shadow_surf, (*COLORS['SHADOW'], 60), (0, 0, TILE_SIZE + 6, TILE_SIZE + 6)) # used to be pygame.draw.rect(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 6, TILE_SIZE + 6))
         surface.blit(shadow_surf, (x - 3, y - 3))
 
         rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
@@ -1150,7 +1150,7 @@ class GNGameVisualizer:
         """Enhanced wooden barrel WITHOUT powerup glow"""
         # Drop shadow
         shadow_surf = pygame.Surface((TILE_SIZE + 8, TILE_SIZE + 8), pygame.SRCALPHA)
-        pygame.draw.ellipse(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 8, TILE_SIZE + 8))
+        pygame.draw.ellipse(shadow_surf, (*COLORS['SHADOW'], 60), (0, 0, TILE_SIZE + 8, TILE_SIZE + 8))  # used to be pygame.draw.ellipse(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 6, TILE_SIZE + 6))
         surface.blit(shadow_surf, (x - 4, y - 4))
 
         center_x = x + TILE_SIZE // 2
@@ -1209,7 +1209,7 @@ class GNGameVisualizer:
         """Enhanced metal barrel WITHOUT powerup glow"""
         # Drop shadow
         shadow_surf = pygame.Surface((TILE_SIZE + 8, TILE_SIZE + 8), pygame.SRCALPHA)
-        pygame.draw.ellipse(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 8, TILE_SIZE + 8))
+        pygame.draw.ellipse(shadow_surf, (*COLORS['SHADOW'], 60), (0, 0, TILE_SIZE + 8, TILE_SIZE + 8)) # used to be pygame.draw.ellipse(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 8, TILE_SIZE + 8))
         surface.blit(shadow_surf, (x - 4, y - 4))
 
         center_x = x + TILE_SIZE // 2
@@ -1272,7 +1272,7 @@ class GNGameVisualizer:
         pulse = 0.7 + 0.3 * math.sin(self.time * 6)
         highlight_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
         alpha = int(150 * pulse)
-        pygame.draw.rect(highlight_surf, (*COLORS['SELECTION'][:3], alpha), (0, 0, TILE_SIZE, TILE_SIZE))
+        pygame.draw.rect(highlight_surf, (*COLORS['SELECTION'], alpha), (0, 0, TILE_SIZE, TILE_SIZE))
         pygame.draw.rect(highlight_surf, COLORS['TEXT_GOLD'], (0, 0, TILE_SIZE, TILE_SIZE), 3)
         surface.blit(highlight_surf, (x, y))
 
