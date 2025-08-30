@@ -1863,7 +1863,7 @@ class GNGameVisualizer:
 
         # Create overlay surface
         overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        overlay.fill(COLORS['DEATH_OVERLAY_BG'])
+        overlay.fill((*COLORS['DEATH_OVERLAY_BG'], 180))  # (0, 0, 0, 180)        
         
         # Pulsing effect for dramatic impact
         pulse = 0.8 + 0.2 * math.sin(self.time * 4)
