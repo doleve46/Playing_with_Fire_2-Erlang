@@ -208,6 +208,30 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% Handle messages
+handle_info(start_socket_server, State) ->
+    LocalGN = State#state.local_gn_name,
+    SocketPort = get_gn_socket_port(LocalGN),
+    
+    io:format("🔌 Starting socket server for ~w on port ~w...~n", [LocalGN, SocketPort]),
+    
+    case start_gn_socket_listener(SocketPort) of
+        {ok, {ListenSocket, AcceptorPid}} ->
+            io:format("✅ GN Socket server started successfully on port ~w~n", [SocketPort]),
+            
+            UpdatedState = State#state{
+                listen_socket = ListenSocket,
+                socket_acceptor = AcceptorPid
+            },
+            
+            % Now start the Python client after socket server is ready
+            erlang:send_after(2000, self(), start_python_socket_client),
+            
+            {noreply, UpdatedState};
+        {error, Reason} ->
+            io:format("❌ Failed to start GN socket server: ~p~n", [Reason]),
+            {noreply, State}
+    end;
+
 handle_info(start_python_socket_client, State) ->
     spawn(fun() ->
         {ok, Cwd} = file:get_cwd(),
