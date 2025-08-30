@@ -2200,7 +2200,7 @@ if __name__ == "__main__":
     try:
         print("PYTHON TRYING TO START!!!!!!!!!")
         print("🐍 GN Python Visualizer Starting...")
-        visualizer = GNMapVisualizer()  # No arguments needed!
+        visualizer = GNGameVisualizer()  # No arguments needed!
         
         print("🚀 Initializing GN Socket-based Playing with Fire 2 Visualizer...")
         print(f"🎯 GN ID: {gn_id.upper()}")
