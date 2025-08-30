@@ -491,42 +491,42 @@ class GNGameVisualizer:
         print(f"🔗 Target GN server: localhost:{GN_SOCKET_PORT_BASE + int(gn_id[-1])}")
         print(f"👤 Local player: Player {self.local_player_id}")
 
-def connect_to_server(self) -> bool:
-    """Connect to GN server and start receiving thread"""
-    print(f"🔌 Attempting to connect to GN {self.gn_id} server...")
-    
-    # Try a few times in case server isn't ready yet
-    for attempt in range(5):
-        if self.socket_manager.connect():
-            self.connection_status = "Connected"
-            
-            # Start receiving thread
-            if self.receive_thread and self.receive_thread.is_alive():
-                self.socket_manager.running = False
-                self.receive_thread.join(timeout=1.0)
+    def connect_to_server(self) -> bool:
+        """Connect to GN server and start receiving thread"""
+        print(f"🔌 Attempting to connect to GN {self.gn_id} server...")
+        
+        # Try a few times in case server isn't ready yet
+        for attempt in range(5):
+            if self.socket_manager.connect():
+                self.connection_status = "Connected"
                 
-            self.socket_manager.running = True
-            self.receive_thread = threading.Thread(target=self.socket_manager.receive_messages, daemon=True)
-            self.receive_thread.start()
-            
-            # Send initial connection message
-            self.socket_manager.send_message({
-                "type": "client_connected",
-                "client_type": "gn_python_visualizer",
-                "gn_id": self.gn_id,
-                "local_player": self.local_player_id,
-                "version": "1.0",
-                "timestamp": int(time.time() * 1000)
-            })
-            
-            return True
-        else:
-            print(f"⏳ Attempt {attempt + 1}/5 failed, retrying in 1 second...")
-            time.sleep(1)
-    
-    print("❌ Failed to connect after 5 attempts")
-    self.connection_status = "Connection Failed"
-    return False
+                # Start receiving thread
+                if self.receive_thread and self.receive_thread.is_alive():
+                    self.socket_manager.running = False
+                    self.receive_thread.join(timeout=1.0)
+                    
+                self.socket_manager.running = True
+                self.receive_thread = threading.Thread(target=self.socket_manager.receive_messages, daemon=True)
+                self.receive_thread.start()
+                
+                # Send initial connection message
+                self.socket_manager.send_message({
+                    "type": "client_connected",
+                    "client_type": "gn_python_visualizer",
+                    "gn_id": self.gn_id,
+                    "local_player": self.local_player_id,
+                    "version": "1.0",
+                    "timestamp": int(time.time() * 1000)
+                })
+                
+                return True
+            else:
+                print(f"⏳ Attempt {attempt + 1}/5 failed, retrying in 1 second...")
+                time.sleep(1)
+        
+        print("❌ Failed to connect after 5 attempts")
+        self.connection_status = "Connection Failed"
+        return False
 
     def handle_socket_messages(self):
         """Process all pending socket messages"""
