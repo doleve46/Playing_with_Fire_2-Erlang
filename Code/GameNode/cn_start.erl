@@ -293,7 +293,34 @@ create_tables(GN_node, CN_node, Node_number) ->
 
 %% @doc awaits mnesia table's finalized setup, then inserts the generated map-state to the tables
 initial_mnesia_load(TableNamesList, Map) ->
-    mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % ? timeout is 5000ms for now
+    % Re-verify that all nodes are still running before waiting for tables
+    AllTableNames = lists:flatten(TableNamesList),
+    
+    % Get all connected GN nodes
+    ConnectedGNNodes = [N || N <- nodes(), 
+                            string:str(atom_to_list(N), "GN") > 0],
+    
+    io:format("CN: Re-verifying GN nodes before waiting for tables: ~p~n", [ConnectedGNNodes]),
+    
+    % Check each GN node's Mnesia status
+    lists:foreach(fun(Node) ->
+        case rpc:call(Node, mnesia, system_info, [is_running], 3000) of
+            yes ->
+                io:format("CN: ✅ Node ~p still running Mnesia~n", [Node]);
+            {badrpc, nodedown} ->
+                io:format("CN: ❌ Node ~p is down!~n", [Node]),
+                error({node_down_before_load, Node});
+            {badrpc, timeout} ->
+                io:format("CN: ⏰ Timeout checking node ~p~n", [Node]),
+                error({node_timeout_before_load, Node});
+            Other ->
+                io:format("CN: ❌ Node ~p Mnesia not running: ~p~n", [Node, Other]),
+                error({mnesia_not_running_before_load, Node, Other})
+        end
+    end, ConnectedGNNodes),
+    
+    io:format("CN: All GN nodes verified, waiting for tables: ~p~n", [AllTableNames]),
+    mnesia:wait_for_tables(AllTableNames, 5000), % ? timeout is 5000ms for now
     insert_map_to_database(Map),
     io:format("***Initial map state loaded successfully to mnesia tables~n").
 
