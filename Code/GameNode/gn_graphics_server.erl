@@ -235,10 +235,10 @@ handle_info(start_socket_server, State) ->
 handle_info(start_python_socket_client, State) ->
     spawn(fun() ->
         {ok, Cwd} = file:get_cwd(),
-        io:format("🔍 Current working directory: ~s~n", [Cwd]),
+        % io:format("🔍 Current working directory: ~s~n", [Cwd]),
         
         MapDir = filename:join([Cwd, "src", "Code", "Map"]),
-        io:format("🔍 Calculated map directory: ~s~n", [MapDir]),
+        % io:format("🔍 Calculated map directory: ~s~n", [MapDir]),
         
         % Check if directory exists
         case filelib:is_dir(MapDir) of
@@ -246,14 +246,14 @@ handle_info(start_python_socket_client, State) ->
                 io:format("✅ Directory exists: ~s~n", [MapDir]);
             false ->
                 io:format("❌ Directory does not exist: ~s~n", [MapDir]),
-                io:format("🔍 Let's check what directories DO exist...~n"),
+                % io:format("🔍 Let's check what directories DO exist...~n"),
                 
                 % Check parent directories
                 SrcDir = filename:join([Cwd, "src"]),
                 CodeDir = filename:join([Cwd, "src", "code"]),
                 
-                io:format("   src exists: ~p~n", [filelib:is_dir(SrcDir)]),
-                io:format("   src/code exists: ~p~n", [filelib:is_dir(CodeDir)]),
+                % io:format("   src exists: ~p~n", [filelib:is_dir(SrcDir)]),
+                % io:format("   src/code exists: ~p~n", [filelib:is_dir(CodeDir)]),
                 
                 % Try to list what's actually there
                 case file:list_dir(Cwd) of
@@ -266,8 +266,8 @@ handle_info(start_python_socket_client, State) ->
         NodeIdFile = filename:join([MapDir, "node_id.txt"]),
         GNId = atom_to_list(State#state.local_gn_name),
         
-        io:format("🔍 Target file path: ~s~n", [NodeIdFile]),
-        io:format("🔍 Writing GN ID '~s' to file~n", [GNId]),
+        % io:format("🔍 Target file path: ~s~n", [NodeIdFile]),
+        % io:format("🔍 Writing GN ID '~s' to file~n", [GNId]),
         
         case file:write_file(NodeIdFile, GNId) of
             ok ->
