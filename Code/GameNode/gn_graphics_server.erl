@@ -232,21 +232,6 @@ handle_info(start_python_socket_client, State) ->
     end),
     {noreply, State};
 
-% Add this helper function
-monitor_python_output(Port) ->
-    receive
-        {Port, {data, Data}} ->
-            io:format("🐍 Python output: ~s~n", [Data]),
-            monitor_python_output(Port);
-        {Port, {exit_status, Status}} ->
-            io:format("🐍 Python exited with status: ~p~n", [Status]);
-        Other ->
-            io:format("🐍 Python port message: ~p~n", [Other]),
-            monitor_python_output(Port)
-    after 30000 ->
-        io:format("🐍 Python output monitoring timeout~n")
-    end.
-
 handle_info({socket_connected, ClientSocket, ClientPid}, State) ->
     io:format("🔗 Python client connected to GN ~w via socket~n", [State#state.local_gn_name]),
     NewState = State#state{
@@ -723,5 +708,19 @@ convert_player_safely_gn({PlayerID, Life, Speed, Direction, Movement, MovementTi
         ImmunityTimer,
         RequestTimer
     ];
+
+monitor_python_output(Port) ->
+    receive
+        {Port, {data, Data}} ->
+            io:format("🐍 Python output: ~s~n", [Data]),
+            monitor_python_output(Port);
+        {Port, {exit_status, Status}} ->
+            io:format("🐍 Python exited with status: ~p~n", [Status]);
+        Other ->
+            io:format("🐍 Python port message: ~p~n", [Other]),
+            monitor_python_output(Port)
+    after 30000 ->
+        io:format("🐍 Python output monitoring timeout~n")
+    end.
 convert_player_safely_gn(_) ->
     <<"none">>.
