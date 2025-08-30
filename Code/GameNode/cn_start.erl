@@ -117,7 +117,35 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     end,
     
     mnesia:create_schema(AllNodes), % mnesia start-up requirement
-    rpc:multicall(AllNodes, application, start, [mnesia]), % Starts mnesia on all nodes
+    
+    % Start mnesia on all nodes and verify success
+    io:format("CN: Starting Mnesia on all nodes: ~p~n", [AllNodes]),
+    {Results, BadNodes} = rpc:multicall(AllNodes, application, start, [mnesia]),
+    
+    % Check if all nodes started Mnesia successfully
+    case BadNodes of
+        [] -> 
+            io:format("CN: Mnesia started successfully on all nodes~n"),
+            io:format("CN: Start results: ~p~n", [Results]);
+        _ -> 
+            io:format("CN: ~ts Failed to start Mnesia on nodes: ~p~n", [[16#274C],BadNodes]),
+            error({mnesia_start_failed, BadNodes})
+    end,
+    
+    % Wait a bit for Mnesia to be fully ready on all nodes
+    timer:sleep(2000),
+    
+    % Verify that Mnesia is running on all nodes
+    lists:foreach(fun(Node) ->
+        case rpc:call(Node, mnesia, system_info, [is_running]) of
+            yes ->
+                io:format("CN: ~ts Mnesia confirmed running on ~p~n", [[16#2705],Node]);
+            Other ->
+                io:format("CN: ~ts Mnesia not running on ~p: ~p~n", [[16#274C],Node, Other]),
+                error({mnesia_not_running, Node, Other})
+        end
+    end, AllNodes),
+    
     TableNamesList = lists:map(fun(X) ->
             create_tables(lists:nth(X, ConnectedNodeNames), node(), X)
         end, lists:seq(1,length(ConnectedNodeNames))),
