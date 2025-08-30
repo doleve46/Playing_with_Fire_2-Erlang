@@ -133,7 +133,7 @@ COLORS = {
     'EXPLOSION_SPARK': (255, 255, 255),
 
     # Enhanced special effects
-    ''SHADOW': (0, 0, 0),           # ✅ RGB only
+    'SHADOW': (0, 0, 0),           # ✅ RGB only
     'HIGHLIGHT': (255, 255, 255),  # ✅ RGB only  
     'SELECTION': (255, 255, 0),    # ✅ RGB only
     'GRID_LINE': (0, 0, 0),        # ✅ RGB only
