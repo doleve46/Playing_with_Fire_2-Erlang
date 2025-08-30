@@ -215,16 +215,16 @@ display_response(Response, PlayerNumber) ->
     end.
 
 %% @doc Read keyboard input (non-blocking)
-read_keyboard_input(Key) ->
+read_keyboard_input(Key) -> %% TODO: the input is a binary, not a string
     io:format("**##** READ_INPUT: Received keyboard_input message: ~p~n", [Key]),
     case Key of
-        " " -> space;
-        "w" -> w;
-        "a" -> a;
-        "s" -> s;
-        "d" -> d;
-        "e" -> e;
-        "q" -> q;
+        <<" ">> -> space;
+        <<"w">> -> w;
+        <<"a">> -> a;
+        <<"s">> -> s;
+        <<"d">> -> d;
+        <<"e">> -> e;
+        <<"q">> -> q;
         _ -> 
             io:format("**##** READ_INPUT: Unknown key: ~p~n", [Key]),
             no_input
