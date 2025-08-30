@@ -95,7 +95,9 @@ handle_cast({player_ack, Response}, State) ->
 
 handle_cast(game_start, State) ->
     io:format("**##**IO HANDLER: Game started for player ~p**##**~n", [State#io_state.player_number]),
+    io:format("**##** SPAWNING KEYBOARD LOOP PROCESS**##**~n"),
     spawn_link(fun() -> keyboard_input_loop(self()) end),
+    io:format("**##** STARTING POLL_INPUT TIMER**##**~n"),
     erlang:send_after(?TICK_DELAY, self(), poll_input),
     {noreply, State};
 
@@ -109,6 +111,7 @@ handle_info(poll_input, State) ->
     NewState = case Input of
         no_input -> State;
         Key -> 
+            io:format("**##** POLL_INPUT: Processing key: ~p~n", [Key]),
             case process_input(Key, State) of
                 {noreply, S} -> S;
                 _ -> State
@@ -227,6 +230,7 @@ read_keyboard_input() ->
     % Check if there's a pending input message
     receive
         {keyboard_input, Key} -> 
+            io:format("**##** READ_INPUT: Received keyboard_input message: ~p~n", [Key]),
             case Key of
                 " " -> space;
                 "w" -> w;
@@ -235,7 +239,9 @@ read_keyboard_input() ->
                 "d" -> d;
                 "e" -> b;
                 "q" -> q;
-                _ -> no_input
+                _ -> 
+                    io:format("**##** READ_INPUT: Unknown key: ~p~n", [Key]),
+                    no_input
             end
     after 0 -> 
         no_input  % No input available immediately
@@ -247,11 +253,14 @@ read_keyboard_input() ->
 
 %% @doc Separate process for blocking keyboard input
 keyboard_input_loop(IOHandlerPid) ->
+    io:format("**##** KEYBOARD LOOP: Starting, waiting for input...~n"),
     case io:get_chars('', 1) of
         eof -> 
+            io:format("**##** KEYBOARD LOOP: Got EOF, retrying...~n"),
             timer:sleep(100),  % Wait a bit before trying again
             keyboard_input_loop(IOHandlerPid);
         Key -> 
+            io:format("**##** KEYBOARD LOOP: Got key: ~p, sending to IO handler~n", [Key]),
             IOHandlerPid ! {keyboard_input, Key},
             keyboard_input_loop(IOHandlerPid)
     end.
