@@ -140,11 +140,6 @@ COLORS = {
     'TIMER_BAR_BG': (50, 50, 50),
     'TIMER_BAR_FILL': (100, 255, 100),
     'TIMER_BAR_DANGER': (255, 100, 100),
-    
-    # YOU DIED overlay colors
-    'DEATH_OVERLAY_BG': (0, 0, 0),
-    'DEATH_TEXT': (255, 50, 50),
-    'DEATH_SHADOW': (100, 0, 0),
 }
 
 # Enhanced Data Classes
@@ -1856,48 +1851,41 @@ class GNGameVisualizer:
         self.virtual_surface.blit(self.powerup_panel_surface, (0, POWERUP_OFFSET_Y))
 
     def draw_death_overlay(self):
-        """Draw the YOU DIED overlay when local player dies"""
+        """Draw the YOU DIED overlay - full black screen when local player dies"""
         if not self.local_player_dead:
             return
-
-        # Create overlay surface
-        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((*COLORS['DEATH_OVERLAY_BG'], 180))  # (0, 0, 0, 180)        
+    
+        # Create full black screen overlay that covers everything
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+        overlay.fill((0, 0, 0))  # Pure black background
         
         # Pulsing effect for dramatic impact
         pulse = 0.8 + 0.2 * math.sin(self.time * 4)
         
-        # Main "YOU DIED" text
+        # Main "YOU DIED" text in red
         death_text = "YOU DIED"
-        text_shadow = self.death_font.render(death_text, True, COLORS['DEATH_SHADOW'])
         text_main = self.death_font.render(death_text, True, tuple(int(c * pulse) for c in COLORS['DEATH_TEXT']))
         
         # Center the text
         text_rect = text_main.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2))
-        shadow_rect = text_shadow.get_rect(center=(WINDOW_WIDTH // 2 + 3, WINDOW_HEIGHT // 2 + 3))
         
-        # Multiple shadow layers for depth
-        for offset in [(6, 6), (3, 3), (0, 0)]:
-            if offset == (0, 0):
-                overlay.blit(text_main, text_rect)
-            else:
-                shadow_pos = (text_rect.x + offset[0], text_rect.y + offset[1])
-                overlay.blit(text_shadow, shadow_pos)
-
+        # Draw the text on the black overlay
+        overlay.blit(text_main, text_rect)
+    
         # Additional message
         time_since_death = time.time() - self.death_message_start_time
         sub_text = f"Game continues... ({time_since_death:.1f}s)"
         sub_surface = self.font.render(sub_text, True, COLORS['TEXT_WHITE'])
         sub_rect = sub_surface.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 80))
         overlay.blit(sub_surface, sub_rect)
-
+    
         # Instructions
         instruction_text = "Press ESC to exit"
         instruction_surface = self.small_font.render(instruction_text, True, COLORS['TEXT_GREY'])
         instruction_rect = instruction_surface.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 110))
         overlay.blit(instruction_surface, instruction_rect)
-
-        # Blit overlay to virtual surface
+    
+        # Blit overlay to virtual surface - this will cover everything
         self.virtual_surface.blit(overlay, (0, 0))
 
     # Event Handling
@@ -2043,8 +2031,9 @@ class GNGameVisualizer:
         y_offset = (self.current_height - scaled_surface.get_height()) // 2
         self.screen.blit(scaled_surface, (max(0, x_offset), max(0, y_offset)))
 
-        # Enhanced status display
-        self.draw_enhanced_status_display()
+        # Enhanced status display - but only if player is alive
+        if not self.local_player_dead:
+            self.draw_enhanced_status_display())
 
     def draw_enhanced_status_display(self):
         """Draw enhanced status display"""
