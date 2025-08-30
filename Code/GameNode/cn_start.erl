@@ -152,7 +152,8 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     %% Create map
     Map = map_generator:create_map(),
     %% Load map into mnesia - in parallel processes
-    Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
+    %Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
+    Mnesia_loading_pid = initial_mnesia_load(TableNamesList, Map),
     %% Await GNs decisions to play as bot or human
     io:format("📋 Waiting for player decisions from 4 GN nodes...~n"),
     GNs_decisions = await_players_decisions(4, [], ConnectedNodeNames),
