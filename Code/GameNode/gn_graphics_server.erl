@@ -237,7 +237,7 @@ handle_info(start_python_socket_client, State) ->
         {ok, Cwd} = file:get_cwd(),
         io:format("🔍 Current working directory: ~s~n", [Cwd]),
         
-        MapDir = filename:join([Cwd, "src", "code", "map"]),
+        MapDir = filename:join([Cwd, "src", "Code", "Map"]),
         io:format("🔍 Calculated map directory: ~s~n", [MapDir]),
         
         % Check if directory exists
