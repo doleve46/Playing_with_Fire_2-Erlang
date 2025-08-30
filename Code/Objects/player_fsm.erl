@@ -175,6 +175,10 @@ startup(cast, {killswitch}, Data) ->
     end,
     {stop, killswitch, Data};
 
+%% Handle tick messages in startup state (ignore them)
+startup(info, timer_tick, Data) ->
+    {keep_state, Data};
+
 %% Ignore all other inputs until game starts
 startup(_Type, _Event, Data) ->
     {keep_state, Data}.
@@ -647,13 +651,13 @@ handle_tick(CurrentState, Data) ->
     %% immunity handling - this timer is the only one responsible for state changes
     if
         Updated_immunityTimer == Immunity_cd -> % was at 0, nothing to report
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 0 -> % immunity ended, notify GN
             gen_server:cast(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             case CurrentState of
                 immunity_idle -> {next_state, idle, NewData};
                 immunity_waiting_for_response -> {next_state, waiting_for_response, NewData}
@@ -662,23 +666,23 @@ handle_tick(CurrentState, Data) ->
             gen_server:cast(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 2000 -> % 2sec immunity left, report to GN
             gen_server:cast(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         true -> % still in immunity or was already at 0
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData}
     end.
 
 handle_common_events(Type, Event, Data) ->
     {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
     io:format("[~2..0B:~2..0B:~2..0B]: Unhandled event: ~p~n", [Hour, Min, Sec, {Type, Event}]),
-    error_logger:info_msg("Unhandled event: ~p~n", [{Type, Event}]),
+    error_logger:info_msg("Unhandled event (State|Event): ~p~n", [{Type, Event}]),
     {keep_state, Data}. % default handler for unexpected events
 
 
