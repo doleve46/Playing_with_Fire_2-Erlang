@@ -2171,7 +2171,7 @@ class GNGameVisualizer:
                     print("   Click tiles - Inspect with enhanced details")
                 elif event.key in (pygame.K_w, pygame.K_a, pygame.K_s, pygame.K_d,
                          pygame.K_SPACE, pygame.K_q):
-                    GNSocketManager.send_normal_message(pygame.key.name(event.key))
+                    self.socket_manager.send_normal_message(pygame.key.name(event.key))
             elif event.type == pygame.VIDEORESIZE:
                 self.handle_window_resize(event.w, event.h)
             elif event.type == pygame.MOUSEBUTTONDOWN:
