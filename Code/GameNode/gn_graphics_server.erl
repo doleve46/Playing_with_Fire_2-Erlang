@@ -49,16 +49,20 @@ init([CNNode]) ->
         local_gn_name = LocalGN,
         local_player_ids = LocalPlayerIDs
     },
-     %% trap exits
+    
+    %% trap exits
     process_flag(trap_exit, true),
     
-    % Monitors ALL nodes in the cluster for connection up/down (message of the form {nodeup, Node} | {nodedown, Node}
+    % Monitor nodes for CN reconnection scenarios
     net_kernel:monitor_nodes(true),
     
     % Create Python port after a short delay
     erlang:send_after(50, self(), create_python_port),
     
-    io:format("✅ Enhanced GN Graphics Server initialized (waiting for CN updates)~n"),
+    % Request full map from CN immediately (assuming CN is up)
+    erlang:send_after(100, self(), request_cn_connection),
+    
+    io:format("✅ Enhanced GN Graphics Server initialized~n"),
     {ok, State}.
 
 %% Handle synchronous calls
@@ -85,92 +89,48 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 %% Handle asynchronous casts
-handle_cast({map_update, EnhancedMapState}, State) ->
+handle_cast({map_update, CompleteMapState}, State) ->
     io:format("📡 GN Graphics Server received map update from CN~n"),
-    % Received enhanced map update from CN graphics server
+    
+    % Store the complete map state locally (resetting our state)
     CurrentTime = erlang:system_time(millisecond),
     
-    % Handle enhanced format with timing, death, and explosion information
-    {ActualMapState, DeadPlayers, BackendTiming, ActiveExplosions} = case EnhancedMapState of
-        #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing, active_explosions := Explosions} ->
-            % Full enhanced format with explosions
-            ExplosionCount = maps:size(Explosions),
-            io:format("🗺️ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
-                      [State#state.update_counter + 1, ExplosionCount]),
-            
-            % Check for newly dead players
-            NewDeaths = maps:filter(fun(PlayerID, _DeathInfo) ->
-                not maps:is_key(PlayerID, State#state.dead_players)
-            end, DeadPlayersMap),
-            
-            if map_size(NewDeaths) > 0 ->
-                NewDeathList = maps:to_list(NewDeaths),
-                io:format("💀 New deaths detected by GN: ~p~n", [NewDeathList]),
-                
-                % Check if any deaths are for local players
-                lists:foreach(fun({PlayerID, {DeathTime, _LastState, LocalGNAtom}}) ->
-                    if LocalGNAtom =:= State#state.local_gn_name ->
-                        io:format("🩸 LOCAL PLAYER ~w DIED on this GN! (Death time: ~w)~n", [PlayerID, DeathTime]);
-                    true ->
-                        io:format("💀 Remote player ~w died on ~w~n", [PlayerID, LocalGNAtom])
-                    end
-                end, NewDeathList);
-            true -> ok
-            end,
-            
-            % Log new explosions
-            PreviousExplosions = maps:size(State#state.active_explosions),
-            if ExplosionCount > PreviousExplosions ->
-                NewExplosionCount = ExplosionCount - PreviousExplosions,
-                io:format("💥 ~w new explosions received from CN~n", [NewExplosionCount]);
-            ExplosionCount < PreviousExplosions ->
-                ExpiredCount = PreviousExplosions - ExplosionCount,
-                io:format("💨 ~w explosions expired~n", [ExpiredCount]);
-            true -> ok
-            end,
-            
-            {GridData, DeadPlayersMap, Timing, Explosions};
-            
-        #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing} ->
-            % Enhanced format without explosions
-            io:format("🗺️ GN received enhanced map update from CN (#~w) with timing & death info~n", 
-                      [State#state.update_counter + 1]),
-            {GridData, DeadPlayersMap, Timing, State#state.active_explosions};
-            
-        #{map := GridData, dead_players := DeadPlayersMap} ->
-            % Format without backend timing or explosions
-            io:format("🗺️ GN received map update from CN (#~w) with death info~n", 
-                      [State#state.update_counter + 1]),
-            {GridData, DeadPlayersMap, State#state.backend_timing, State#state.active_explosions};
-            
+    % Extract components from the complete map state
+    {GridData, DeadPlayers, BackendTiming, ActiveExplosions} = case CompleteMapState of
+        #{map := Grid, dead_players := Deaths, backend_timing := Timing, active_explosions := Explosions} ->
+            {Grid, Deaths, Timing, Explosions};
+        #{map := Grid, dead_players := Deaths, backend_timing := Timing} ->
+            {Grid, Deaths, Timing, #{}};
+        #{map := Grid, dead_players := Deaths} ->
+            {Grid, Deaths, #{}, #{}};
         _ ->
-            % Old format - just the grid
-            io:format("🗺️ GN received basic map update from CN (#~w)~n", 
-                      [State#state.update_counter + 1]),
-            {EnhancedMapState, State#state.dead_players, State#state.backend_timing, State#state.active_explosions}
+            % Fallback for unexpected format
+            {CompleteMapState, #{}, #{}, #{}}
     end,
     
-    % Create enhanced data for local Python visualizer with GN-specific information
-    LocalEnhancedMapData = #{
-        map => ActualMapState,
-        dead_players => DeadPlayers,
-        update_time => CurrentTime,
-        local_gn => State#state.local_gn_name,
-        local_players => State#state.local_player_ids,
-        backend_timing => BackendTiming,
-        active_explosions => ActiveExplosions
-    },
-    
-    send_enhanced_map_to_python(State#state.python_port, LocalEnhancedMapData),
-    
+    % Update local state with complete new state
     NewState = State#state{
-        current_map_state = LocalEnhancedMapData,
+        current_map_state = CompleteMapState,
         dead_players = DeadPlayers,
         backend_timing = BackendTiming,
         active_explosions = ActiveExplosions,
         update_counter = State#state.update_counter + 1,
         last_update_time = CurrentTime
     },
+    
+    % Convert to JSON and send to Python visualizer
+    send_enhanced_map_to_python(State#state.python_port, CompleteMapState),
+    
+    % Log updates occasionally
+    case NewState#state.update_counter rem 20 == 0 of
+        true ->
+            ExplosionCount = maps:size(ActiveExplosions),
+            DeathCount = maps:size(DeadPlayers),
+            io:format("🔄 GN processed update #~w (~w explosions, ~w dead players)~n", 
+                      [NewState#state.update_counter, ExplosionCount, DeathCount]);
+        false -> ok
+    end,
+    
     {noreply, NewState};
 
 % Handle movement confirmations from CN
@@ -242,14 +202,49 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
     
     {noreply, State#state{python_port = NewPort}};
 
+handle_info(request_cn_connection, State) ->
+    io:format("🔌 Requesting full map connection from CN graphics server...~n"),
+    try
+        % Request full map from CN graphics server
+        case cn_server_graphics:request_full_map(node(), self()) of
+            FullMapState when is_map(FullMapState) ->
+                io:format("✅ Received full map state from CN graphics server~n"),
+                
+                % Reset local state completely and store new state
+                NewState = State#state{
+                    current_map_state = FullMapState,
+                    dead_players = maps:get(dead_players, FullMapState, #{}),
+                    backend_timing = maps:get(backend_timing, FullMapState, #{}),
+                    active_explosions = maps:get(active_explosions, FullMapState, #{}),
+                    update_counter = 0,
+                    last_update_time = erlang:system_time(millisecond)
+                },
+                
+                % Send the full map to Python visualizer as JSON
+                send_enhanced_map_to_python(State#state.python_port, FullMapState),
+                io:format("📡 Full map state sent to local Python visualizer~n"),
+                
+                {noreply, NewState};
+            Error ->
+                io:format("❌ Failed to get full map from CN: ~p, retrying in 2 seconds...~n", [Error]),
+                erlang:send_after(2000, self(), request_cn_connection),
+                {noreply, State}
+        end
+    catch
+        _:RequestError ->
+            io:format("❌ Error requesting full map from CN: ~p, retrying in 2 seconds...~n", [RequestError]),
+            erlang:send_after(2000, self(), request_cn_connection),
+            {noreply, State}
+    end;
+
 handle_info({nodedown, Node}, State) when Node == State#state.cn_node ->
     io:format("⚠️ CN node ~w went down~n", [Node]),
-    %% TODO: show something on screen for this time? add a variable in the state record that stops all timers?
     {noreply, State};
 
 handle_info({nodeup, Node}, State) when Node == State#state.cn_node ->
-    io:format("✅ CN node ~w came back up~n", [Node]),
-    %% TODO: going back up mechanism - should request a full map, return all timers back to normal.
+    io:format("✅ CN node ~w came back up, requesting reconnection...~n", [Node]),
+    % Request full map to reconnect
+    erlang:send_after(100, self(), request_cn_connection),
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -333,13 +328,15 @@ send_enhanced_map_to_python(undefined, _MapState) ->
 
 send_enhanced_map_to_python(Port, MapState) ->
     try
-        % Send enhanced map state as binary term
-        MapBinary = term_to_binary(MapState),
-        port_command(Port, MapBinary),
+        % Convert Erlang map to JSON using jiffy
+        JsonData = jiffy:encode(MapState),
+        
+        % Send JSON data to Python port
+        port_command(Port, JsonData),
         
         % Log details about what we're sending (less frequent to reduce spam)
         case MapState of
-            #{dead_players := DeadPlayers, local_gn := LocalGN, backend_timing := Timing, active_explosions := Explosions} ->
+            #{dead_players := DeadPlayers, backend_timing := Timing, active_explosions := Explosions} ->
                 DeadCount = maps:size(DeadPlayers),
                 ExplosionCount = maps:size(Explosions),
                 TimingKeys = maps:keys(Timing),
@@ -347,8 +344,8 @@ send_enhanced_map_to_python(Port, MapState) ->
                 case get(log_counter) of
                     undefined -> put(log_counter, 1);
                     Counter when Counter >= 40 ->
-                        io:format("📤 Enhanced map forwarded to Python visualizer (~w, dead: ~w, explosions: ~w, timing: ~w)~n", 
-                                 [LocalGN, DeadCount, ExplosionCount, TimingKeys]),
+                        io:format("📤 JSON map sent to Python visualizer (dead: ~w, explosions: ~w, timing: ~w)~n", 
+                                 [DeadCount, ExplosionCount, TimingKeys]),
                         put(log_counter, 1);
                     Counter ->
                         put(log_counter, Counter + 1)

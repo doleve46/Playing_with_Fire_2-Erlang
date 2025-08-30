@@ -10,7 +10,7 @@
 %% TODO: Need to verify that a python port is created through cn_graphics and gn_graphics, and is responsive and works as intended.
 %%% ------------------------------------------------------------------------------------------------------
 %% API
--export([start_link/1, get_current_map/0, show_explosion/1]).
+-export([start_link/1, get_current_map/0, show_explosion/1, request_full_map/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -23,18 +23,19 @@
 -define(EXPLOSION_DISPLAY_TIME, 1000). % Show explosions for 1 second
 
 -record(state, {
-    gn_graphics_servers = [],     % List of {Node, Pid} for GN graphics servers
-    python_port,                  % Port to Python visualizer
-    current_map_state,            % Current unified map state
-    gn_nodes,                     % List of GN nodes
-    subscribed_tables = [],       % List of tables subscribed to
-    update_counter = 0,           % Counter for updates (debugging)
-    movement_states = #{},        % Track active player movements with real timing
-    bomb_movements = #{},         % Track active bomb movements
-    dead_players = #{},           % Track recently deceased players: PlayerID => {DeathTime, LastKnownState, LocalGN}
-    last_known_players = #{},     % Track last known player states for death detection
-    timer_subscribers = #{},      % Track timer update subscriptions
-    active_explosions = #{}       % Track active explosions: Coord => ExpiryTime
+    gn_graphics_servers = #{},        % Map of Node => {Pid, MonitorRef} for connected GN graphics servers
+    python_port,                      % Port to Python visualizer
+    current_map_state,                % Current unified map state
+    gn_nodes,                         % List of GN nodes (kept for reference)
+    subscribed_tables = [],           % List of tables subscribed to
+    update_counter = 0,               % Counter for updates (debugging)
+    movement_states = #{},            % Track active player movements with real timing
+    bomb_movements = #{},             % Track active bomb movements
+    dead_players = #{},               % Track recently deceased players: PlayerID => {DeathTime, LastKnownState, LocalGN}
+    last_known_players = #{},         % Track last known player states for death detection
+    timer_subscribers = #{},          % Track timer update subscriptions
+    active_explosions = #{},          % Track active explosions: Coord => ExpiryTime
+    periodic_updates_active = false   % Whether periodic updates are running
 }).
 
 %%%===================================================================
@@ -62,6 +63,11 @@ show_explosion(Coordinates) ->
     gen_server:cast(?MODULE, {add_explosions_direct, Coordinates}),
     ok.
 
+%% API function for GN graphics servers to request full map and register
+-spec request_full_map(node(), pid()) -> term().
+request_full_map(GNNode, GNPid) ->
+    gen_server:call({global, ?MODULE}, {request_full_map, GNNode, GNPid}).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -76,14 +82,8 @@ init([GNNodes]) ->
     % Set up mnesia subscriptions
     erlang:send(self(), setup_subscriptions),
    
-    % Monitoring of gn graphics servers
-    erlang:send_after(?TICK_DELAY, self(), monitor_gn_graphics_servers),
-   
     % Create Python port
     erlang:send(self(), create_python_port),
-   
-    % Start periodic updates (faster for better timer sync)
-    erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
    
     % Clean up dead players and explosions periodically
     erlang:send_after(5000, self(), cleanup_expired_elements),
@@ -91,12 +91,48 @@ init([GNNodes]) ->
     %% trap exits
     process_flag(trap_exit, true),
     
-    io:format("✅ Enhanced CN Graphics Server initialized~n"),
+    io:format("✅ Enhanced CN Graphics Server initialized (waiting for GN connections)~n"),
     {ok, State}.
 
 %% Handle synchronous calls
 handle_call(get_current_map, _From, State) ->
     {reply, State#state.current_map_state, State};
+
+handle_call({request_full_map, GNNode, GNPid}, _From, State) ->
+    io:format("🔌 GN graphics server from ~w requesting full map connection~n", [GNNode]),
+    
+    % Create monitor reference for the GN process
+    MonitorRef = erlang:monitor(process, GNPid),
+    
+    % Add GN to connected servers map
+    NewGNServers = maps:put(GNNode, {GNPid, MonitorRef}, State#state.gn_graphics_servers),
+    ConnectedCount = maps:size(NewGNServers),
+    
+    io:format("✅ GN ~w connected! (~w/4 GNs connected)~n", [GNNode, ConnectedCount]),
+    
+    % Create current map state if not available
+    CurrentMapState = case State#state.current_map_state of
+        undefined -> create_enhanced_map_state(State);
+        ExistingState -> ExistingState
+    end,
+    
+    % Update state with new GN and current map
+    UpdatedState = State#state{
+        gn_graphics_servers = NewGNServers,
+        current_map_state = CurrentMapState
+    },
+    
+    % Check if we should start periodic updates (when 4 GNs are connected)
+    FinalState = case ConnectedCount >= 4 andalso not State#state.periodic_updates_active of
+        true ->
+            io:format("🚀 All 4 GNs connected! Starting periodic updates...~n"),
+            erlang:send_after(?TICK_DELAY, self(), periodic_update),
+            UpdatedState#state{periodic_updates_active = true};
+        false ->
+            UpdatedState
+    end,
+    
+    {reply, CurrentMapState, FinalState};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
@@ -144,15 +180,8 @@ handle_info(setup_subscriptions, State) ->
             {noreply, State}
     end;
 
-handle_info(monitor_gn_graphics_servers, State) ->
-    io:format("🚀 Attempting to monitor all GN graphics servers...~n"),
-    ReferencesList = monitor_gn_graphics_servers(State#state.gn_nodes),
-    io:format("✅ Monitoring was successful!: ~p~n", [length(ReferencesList)]),
-    {noreply, State#state{gn_graphics_servers = ReferencesList}};
-
 handle_info(create_python_port, State) ->
     io:format("🐍 Creating enhanced Python port...~n"),
-    io:format("🔍 Graphics server received create_python_port message~n"),
     Port = create_python_visualizer_port(),
     % Create initial enhanced map state
     InitialMapState = create_enhanced_map_state(State),
@@ -160,9 +189,9 @@ handle_info(create_python_port, State) ->
         python_port = Port,
         current_map_state = InitialMapState
     },
-    % Send initial state
-    send_map_to_all_targets(UpdatedState),
-    io:format("✅ Enhanced Python port created and initial map sent~n"),
+    % Send initial state only to Python (GN servers not connected yet)
+    send_enhanced_map_to_python(UpdatedState),
+    io:format("✅ Enhanced Python port created and initial map sent to Python~n"),
     %% Send ready message to cn_server
     case global:whereis_name(cn_server) of
         Pid when is_pid(Pid) ->
@@ -174,45 +203,48 @@ handle_info(create_python_port, State) ->
     {noreply, UpdatedState};
 
 handle_info(periodic_update, State) ->
-    CurrentTime = erlang:system_time(millisecond),
-    
-    % Clean up expired explosions
-    NewExplosions = maps:filter(fun(_Coord, ExpiryTime) ->
-        CurrentTime < ExpiryTime
-    end, State#state.active_explosions),
-    
-    CleanedExplosions = maps:size(State#state.active_explosions) - maps:size(NewExplosions),
-    if CleanedExplosions > 0 ->
-        io:format("💨 Cleaned up ~w expired explosions~n", [CleanedExplosions]);
-    true -> ok
-    end,
-    
-    % Enhanced periodic update every TICK_DELAY milliseconds for better timer sync
-    NewMapState = create_enhanced_map_state(State#state{active_explosions = NewExplosions}),
-    UpdatedState = State#state{
-        current_map_state = NewMapState,
-        update_counter = State#state.update_counter + 1,
-        active_explosions = NewExplosions
-    },
-   
-    % Send more frequently for real-time timer updates
-    ShouldSend = (NewMapState =/= State#state.current_map_state) orelse
-                 (State#state.update_counter rem 2 == 0), % Every 2nd update = every 100ms
-   
-    if ShouldSend ->
-        send_map_to_all_targets(UpdatedState),
-        % Only log every 20th update to reduce spam
-        case State#state.update_counter rem 20 == 0 of
-            true ->
-                io:format("🔄 Enhanced periodic update #~w sent~n", [UpdatedState#state.update_counter]);
-            false -> ok
-        end;
-    true -> ok
-    end,
-   
-    % Schedule next update using actual backend timing
-    erlang:send_after(?TICK_DELAY, self(), periodic_update),
-    {noreply, UpdatedState};
+    % Only process periodic updates if they are active
+    case State#state.periodic_updates_active of
+        false ->
+            % Periodic updates not started yet, skip this update
+            {noreply, State};
+        true ->
+            CurrentTime = erlang:system_time(millisecond),
+            
+            % Clean up expired explosions
+            NewExplosions = maps:filter(fun(_Coord, ExpiryTime) ->
+                CurrentTime < ExpiryTime
+            end, State#state.active_explosions),
+            
+            CleanedExplosions = maps:size(State#state.active_explosions) - maps:size(NewExplosions),
+            if CleanedExplosions > 0 ->
+                io:format("💨 Cleaned up ~w expired explosions~n", [CleanedExplosions]);
+            true -> ok
+            end,
+            
+            % Enhanced periodic update every TICK_DELAY milliseconds for better timer sync
+            NewMapState = create_enhanced_map_state(State#state{active_explosions = NewExplosions}),
+            UpdatedState = State#state{
+                current_map_state = NewMapState,
+                update_counter = State#state.update_counter + 1,
+                active_explosions = NewExplosions
+            },
+           
+            % Send to all connected GN graphics servers
+            send_map_to_all_targets(UpdatedState),
+            % Only log every 20th update to reduce spam
+            case State#state.update_counter rem 20 == 0 of
+                true ->
+                    ConnectedCount = maps:size(UpdatedState#state.gn_graphics_servers),
+                    io:format("🔄 Enhanced periodic update #~w sent to ~w GN servers~n", 
+                              [UpdatedState#state.update_counter, ConnectedCount]);
+                false -> ok
+            end,
+           
+            % Schedule next update using actual backend timing
+            erlang:send_after(?TICK_DELAY, self(), periodic_update),
+            {noreply, UpdatedState}
+    end;
 
 handle_info(cleanup_expired_elements, State) ->
     CurrentTime = erlang:system_time(millisecond),
@@ -311,10 +343,43 @@ handle_info({Port, closed}, State) when Port == State#state.python_port ->
     NewPort = create_python_visualizer_port(),
     {noreply, State#state{python_port = NewPort}};
 
-handle_info({'DOWN', MonitorRef, process, RemotePid, noconnection}, State) ->
-    %% TODO: deal with GN graphics servers disconnecting.
-    io:format("🔍 Received DOWN message for disconnected GN graphics server~n"),
-    {noreply, State};
+handle_info({'DOWN', MonitorRef, process, _RemotePid, Reason}, State) ->
+    % Find which GN disconnected by matching the monitor reference
+    DisconnectedGN = maps:fold(fun(Node, {_Pid, MRef}, Acc) ->
+        case MRef == MonitorRef of
+            true -> {found, Node};
+            false -> Acc
+        end
+    end, not_found, State#state.gn_graphics_servers),
+    
+    case DisconnectedGN of
+        {found, GNNode} ->
+            % Remove the disconnected GN from our map
+            NewGNServers = maps:remove(GNNode, State#state.gn_graphics_servers),
+            ConnectedCount = maps:size(NewGNServers),
+            
+            io:format("⚠️ GN graphics server ~w disconnected (reason: ~p), ~w/4 GNs remaining~n", 
+                      [GNNode, Reason, ConnectedCount]),
+            
+            % Stop periodic updates if we have less than 4 GNs
+            NewPeriodicStatus = case ConnectedCount < 4 of
+                true when State#state.periodic_updates_active ->
+                    io:format("⏸️ Less than 4 GNs connected, pausing periodic updates~n"),
+                    false;
+                _ ->
+                    State#state.periodic_updates_active
+            end,
+            
+            UpdatedState = State#state{
+                gn_graphics_servers = NewGNServers,
+                periodic_updates_active = NewPeriodicStatus
+            },
+            
+            {noreply, UpdatedState};
+        not_found ->
+            io:format("🔍 Received DOWN message for unknown process (monitor ref: ~p)~n", [MonitorRef]),
+            {noreply, State}
+    end;
 
 handle_info(Info, State) ->
     io:format("ℹ️ Unexpected message: ~p~n", [Info]),
@@ -812,31 +877,6 @@ setup_mnesia_subscriptions(Tables) ->
         end
     end, [], Tables).
 
-%% Monitor enhanced graphics servers on all GN nodes
-monitor_gn_graphics_servers(GNNodes)->
-    % First, get the PIDs of the GN graphics servers
-    GNServerPids = lists:foldl(fun(Node, Acc) ->
-        case rpc:call(Node, erlang, whereis, [gn_graphics_server]) of
-            Pid when is_pid(Pid) ->
-                io:format("✅ Found GN graphics server on ~w: ~p~n", [Node, Pid]),
-                [{Node, Pid} | Acc];
-            undefined ->
-                io:format("⚠️ GN graphics server not found on ~w~n", [Node]),
-                Acc;
-            {badrpc, Reason} ->
-                io:format("❌ RPC failed for ~w: ~p~n", [Node, Reason]),
-                Acc
-        end
-    end, [], GNNodes),
-    
-    % Monitor the found processes
-    lists:foreach(fun({Node, Pid}) ->
-        Ref = erlang:monitor(process, Pid),
-        io:format("🔍 Monitoring GN graphics server ~p on ~w~n", [Pid, Node])
-    end, GNServerPids),
-    
-    GNServerPids.
-
 %% Create enhanced Python visualizer port
 create_python_visualizer_port() ->
     try
@@ -977,15 +1017,14 @@ send_enhanced_map_to_python(State) ->
 
 %% Send enhanced map to all GN graphics servers
 send_enhanced_map_to_gn_servers(State) ->
-    GNCount = length(State#state.gn_graphics_servers),
+    GNCount = maps:size(State#state.gn_graphics_servers),
     io:format("🔄 CN attempting to send map update to ~w GN graphics servers~n", [GNCount]),
-    lists:foreach(fun({Node, Pid}) ->
+    maps:fold(fun(Node, {Pid, _MonitorRef}, _Acc) ->
         case is_pid(Pid) of
             true ->
                 try
                     % Send enhanced map state with full backend information
                     gen_server:cast(Pid, {map_update, State#state.current_map_state}),
-                    io:format("📡 Map update sent to GN server on ~w~n", [Node]),
                     case State#state.update_counter rem 40 == 0 of  % Log every 2 seconds
                         true ->
                             ExplosionCount = maps:size(State#state.active_explosions),
@@ -994,9 +1033,9 @@ send_enhanced_map_to_gn_servers(State) ->
                     end
                 catch
                     _:Error ->
-                        io:format("❌ Error sending enhanced data to GN server on ~w: ~p~n", [Node, Error])
+                        io:format("❌ Error sending enhanced data to GN server on ~w: ~p (will be handled by monitor)~n", [Node, Error])
                 end;
             false ->
                 io:format("⚠️ Invalid PID for GN server on ~w: ~p~n", [Node, Pid])
         end
-    end, State#state.gn_graphics_servers).
+    end, ok, State#state.gn_graphics_servers).
