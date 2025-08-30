@@ -253,6 +253,7 @@ read_keyboard_input() ->
 %%%===================================================================
 keyboard_input_handler(IOHandlerPid) ->
     Port = open_port({spawn, "python3 ./keyhelper.py"}, [binary, exit_status]),
+    io:format("**** KEYBOARD LOOP: Started key helper port ~p~n", [Port]),
     keyboard_input_loop(IOHandlerPid, Port).
 
 keyboard_input_loop(IOHandlerPid, Port) ->
