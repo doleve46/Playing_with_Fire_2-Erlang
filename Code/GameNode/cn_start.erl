@@ -151,23 +151,14 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
         end, lists:seq(1,length(ConnectedNodeNames))),
     %% Create map
     Map = map_generator:create_map(),
-    %% Load map into mnesia - in parallel processes
+    %% Load map into mnesia - synchronously
     %Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
-    Mnesia_loading_pid = initial_mnesia_load(TableNamesList, Map),
+    ok = initial_mnesia_load(TableNamesList, Map),
     %% Await GNs decisions to play as bot or human
     io:format("📋 Waiting for player decisions from 4 GN nodes...~n"),
     GNs_decisions = await_players_decisions(4, [], ConnectedNodeNames),
     io:format("✅ GNs decisions received: ~p~n", [GNs_decisions]),
-    %% Verify mnesia loading process has finished
-    case erlang:is_process_alive(Mnesia_loading_pid) of
-        true ->
-            io:format("Mnesia loading process still alive, wait 5 more seconds...~n"),
-            timer:sleep(5000),
-            false = erlang:is_process_alive(Mnesia_loading_pid), % crash if not ready
-            io:format("Mnesia loading process finished.~n");
-        false ->
-            io:format("Mnesia loading process already finished.~n")
-    end,
+    io:format("Mnesia loading completed successfully.~n"),
     %% Open cn_server and cn_graphics_server
     io:format("🚀 Starting CN server and CN graphics server...~n"),
     {ok, _Pid_cn_server} = cn_server:start_link(GNs_decisions),
