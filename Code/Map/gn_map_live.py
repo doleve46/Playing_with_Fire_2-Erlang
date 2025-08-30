@@ -2033,7 +2033,7 @@ class GNGameVisualizer:
 
         # Enhanced status display - but only if player is alive
         if not self.local_player_dead:
-            self.draw_enhanced_status_display())
+            self.draw_enhanced_status_display()
 
     def draw_enhanced_status_display(self):
         """Draw enhanced status display"""
