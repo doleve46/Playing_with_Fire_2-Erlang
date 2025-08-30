@@ -211,6 +211,34 @@ class GNSocketManager:
         self.connection_attempts = 0
         self.last_connect_time = 0
 
+def read_node_id():
+    """Read the GN ID from node_id.txt file"""
+    try:
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        node_id_file = os.path.join(script_dir, "node_id.txt")
+        
+        print(f"🔍 Looking for node ID file: {node_id_file}")
+        
+        with open(node_id_file, 'r') as f:
+            gn_id = f.read().strip()
+            
+        print(f"✅ Read GN ID from file: '{gn_id}'")
+        
+        # Validate format
+        if not gn_id.startswith('gn') or len(gn_id) != 3:
+            raise ValueError(f"Invalid GN ID format: '{gn_id}'")
+            
+        return gn_id
+        
+    except FileNotFoundError:
+        print("❌ ERROR: node_id.txt file not found!")
+        print("Make sure the Erlang GN graphics server creates this file first.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ ERROR reading node ID file: {e}")
+        sys.exit(1)
+    
     def connect(self) -> bool:
         """Establish connection to GN server"""
         try:
@@ -355,7 +383,14 @@ class GNSocketManager:
 
 class GNGameVisualizer:
     def __init__(self, gn_id: str):
-        self.gn_id = gn_id
+        # Read GN ID from file instead of command line
+        self.gn_id = read_node_id()
+        self.gn_number = int(self.gn_id[-1])  # Extract number from gn1, gn2, etc.
+        self.host = 'localhost'
+        self.port = GN_SOCKET_PORT_BASE + self.gn_number
+        
+        print(f"🎮 GN Map Visualizer starting for {self.gn_id}")
+        print(f"🔌 Will connect to {self.host}:{self.port}")
         self.local_player_id = int(gn_id[-1])  # GN1 -> Player 1, etc.
         
         # Enhanced window setup
@@ -2163,8 +2198,9 @@ def determine_gn_id():
 # Main execution
 if __name__ == "__main__":
     try:
-        # Determine which GN this visualizer belongs to
-        gn_id = determine_gn_id()
+        print("PYTHON TRYING TO START!!!!!!!!!")
+        print("🐍 GN Python Visualizer Starting...")
+        visualizer = GNMapVisualizer()  # No arguments needed!
         
         print("🚀 Initializing GN Socket-based Playing with Fire 2 Visualizer...")
         print(f"🎯 GN ID: {gn_id.upper()}")
