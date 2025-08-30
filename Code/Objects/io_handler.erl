@@ -28,7 +28,7 @@
     player_number,           % Player number (1-4)
     waiting_for_ack = false, % Waiting for player response
     input_buffer = [],       % Buffered inputs while waiting
-    keyboard_mode = true     % true for keyboard, false for bot
+    keyboard_pid = none      % holds pid for the keyboard process (the one comm. with the Python port)
 }).
 
 %%%===================================================================
@@ -40,11 +40,6 @@ start_link(PlayerNumber) ->
     ServerName = list_to_atom("io_handler_" ++ integer_to_list(PlayerNumber)),
     gen_server:start_link({local, ServerName}, ?MODULE, 
         [PlayerNumber], []).  % true = keyboard mode for human players
-
-%% @doc Send input (for testing)
-send_input(PlayerNumber, Input) ->
-    ServerName = list_to_atom("io_handler_" ++ integer_to_list(PlayerNumber)),
-    gen_server:cast(ServerName, {external_input, Input}).
 
 %% @doc Set the player PID after player FSM starts
 set_player_pid(IOHandlerPid, PlayerPid) ->
@@ -96,10 +91,10 @@ handle_cast({player_ack, Response}, State) ->
 handle_cast(game_start, State) ->
     io:format("**##**IO HANDLER: Game started for player ~p**##**~n", [State#io_state.player_number]),
     io:format("**##** SPAWNING KEYBOARD LOOP PROCESS**##**~n"),
-    spawn_link(fun() -> keyboard_input_loop(self()) end),
+    NewState = State#io_state{keyboard_pid = spawn_link(fun() -> keyboard_input_handler(self()) end)},
     io:format("**##** STARTING POLL_INPUT TIMER**##**~n"),
     erlang:send_after(?TICK_DELAY, self(), poll_input),
-    {noreply, State};
+    {noreply, NewState};
 
 handle_cast(_Request, State) ->
     {noreply, State}.
@@ -125,7 +120,8 @@ handle_info(poll_input, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, State) ->
+    State#io_state.keyboard_pid ! stop,
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -237,7 +233,7 @@ read_keyboard_input() ->
                 "a" -> a;
                 "s" -> s;
                 "d" -> d;
-                "e" -> b;
+                "e" -> e;
                 "q" -> q;
                 _ -> 
                     io:format("**##** READ_INPUT: Unknown key: ~p~n", [Key]),
@@ -251,16 +247,30 @@ read_keyboard_input() ->
 %%% Internal functions
 %%%===================================================================
 
-%% @doc Separate process for blocking keyboard input
-keyboard_input_loop(IOHandlerPid) ->
-    io:format("**##** KEYBOARD LOOP: Starting, waiting for input...~n"),
-    case io:get_chars('', 1) of
-        eof -> 
-            io:format("**##** KEYBOARD LOOP: Got EOF, retrying...~n"),
-            timer:sleep(100),  % Wait a bit before trying again
-            keyboard_input_loop(IOHandlerPid);
-        Key -> 
-            io:format("**##** KEYBOARD LOOP: Got key: ~p, sending to IO handler~n", [Key]),
-            IOHandlerPid ! {keyboard_input, Key},
-            keyboard_input_loop(IOHandlerPid)
+
+%%%===================================================================
+%%% Keyboard control - python-based input port
+%%%===================================================================
+keyboard_input_handler(IOHandlerPid) ->
+    Port = open_port({spawn, "python3 ./keyhelper.py"}, [binary, exit_status]),
+    keyboard_input_loop(IOHandlerPid, Port).
+
+keyboard_input_loop(IOHandlerPid, Port) ->
+    io:format("**** KEYBOARD LOOP: Starting, waiting for input...~n"),
+    receive
+        {Port, {data, <<Key>>}} ->
+            io:format("**** KEYBOARD LOOP: Received keyboard input: ~p~n", [Key]),
+            % Convert binary to string
+            KeyString = binary_to_list(<<Key>>),
+            IOHandlerPid ! {keyboard_input, KeyString},
+            time:sleep(100), % to not overwhelm from consistent pressing, wait between transmission to IOHandler
+            keyboard_input_loop(IOHandlerPid, Port);
+        {Port, {exit_status, Status}} ->
+            io:format("**** KEYBOARD LOOP: Key helper exited with status: ~p~n", [Status]),
+            ok;
+        stop -> % TODO: should be used when ending the game? 
+            io:format("**** KEYBOARD LOOP: Stopping...~n"),
+            port_close(Port),
+            io:format("**** KEYBOARD LOOP: Stopped.~n"),
+            ok
     end.
