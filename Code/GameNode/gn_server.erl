@@ -54,6 +54,25 @@ init([GN_number, PlayerType]) ->
         bombs_table_name = generate_atom_table_names(GN_number, "_bombs"),
         powerups_table_name = generate_atom_table_names(GN_number, "_powerups"),
         players_table_name = generate_atom_table_names(GN_number, "_players")},
+    %% ! HOTFIX: check if tables are created before trying to access them
+    %% Wait for all tables to be created before proceeding
+    AllTableNames = [
+        Data#gn_state.tiles_table_name,
+        Data#gn_state.bombs_table_name,
+        Data#gn_state.powerups_table_name,
+        Data#gn_state.players_table_name
+    ],
+    io:format("CN: Waiting for tables to be ready: ~p~n", [AllTableNames]),
+    case mnesia:wait_for_tables(AllTableNames, 10000) of
+        ok -> 
+            io:format("✅ All mnesia tables created successfully~n");
+        {timeout, BadTabs} -> 
+            io:format("❌ Timeout waiting for tables: ~p~n", [BadTabs]),
+            error({mnesia_tables_timeout, BadTabs});
+        {error, Reason} -> 
+            io:format("❌ Error waiting for tables: ~p~n", [Reason]),
+            error({mnesia_tables_error, Reason})
+    end,
     %% Initialize tiles and players from the generated map
     initialize_tiles(Data#gn_state.tiles_table_name),
     initialize_players(Data#gn_state.players_table_name, PlayerType, GN_number),
