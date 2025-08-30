@@ -62,7 +62,10 @@ init([PlayerNumber, KeyboardMode]) ->
     
     % Start input polling if in keyboard mode
     case KeyboardMode of
-        true -> erlang:send_after(?TICK_DELAY, self(), poll_input);
+        true -> 
+            % Spawn a separate process for blocking keyboard input
+            spawn_link(fun() -> keyboard_input_loop(self()) end),
+            erlang:send_after(?TICK_DELAY, self(), poll_input);
         false -> ok
     end,
     
@@ -216,18 +219,36 @@ display_response(Response, PlayerNumber) ->
             io:format("Player ~p: ~p~n", [PlayerNumber, Response])
     end.
 
-%% @doc Read keyboard input 
+%% @doc Read keyboard input (non-blocking)
 read_keyboard_input() ->
-    % For testing
+    % Check if there's a pending input message
+    receive
+        {keyboard_input, Key} -> 
+            case Key of
+                " " -> space;
+                "w" -> w;
+                "a" -> a;
+                "s" -> s;
+                "d" -> d;
+                "e" -> b;
+                "q" -> q;
+                _ -> no_input
+            end
+    after 0 -> 
+        no_input  % No input available immediately
+    end.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+%% @doc Separate process for blocking keyboard input
+keyboard_input_loop(IOHandlerPid) ->
     case io:get_chars('', 1) of
-        eof -> no_input;
-        " " -> space;
-        "w" -> w;
-        "a" -> a;
-        "s" -> s;
-        "d" -> d;
-        "e" -> b;
-        "q" -> q;
-        "\e" -> escape;
-        _ -> no_input
+        eof -> 
+            timer:sleep(100),  % Wait a bit before trying again
+            keyboard_input_loop(IOHandlerPid);
+        Key -> 
+            IOHandlerPid ! {keyboard_input, Key},
+            keyboard_input_loop(IOHandlerPid)
     end.
