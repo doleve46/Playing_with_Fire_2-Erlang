@@ -2180,29 +2180,34 @@ def connect_to_server(self) -> bool:
         sys.exit()
 
 
-def determine_gn_id():
-    """Determine GN ID from command line argument passed by Erlang"""
-    if len(sys.argv) > 1:
-        arg = sys.argv[1].lower()
-        if arg in ['gn1', 'gn2', 'gn3', 'gn4']:
-            print(f"✅ GN ID received from Erlang: {arg}")
-            return arg
+# def determine_gn_id():
+#     """Determine GN ID from command line argument passed by Erlang"""
+#     if len(sys.argv) > 1:
+#         arg = sys.argv[1].lower()
+#         if arg in ['gn1', 'gn2', 'gn3', 'gn4']:
+#             print(f"✅ GN ID received from Erlang: {arg}")
+#             return arg
     
-    # This should never happen if called properly by Erlang
-    print("❌ No GN ID provided as command line argument!")
-    print("   This script should be started by gn_graphics_server.erl")
-    print("   Falling back to gn1...")
-    return 'gn1'
+#     # This should never happen if called properly by Erlang
+#     print("❌ No GN ID provided as command line argument!")
+#     print("   This script should be started by gn_graphics_server.erl")
+#     print("   Falling back to gn1...")
+#     return 'gn1'
 
 
 # Main execution
+# Main execution
 if __name__ == "__main__":
     try:
-        print("🐍 GN Python Visualizer Starting...")        
-        print("🚀 Initializing GN Socket-based Playing with Fire 2 Visualizer...")
+        print("🐍 GN Python Visualizer Starting...")
+        
+        # Get the GN ID first
+        gn_id = read_node_id()
+        
         print(f"🎯 GN ID: {gn_id.upper()}")
         print(f"👤 Local Player: Player {int(gn_id[-1])}")
         
+        # Create visualizer once with correct arguments
         visualizer = GNGameVisualizer(gn_id)
         visualizer.run_enhanced_game_loop()
         
