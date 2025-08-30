@@ -2198,15 +2198,10 @@ def determine_gn_id():
 # Main execution
 if __name__ == "__main__":
     try:
-        print("PYTHON TRYING TO START!!!!!!!!!")
-        print("🐍 GN Python Visualizer Starting...")
-        visualizer = GNGameVisualizer()  # No arguments needed!
-        
+        print("🐍 GN Python Visualizer Starting...")        
         print("🚀 Initializing GN Socket-based Playing with Fire 2 Visualizer...")
         print(f"🎯 GN ID: {gn_id.upper()}")
         print(f"👤 Local Player: Player {int(gn_id[-1])}")
-        print("🎨 Beautiful graphics with GN-specific socket communication")
-        print("=" * 80)
         
         visualizer = GNGameVisualizer(gn_id)
         visualizer.run_enhanced_game_loop()
