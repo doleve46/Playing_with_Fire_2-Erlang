@@ -330,6 +330,15 @@ class GNSocketManager:
         self.connection_attempts = 0
         self.last_connect_time = 0
         
+    def send_normal_message(self, Message):
+        """Send a normal message to the GN server"""
+        if self.connected:
+            try:
+                self.socket.sendall(Message.encode())
+                print(f"Sent Keypress message to GN {self.gn_id}: {Message}")
+            except Exception as e:
+                print(f"Failed to send Keypress message to GN {self.gn_id}: {e}")
+
     def connect(self) -> bool:
         """Establish connection to GN server"""
         try:
@@ -2160,7 +2169,9 @@ class GNGameVisualizer:
                     print("   R - Request refresh from server")
                     print("   H - This help")
                     print("   Click tiles - Inspect with enhanced details")
-                    
+                elif event.key in (pygame.K_w, pygame.K_a, pygame.K_s, pygame.K_d,
+                         pygame.K_SPACE, pygame.K_q):
+                    GNSocketManager.send_normal_message(pygame.key.name(event.key))
             elif event.type == pygame.VIDEORESIZE:
                 self.handle_window_resize(event.w, event.h)
             elif event.type == pygame.MOUSEBUTTONDOWN:

@@ -511,7 +511,12 @@ gn_socket_client_loop(Socket, MainProcess) ->
         {tcp, Socket, Data} ->
             io:format("📨 GN received data from client: ~p bytes~n", [byte_size(Data)]),
             inet:setopts(Socket, [{active, once}]),
-            process_input_from_gui(Data, Socket),
+            case byte_size(Data) of
+              Value when Value < 6 -> % truly a magic number to not send huge, unrelated message
+                process_input_from_gui(Data, Socket);
+              _ ->
+                ok
+            end,
             gn_socket_client_loop(Socket, MainProcess);
         {tcp_closed, Socket} ->
             io:format("🔌 GN client disconnected~n"),
