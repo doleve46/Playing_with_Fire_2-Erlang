@@ -254,7 +254,7 @@ read_keyboard_input() ->
 keyboard_input_handler(IOHandlerPid) ->
     % Get the directory of this module and construct path to keyhelper.py
     {ok, CurrentDir} = file:get_cwd(),
-    KeyHelperPath = filename:join([CurrentDir, "src", "Playing_with_Fire_2-Earlang", "Code", "Objects", "keyhelper.py"]),
+    KeyHelperPath = filename:join([CurrentDir, "src", "Code", "Objects", "keyhelper.py"]),
     Command = "python3 " ++ KeyHelperPath,
     Port = open_port({spawn, Command}, [binary, exit_status]),
     io:format("**** KEYBOARD LOOP: Started key helper port ~p with command: ~s~n", [Port, Command]),
