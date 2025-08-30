@@ -48,7 +48,7 @@ MAP_OFFSET_Y = 10  # Small top margin
 POWERUP_OFFSET_Y = MAP_OFFSET_Y + MAP_SIZE * TILE_SIZE + 10  # Power-ups below map
 TIMER_OFFSET_X = MAP_OFFSET_X + MAP_SIZE * TILE_SIZE + 10   # Timer panel right of map
 
-# Enhanced Color Palette
+# Enhanced Color Palette - All RGB format to avoid issues
 COLORS = {
     # Enhanced backgrounds with more depth
     'BACKGROUND': (25, 35, 45),
@@ -72,6 +72,7 @@ COLORS = {
     'TEXT_RED': (200, 50, 50),
     'TEXT_GREEN': (100, 255, 100),
     'TEXT_PURPLE': (200, 100, 255),
+    'DEATH_TEXT': (255, 100, 100),
 
     # Enhanced brick walls with realistic texture
     'BRICK_TOP': (180, 90, 45),
@@ -132,17 +133,135 @@ COLORS = {
     'EXPLOSION_OUTER': (255, 50, 50),
     'EXPLOSION_SPARK': (255, 255, 255),
 
-    # Enhanced special effects
-    'SHADOW': (0, 0, 0),           # ✅ RGB only
-    'HIGHLIGHT': (255, 255, 255),  # ✅ RGB only  
-    'SELECTION': (255, 255, 0),    # ✅ RGB only
-    'GRID_LINE': (0, 0, 0),        # ✅ RGB only
+    # Enhanced special effects - converted to RGB
+    'SHADOW_RGB': (0, 0, 0),
+    'HIGHLIGHT_RGB': (255, 255, 255),
+    'SELECTION_RGB': (255, 255, 0),
+    'GRID_LINE_RGB': (0, 0, 0),
     'TIMER_BAR_BG': (50, 50, 50),
     'TIMER_BAR_FILL': (100, 255, 100),
     'TIMER_BAR_DANGER': (255, 100, 100),
 }
 
-# Enhanced Data Classes
+# ============================================================================
+# COLOR VALIDATION AND SAFE DRAWING FUNCTIONS
+# ============================================================================
+
+def validate_color(color, context="unknown"):
+    """Validate and fix color values to ensure pygame compatibility"""
+    try:
+        if color is None:
+            print(f"WARNING: None color passed to {context}, using white")
+            return (255, 255, 255)
+        
+        if not isinstance(color, (tuple, list)):
+            print(f"WARNING: Invalid color type {type(color)} in {context}, using white")
+            return (255, 255, 255)
+        
+        if len(color) < 3:
+            print(f"WARNING: Color {color} has < 3 components in {context}, using white")
+            return (255, 255, 255)
+        
+        # Take only RGB components and clamp to valid range
+        rgb = []
+        for i, component in enumerate(color[:3]):
+            if not isinstance(component, (int, float)):
+                print(f"WARNING: Non-numeric color component {component} at index {i} in {context}")
+                rgb.append(255)
+            else:
+                # Clamp to 0-255 range
+                clamped = max(0, min(255, int(component)))
+                if clamped != int(component):
+                    print(f"WARNING: Color component {component} clamped to {clamped} in {context}")
+                rgb.append(clamped)
+        
+        return tuple(rgb)
+        
+    except Exception as e:
+        print(f"ERROR validating color {color} in {context}: {e}")
+        return (255, 255, 255)  # White fallback
+
+def safe_get_color(color_name, context="unknown"):
+    """Safely get color from COLORS dictionary with validation"""
+    if color_name not in COLORS:
+        print(f"WARNING: Color '{color_name}' not found in COLORS dictionary in {context}")
+        return (255, 0, 255)  # Bright magenta as error indicator
+    
+    color = COLORS[color_name]
+    return validate_color(color, f"{context}:{color_name}")
+
+def create_rgba_color(rgb_color, alpha, context="unknown"):
+    """Safely create RGBA color with alpha channel"""
+    validated_rgb = validate_color(rgb_color, context)
+    alpha_clamped = max(0, min(255, int(alpha)))
+    return (*validated_rgb, alpha_clamped)
+
+def safe_pygame_draw_circle(surface, color, center, radius, width=0, context="circle"):
+    """Safely draw circle with color validation"""
+    try:
+        validated_color = validate_color(color, f"{context}_circle")
+        pygame.draw.circle(surface, validated_color, center, radius, width)
+    except Exception as e:
+        print(f"ERROR in pygame.draw.circle at {context}: {e}")
+        print(f"  Color: {color} -> Validated: {validate_color(color, context)}")
+        print(f"  Center: {center}, Radius: {radius}, Width: {width}")
+        # Draw error indicator
+        pygame.draw.circle(surface, (255, 0, 255), center, radius, width)
+
+def safe_pygame_draw_rect(surface, color, rect, width=0, context="rect"):
+    """Safely draw rectangle with color validation"""
+    try:
+        validated_color = validate_color(color, f"{context}_rect")
+        pygame.draw.rect(surface, validated_color, rect, width)
+    except Exception as e:
+        print(f"ERROR in pygame.draw.rect at {context}: {e}")
+        print(f"  Color: {color} -> Validated: {validate_color(color, context)}")
+        print(f"  Rect: {rect}, Width: {width}")
+        # Draw error indicator
+        pygame.draw.rect(surface, (255, 0, 255), rect, width)
+
+def safe_pygame_draw_line(surface, color, start_pos, end_pos, width=1, context="line"):
+    """Safely draw line with color validation"""
+    try:
+        validated_color = validate_color(color, f"{context}_line")
+        pygame.draw.line(surface, validated_color, start_pos, end_pos, width)
+    except Exception as e:
+        print(f"ERROR in pygame.draw.line at {context}: {e}")
+        print(f"  Color: {color} -> Validated: {validate_color(color, context)}")
+        print(f"  Start: {start_pos}, End: {end_pos}, Width: {width}")
+        # Draw error indicator
+        pygame.draw.line(surface, (255, 0, 255), start_pos, end_pos, width)
+
+def safe_pygame_draw_polygon(surface, color, points, width=0, context="polygon"):
+    """Safely draw polygon with color validation"""
+    try:
+        validated_color = validate_color(color, f"{context}_polygon")
+        if len(points) >= 3:
+            pygame.draw.polygon(surface, validated_color, points, width)
+    except Exception as e:
+        print(f"ERROR in pygame.draw.polygon at {context}: {e}")
+        print(f"  Color: {color} -> Validated: {validate_color(color, context)}")
+        print(f"  Points: {points}, Width: {width}")
+        # Draw error indicator
+        if len(points) >= 3:
+            pygame.draw.polygon(surface, (255, 0, 255), points, width)
+
+def safe_pygame_draw_ellipse(surface, color, rect, width=0, context="ellipse"):
+    """Safely draw ellipse with color validation"""
+    try:
+        validated_color = validate_color(color, f"{context}_ellipse")
+        pygame.draw.ellipse(surface, validated_color, rect, width)
+    except Exception as e:
+        print(f"ERROR in pygame.draw.ellipse at {context}: {e}")
+        print(f"  Color: {color} -> Validated: {validate_color(color, context)}")
+        print(f"  Rect: {rect}, Width: {width}")
+        # Draw error indicator
+        pygame.draw.ellipse(surface, (255, 0, 255), rect, width)
+
+# ============================================================================
+# DATA CLASSES
+# ============================================================================
+
 @dataclass
 class PlayerTimers:
     movement_timer: int = 0
@@ -217,7 +336,7 @@ class GNSocketManager:
             if self.socket:
                 self.close()
                 
-            print(f"🔌 Connecting to GN {self.gn_id} server at {self.host}:{self.port}...")
+            print(f"Connecting to GN {self.gn_id} server at {self.host}:{self.port}...")
             
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.settimeout(SOCKET_TIMEOUT)
@@ -232,19 +351,19 @@ class GNSocketManager:
             self.connected = True
             self.connection_attempts = 0
             
-            print(f"✅ Connected to GN {self.gn_id} server successfully!")
+            print(f"Connected to GN {self.gn_id} server successfully!")
             return True
             
         except socket.timeout:
-            print(f"❌ Connection timeout - GN {self.gn_id} server may not be running")
+            print(f"Connection timeout - GN {self.gn_id} server may not be running")
             self.connected = False
             return False
         except ConnectionRefused:
-            print(f"❌ Connection refused - GN {self.gn_id} server not accepting connections")
+            print(f"Connection refused - GN {self.gn_id} server not accepting connections")
             self.connected = False
             return False
         except Exception as e:
-            print(f"❌ Connection failed: {e}")
+            print(f"Connection failed: {e}")
             self.connected = False
             return False
 
@@ -268,7 +387,7 @@ class GNSocketManager:
                 # Receive data
                 data = self.socket.recv(4096)
                 if not data:
-                    print(f"⚠️ GN {self.gn_id} server disconnected")
+                    print(f"GN {self.gn_id} server disconnected")
                     self.connected = False
                     break
                     
@@ -294,7 +413,7 @@ class GNSocketManager:
                                 self.message_queue.append(message)
                                 
                         except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                            print(f"❌ Failed to parse message: {e}")
+                            print(f"Failed to parse message: {e}")
                     else:
                         # Wait for more data
                         break
@@ -303,7 +422,7 @@ class GNSocketManager:
                 # Normal timeout, continue
                 continue
             except Exception as e:
-                print(f"❌ Socket error: {e}")
+                print(f"Socket error: {e}")
                 self.connected = False
                 break
 
@@ -329,7 +448,7 @@ class GNSocketManager:
             return True
             
         except Exception as e:
-            print(f"❌ Failed to send message: {e}")
+            print(f"Failed to send message: {e}")
             self.connected = False
             return False
 
@@ -344,7 +463,7 @@ class GNSocketManager:
         self.last_connect_time = current_time
         self.connection_attempts += 1
         
-        print(f"🔄 Reconnection attempt {self.connection_attempts}/{MAX_RECONNECT_ATTEMPTS}")
+        print(f"Reconnection attempt {self.connection_attempts}/{MAX_RECONNECT_ATTEMPTS}")
         
         if self.connect():
             return True
@@ -361,15 +480,15 @@ class GNGameVisualizer:
         self.host = 'localhost'
         self.port = GN_SOCKET_PORT_BASE + self.gn_number
         
-        print(f"🎮 GN Map Visualizer starting for {self.gn_id}")
-        print(f"🔌 Will connect to {self.host}:{self.port}")
+        print(f"GN Map Visualizer starting for {self.gn_id}")
+        print(f"Will connect to {self.host}:{self.port}")
         self.local_player_id = int(gn_id[-1])  # GN1 -> Player 1, etc.
         
         # Enhanced window setup
         initial_width = min(WINDOW_WIDTH, 1200)
         initial_height = min(WINDOW_HEIGHT, 900)
         self.screen = pygame.display.set_mode((initial_width, initial_height), pygame.RESIZABLE)
-        pygame.display.set_caption(f"🎮 Playing with Fire 2 - GN {self.gn_id.upper()} View")
+        pygame.display.set_caption(f"Playing with Fire 2 - GN {self.gn_id.upper()} View")
         self.clock = pygame.time.Clock()
 
         # Current window dimensions and scaling
@@ -459,13 +578,13 @@ class GNGameVisualizer:
         self.last_message_time = 0
         self.message_count = 0
 
-        print(f"🎮 GN Game Visualizer initialized for {gn_id.upper()}")
-        print(f"🔗 Target GN server: localhost:{GN_SOCKET_PORT_BASE + int(gn_id[-1])}")
-        print(f"👤 Local player: Player {self.local_player_id}")
+        print(f"GN Game Visualizer initialized for {gn_id.upper()}")
+        print(f"Target GN server: localhost:{GN_SOCKET_PORT_BASE + int(gn_id[-1])}")
+        print(f"Local player: Player {self.local_player_id}")
 
     def connect_to_server(self) -> bool:
         """Connect to GN server and start receiving thread"""
-        print(f"🔌 Attempting to connect to GN {self.gn_id} server...")
+        print(f"Attempting to connect to GN {self.gn_id} server...")
         
         # Try a few times in case server isn't ready yet
         for attempt in range(5):
@@ -493,10 +612,10 @@ class GNGameVisualizer:
                 
                 return True
             else:
-                print(f"⏳ Attempt {attempt + 1}/5 failed, retrying in 1 second...")
+                print(f"Attempt {attempt + 1}/5 failed, retrying in 1 second...")
                 time.sleep(1)
         
-        print("❌ Failed to connect after 5 attempts")
+        print("Failed to connect after 5 attempts")
         self.connection_status = "Connection Failed"
         return False
 
@@ -525,7 +644,7 @@ class GNGameVisualizer:
             elif message_type == 'death_event':
                 self.handle_death_event(message_data)
             else:
-                print(f"⚠️ Unknown message type: {message_type}")
+                print(f"Unknown message type: {message_type}")
 
     def process_map_update(self, map_data: dict) -> bool:
         """Process map update with enhanced backend timing information"""
@@ -550,7 +669,7 @@ class GNGameVisualizer:
                 player_id_int = int(player_id)
                 if (player_id_int == self.local_player_id and 
                     player_id_int not in self.current_game_state.dead_players):
-                    print(f"💀 LOCAL PLAYER {self.local_player_id} DIED!")
+                    print(f"LOCAL PLAYER {self.local_player_id} DIED!")
                     self.local_player_dead = True
                     self.death_message_start_time = time.time()
                     self.create_enhanced_death_animation(player_id_int, death_info)
@@ -567,7 +686,7 @@ class GNGameVisualizer:
                 if self.waiting_for_initial_map:
                     self.waiting_for_initial_map = False
                     self.map_initialized = True
-                    print("✅ Initial map loaded! Now receiving real-time updates...")
+                    print("Initial map loaded! Now receiving real-time updates...")
 
                 # Detect changes for enhanced animations
                 if self.previous_game_state:
@@ -577,7 +696,7 @@ class GNGameVisualizer:
             return False
             
         except Exception as e:
-            print(f"❌ Error processing map update: {e}")
+            print(f"Error processing map update: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -720,7 +839,7 @@ class GNGameVisualizer:
         
         # Check if this is our local player
         if player_id == self.local_player_id:
-            print(f"💀 LOCAL PLAYER {self.local_player_id} DIED!")
+            print(f"LOCAL PLAYER {self.local_player_id} DIED!")
             self.local_player_dead = True
             self.death_message_start_time = time.time()
         
@@ -1035,14 +1154,14 @@ class GNGameVisualizer:
         """Quadratic ease-out function for smooth animations"""
         return 1 - (1 - t) * (1 - t)
 
-    # [Include simplified drawing methods - same visual style but without powerup glow]
+    # ENHANCED DRAWING METHODS WITH SAFE COLOR HANDLING
     def draw_enhanced_map(self):
         """Draw the complete enhanced map with all animations and real-time effects"""
         # Apply enhanced camera shake
         shake_x = int(random.random() * self.camera_shake * 12) if self.camera_shake > 0 else 0
         shake_y = int(random.random() * self.camera_shake * 12) if self.camera_shake > 0 else 0
 
-        self.map_surface.fill(COLORS['BACKGROUND'])
+        self.map_surface.fill(safe_get_color('BACKGROUND', 'map_background'))
 
         # Update timing and animations
         self.time += 1 / FPS
@@ -1097,60 +1216,80 @@ class GNGameVisualizer:
         # Blit map to virtual surface
         self.virtual_surface.blit(self.map_surface, (MAP_OFFSET_X, MAP_OFFSET_Y))
 
-    # [Include all the same drawing methods as map_live_port.py but WITHOUT powerup glow]
     def draw_enhanced_floor(self, surface, x, y):
         """Enhanced floor tile with realistic texture"""
         rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
-        self.draw_gradient_rect(surface, COLORS['FLOOR_LIGHT'], COLORS['FLOOR_DARK'], rect)
+        floor_light = safe_get_color('FLOOR_LIGHT', 'floor_tile')
+        floor_dark = safe_get_color('FLOOR_DARK', 'floor_tile')
+        floor_shadow = safe_get_color('FLOOR_SHADOW', 'floor_tile')
+        
+        self.draw_gradient_rect(surface, floor_light, floor_dark, rect)
 
         # Subtle texture pattern
         for i in range(0, TILE_SIZE, 8):
             for j in range(0, TILE_SIZE, 8):
                 if (i + j) % 16 == 0:
-                    pygame.draw.rect(surface, COLORS['FLOOR_SHADOW'], (x + i, y + j, 4, 4))
+                    safe_pygame_draw_rect(surface, floor_shadow, (x + i, y + j, 4, 4), context="floor_texture")
 
         # Enhanced border
-        pygame.draw.rect(surface, COLORS['FLOOR_LIGHT'], rect, 2)
-        pygame.draw.rect(surface, COLORS['FLOOR_SHADOW'], rect, 1)
+        safe_pygame_draw_rect(surface, floor_light, rect, 2, context="floor_border_light")
+        safe_pygame_draw_rect(surface, floor_shadow, rect, 1, context="floor_border_shadow")
 
     def draw_enhanced_brick_wall(self, surface, x, y):
         """Enhanced brick wall with realistic depth and texture"""
-        # Drop shadow
+        # Get colors safely
+        shadow_color = safe_get_color('SHADOW_RGB', 'brick_shadow')
+        brick_top = safe_get_color('BRICK_TOP', 'brick_wall')
+        brick_dark = safe_get_color('BRICK_DARK', 'brick_wall')
+        mortar_color = safe_get_color('MORTAR', 'brick_wall')
+        brick_shadow = safe_get_color('BRICK_SHADOW', 'brick_wall')
+        
+        # Drop shadow with alpha surface
         shadow_surf = pygame.Surface((TILE_SIZE + 6, TILE_SIZE + 6), pygame.SRCALPHA)
-        pygame.draw.rect(shadow_surf, (*COLORS['SHADOW'], 60), (0, 0, TILE_SIZE + 6, TILE_SIZE + 6)) # used to be pygame.draw.rect(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 6, TILE_SIZE + 6))
+        shadow_rgba = create_rgba_color(shadow_color, 60, 'brick_shadow')
+        safe_pygame_draw_rect(shadow_surf, shadow_rgba, (0, 0, TILE_SIZE + 6, TILE_SIZE + 6), context="brick_shadow")
         surface.blit(shadow_surf, (x - 3, y - 3))
 
         rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
-        self.draw_gradient_rect(surface, COLORS['BRICK_TOP'], COLORS['BRICK_DARK'], rect)
+        self.draw_gradient_rect(surface, brick_top, brick_dark, rect)
 
         # Enhanced brick pattern
         brick_height = TILE_SIZE // 5
         for row in range(5):
             brick_y = y + row * brick_height
-            pygame.draw.line(surface, COLORS['MORTAR'],
-                           (x, brick_y), (x + TILE_SIZE, brick_y), 2)
+            safe_pygame_draw_line(surface, mortar_color,
+                           (x, brick_y), (x + TILE_SIZE, brick_y), 2, context="brick_mortar_h")
 
             # Alternating brick pattern
             offset = (TILE_SIZE // 3) if row % 2 == 0 else TILE_SIZE // 6
             for i in range(4):
                 brick_x = x + offset + i * (TILE_SIZE // 4)
                 if x <= brick_x < x + TILE_SIZE:
-                    pygame.draw.line(surface, COLORS['MORTAR'],
-                                   (brick_x, brick_y), (brick_x, brick_y + brick_height), 2)
+                    safe_pygame_draw_line(surface, mortar_color,
+                                   (brick_x, brick_y), (brick_x, brick_y + brick_height), 2, context="brick_mortar_v")
 
         # Enhanced 3D effect
-        pygame.draw.line(surface, COLORS['BRICK_TOP'], (x, y), (x + TILE_SIZE, y), 3)
-        pygame.draw.line(surface, COLORS['BRICK_TOP'], (x, y), (x, y + TILE_SIZE), 3)
-        pygame.draw.line(surface, COLORS['BRICK_SHADOW'], (x + TILE_SIZE - 1, y), 
-                        (x + TILE_SIZE - 1, y + TILE_SIZE), 2)
-        pygame.draw.line(surface, COLORS['BRICK_SHADOW'], (x, y + TILE_SIZE - 1), 
-                        (x + TILE_SIZE, y + TILE_SIZE - 1), 2)
+        safe_pygame_draw_line(surface, brick_top, (x, y), (x + TILE_SIZE, y), 3, context="brick_highlight_top")
+        safe_pygame_draw_line(surface, brick_top, (x, y), (x, y + TILE_SIZE), 3, context="brick_highlight_left")
+        safe_pygame_draw_line(surface, brick_shadow, (x + TILE_SIZE - 1, y), 
+                        (x + TILE_SIZE - 1, y + TILE_SIZE), 2, context="brick_shadow_right")
+        safe_pygame_draw_line(surface, brick_shadow, (x, y + TILE_SIZE - 1), 
+                        (x + TILE_SIZE, y + TILE_SIZE - 1), 2, context="brick_shadow_bottom")
 
     def draw_enhanced_wooden_barrel(self, surface, x, y, has_powerup=False):
         """Enhanced wooden barrel WITHOUT powerup glow"""
+        # Get colors safely
+        shadow_color = safe_get_color('SHADOW_RGB', 'wood_shadow')
+        wood_light = safe_get_color('WOOD_LIGHT', 'wood_barrel')
+        wood_dark = safe_get_color('WOOD_DARK', 'wood_barrel')
+        wood_shadow = safe_get_color('WOOD_SHADOW', 'wood_barrel')
+        wood_highlight = safe_get_color('WOOD_HIGHLIGHT', 'wood_barrel')
+        wood_band = safe_get_color('WOOD_BAND', 'wood_barrel')
+        
         # Drop shadow
         shadow_surf = pygame.Surface((TILE_SIZE + 8, TILE_SIZE + 8), pygame.SRCALPHA)
-        pygame.draw.ellipse(shadow_surf, (*COLORS['SHADOW'], 60), (0, 0, TILE_SIZE + 8, TILE_SIZE + 8))  # used to be pygame.draw.ellipse(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 6, TILE_SIZE + 6))
+        shadow_rgba = create_rgba_color(shadow_color, 60, 'wood_barrel_shadow')
+        safe_pygame_draw_ellipse(shadow_surf, shadow_rgba, (0, 0, TILE_SIZE + 8, TILE_SIZE + 8), context="wood_shadow")
         surface.blit(shadow_surf, (x - 4, y - 4))
 
         center_x = x + TILE_SIZE // 2
@@ -1167,12 +1306,14 @@ class GNGameVisualizer:
             grain_noise = math.sin(i * 0.8) * 0.1
             adjusted_ratio = max(0, min(1, ratio + grain_noise))
             
-            r = int(COLORS['WOOD_LIGHT'][0] * (1 - adjusted_ratio) + COLORS['WOOD_DARK'][0] * adjusted_ratio)
-            g = int(COLORS['WOOD_LIGHT'][1] * (1 - adjusted_ratio) + COLORS['WOOD_DARK'][1] * adjusted_ratio)
-            b = int(COLORS['WOOD_LIGHT'][2] * (1 - adjusted_ratio) + COLORS['WOOD_DARK'][2] * adjusted_ratio)
-
-            pygame.draw.line(surface, (r, g, b),
-                           (center_x - width // 2, y_pos), (center_x + width // 2, y_pos), 1)
+            # Safe color interpolation
+            r = int(wood_light[0] * (1 - adjusted_ratio) + wood_dark[0] * adjusted_ratio)
+            g = int(wood_light[1] * (1 - adjusted_ratio) + wood_dark[1] * adjusted_ratio)
+            b = int(wood_light[2] * (1 - adjusted_ratio) + wood_dark[2] * adjusted_ratio)
+            
+            grain_color = validate_color((r, g, b), 'wood_grain')
+            safe_pygame_draw_line(surface, grain_color,
+                           (center_x - width // 2, y_pos), (center_x + width // 2, y_pos), 1, context="wood_grain")
 
         # Enhanced metal bands
         band_positions = [0.15, 0.4, 0.6, 0.85]
@@ -1181,35 +1322,43 @@ class GNGameVisualizer:
             band_width = int((TILE_SIZE - 6) * (1.0 + 0.3 * math.sin(band_ratio * math.pi)))
 
             # Band shadow
-            pygame.draw.rect(surface, COLORS['WOOD_SHADOW'],
-                           (center_x - band_width // 2, band_y - 1, band_width, 6))
+            safe_pygame_draw_rect(surface, wood_shadow,
+                           (center_x - band_width // 2, band_y - 1, band_width, 6), context="wood_band_shadow")
             # Main band
-            pygame.draw.rect(surface, COLORS['WOOD_BAND'],
-                           (center_x - band_width // 2, band_y - 2, band_width, 5))
+            safe_pygame_draw_rect(surface, wood_band,
+                           (center_x - band_width // 2, band_y - 2, band_width, 5), context="wood_band_main")
             # Band highlight
-            pygame.draw.rect(surface, COLORS['WOOD_HIGHLIGHT'],
-                           (center_x - band_width // 2, band_y - 2, band_width, 1))
+            safe_pygame_draw_rect(surface, wood_highlight,
+                           (center_x - band_width // 2, band_y - 2, band_width, 1), context="wood_band_highlight")
 
         # Enhanced wood grain texture
         for i in range(8):
             grain_x = x + 6 + i * 4
             if grain_x < x + TILE_SIZE - 6:
                 grain_intensity = 0.7 + 0.3 * math.sin(i * 1.2)
-                grain_color = tuple(int(c * grain_intensity) for c in COLORS['WOOD_SHADOW'])
-                pygame.draw.line(surface, grain_color,
-                               (grain_x, y + 4), (grain_x, y + TILE_SIZE - 4), 1)
+                grain_color = tuple(int(c * grain_intensity) for c in wood_shadow)
+                grain_color = validate_color(grain_color, 'wood_grain_texture')
+                safe_pygame_draw_line(surface, grain_color,
+                               (grain_x, y + 4), (grain_x, y + TILE_SIZE - 4), 1, context="wood_grain_line")
 
         # Enhanced highlight
-        pygame.draw.line(surface, COLORS['WOOD_HIGHLIGHT'],
-                        (x + 4, y + 2), (x + 4, y + TILE_SIZE - 2), 3)
-
-        # NO POWERUP GLOW - this is the main difference from CN version
+        safe_pygame_draw_line(surface, wood_highlight,
+                        (x + 4, y + 2), (x + 4, y + TILE_SIZE - 2), 3, context="wood_highlight_line")
 
     def draw_enhanced_metal_barrel(self, surface, x, y, has_powerup=False):
         """Enhanced metal barrel WITHOUT powerup glow"""
+        # Get colors safely
+        shadow_color = safe_get_color('SHADOW_RGB', 'metal_shadow')
+        metal_light = safe_get_color('METAL_LIGHT', 'metal_barrel')
+        metal_dark = safe_get_color('METAL_DARK', 'metal_barrel')
+        metal_shadow = safe_get_color('METAL_SHADOW', 'metal_barrel')
+        metal_shine = safe_get_color('METAL_SHINE', 'metal_barrel')
+        metal_band = safe_get_color('METAL_BAND', 'metal_barrel')
+        
         # Drop shadow
         shadow_surf = pygame.Surface((TILE_SIZE + 8, TILE_SIZE + 8), pygame.SRCALPHA)
-        pygame.draw.ellipse(shadow_surf, (*COLORS['SHADOW'], 60), (0, 0, TILE_SIZE + 8, TILE_SIZE + 8)) # used to be pygame.draw.ellipse(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 8, TILE_SIZE + 8))
+        shadow_rgba = create_rgba_color(shadow_color, 60, 'metal_barrel_shadow')
+        safe_pygame_draw_ellipse(shadow_surf, shadow_rgba, (0, 0, TILE_SIZE + 8, TILE_SIZE + 8), context="metal_shadow")
         surface.blit(shadow_surf, (x - 4, y - 4))
 
         center_x = x + TILE_SIZE // 2
@@ -1225,17 +1374,14 @@ class GNGameVisualizer:
             ratio = i / TILE_SIZE
             reflection_factor = 1.0 + 0.4 * math.sin(ratio * math.pi * 3)
             
-            r = int(COLORS['METAL_LIGHT'][0] * (1 - ratio) * reflection_factor + COLORS['METAL_DARK'][0] * ratio)
-            g = int(COLORS['METAL_LIGHT'][1] * (1 - ratio) * reflection_factor + COLORS['METAL_DARK'][1] * ratio)
-            b = int(COLORS['METAL_LIGHT'][2] * (1 - ratio) * reflection_factor + COLORS['METAL_DARK'][2] * ratio)
+            r = int(metal_light[0] * (1 - ratio) * reflection_factor + metal_dark[0] * ratio)
+            g = int(metal_light[1] * (1 - ratio) * reflection_factor + metal_dark[1] * ratio)
+            b = int(metal_light[2] * (1 - ratio) * reflection_factor + metal_dark[2] * ratio)
             
-            # Clamp values
-            r = max(0, min(255, r))
-            g = max(0, min(255, g))
-            b = max(0, min(255, b))
-
-            pygame.draw.line(surface, (r, g, b),
-                           (center_x - width // 2, y_pos), (center_x + width // 2, y_pos), 1)
+            # Clamp and validate color
+            metal_color = validate_color((r, g, b), 'metal_gradient')
+            safe_pygame_draw_line(surface, metal_color,
+                           (center_x - width // 2, y_pos), (center_x + width // 2, y_pos), 1, context="metal_gradient")
 
         # Enhanced metal bands
         band_positions = [0.2, 0.8]
@@ -1244,14 +1390,14 @@ class GNGameVisualizer:
             band_width = int((TILE_SIZE - 6) * (1.0 + 0.25 * math.sin(band_ratio * math.pi)))
 
             # Band shadow
-            pygame.draw.rect(surface, COLORS['METAL_SHADOW'],
-                           (center_x - band_width // 2, band_y - 1, band_width, 5))
+            safe_pygame_draw_rect(surface, metal_shadow,
+                           (center_x - band_width // 2, band_y - 1, band_width, 5), context="metal_band_shadow")
             # Main band
-            pygame.draw.rect(surface, COLORS['METAL_BAND'],
-                           (center_x - band_width // 2, band_y - 2, band_width, 4))
+            safe_pygame_draw_rect(surface, metal_band,
+                           (center_x - band_width // 2, band_y - 2, band_width, 4), context="metal_band_main")
             # Metallic shine
-            pygame.draw.rect(surface, COLORS['METAL_SHINE'],
-                           (center_x - band_width // 2, band_y - 2, band_width, 1))
+            safe_pygame_draw_rect(surface, metal_shine,
+                           (center_x - band_width // 2, band_y - 2, band_width, 1), context="metal_band_shine")
 
         # Enhanced metallic shine strips
         shine_positions = [0.25, 0.5, 0.75]
@@ -1262,23 +1408,27 @@ class GNGameVisualizer:
             
             if shine_alpha > 0:
                 shine_surf = pygame.Surface((3, TILE_SIZE - 8), pygame.SRCALPHA)
-                pygame.draw.rect(shine_surf, (*COLORS['METAL_SHINE'], shine_alpha), (0, 0, 3, TILE_SIZE - 8))
+                shine_rgba = create_rgba_color(metal_shine, shine_alpha, 'metal_shine_strip')
+                safe_pygame_draw_rect(shine_surf, shine_rgba, (0, 0, 3, TILE_SIZE - 8), context="metal_shine_rect")
                 surface.blit(shine_surf, (shine_x - 1, y + 4))
-
-        # NO POWERUP GLOW - this is the main difference from CN version
 
     def draw_enhanced_selection_highlight(self, surface, x, y):
         """Draw enhanced selection highlight with animation"""
         pulse = 0.7 + 0.3 * math.sin(self.time * 6)
         highlight_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        
+        selection_color = safe_get_color('SELECTION_RGB', 'selection_highlight')
+        gold_color = safe_get_color('TEXT_GOLD', 'selection_border')
+        
         alpha = int(150 * pulse)
-        pygame.draw.rect(highlight_surf, (*COLORS['SELECTION'], alpha), (0, 0, TILE_SIZE, TILE_SIZE))
-        pygame.draw.rect(highlight_surf, COLORS['TEXT_GOLD'], (0, 0, TILE_SIZE, TILE_SIZE), 3)
+        selection_rgba = create_rgba_color(selection_color, alpha, 'selection_fill')
+        
+        safe_pygame_draw_rect(highlight_surf, selection_rgba, (0, 0, TILE_SIZE, TILE_SIZE), context="selection_fill")
+        safe_pygame_draw_rect(highlight_surf, gold_color, (0, 0, TILE_SIZE, TILE_SIZE), 3, context="selection_border")
         surface.blit(highlight_surf, (x, y))
 
     def draw_enhanced_bomb_with_fsm_state(self, surface, x, y, bomb_data: BombState):
         """Draw enhanced bomb with FSM state visualization"""
-        # Same implementation as CN version
         bomb_id = (bomb_data.x, bomb_data.y)
         actual_x, actual_y = x, y
 
@@ -1317,58 +1467,79 @@ class GNGameVisualizer:
         pulse = 0.8 + 0.2 * math.sin(self.time * 4)
         bomb_size = int(16 * pulse)
         
+        freeze_color = safe_get_color('FREEZE_COLOR', 'frozen_bomb')
+        bomb_black = safe_get_color('BOMB_BLACK', 'bomb_body')
+        
         # Ice glow
         ice_size = int(bomb_size * 1.8)
         ice_surf = pygame.Surface((ice_size * 2, ice_size * 2), pygame.SRCALPHA)
-        pygame.draw.circle(ice_surf, (*COLORS['FREEZE_COLOR'], 120), (ice_size, ice_size), ice_size)
+        ice_rgba = create_rgba_color(freeze_color, 120, 'ice_glow')
+        safe_pygame_draw_circle(ice_surf, ice_rgba, (ice_size, ice_size), ice_size, context="ice_glow")
         surface.blit(ice_surf, (center_x - ice_size, center_y - ice_size))
         
         # Main bomb body
-        pygame.draw.circle(surface, COLORS['BOMB_BLACK'], (center_x, center_y), bomb_size)
-        pygame.draw.circle(surface, COLORS['FREEZE_COLOR'], (center_x, center_y), bomb_size, 3)
+        safe_pygame_draw_circle(surface, bomb_black, (center_x, center_y), bomb_size, context="frozen_bomb_body")
+        safe_pygame_draw_circle(surface, freeze_color, (center_x, center_y), bomb_size, 3, context="frozen_bomb_border")
 
     def draw_remote_bomb(self, surface, center_x, center_y, bomb_data):
         """Draw bomb in remote_idle state"""
         pulse = 0.6 + 0.4 * math.sin(self.time * 3)
         bomb_size = int(16 * pulse)
         
+        cyan_color = safe_get_color('TEXT_CYAN', 'remote_bomb')
+        bomb_black = safe_get_color('BOMB_BLACK', 'bomb_body')
+        
         # Remote glow
         remote_size = int(bomb_size * 1.5)
         remote_surf = pygame.Surface((remote_size * 2, remote_size * 2), pygame.SRCALPHA)
-        pygame.draw.circle(remote_surf, (*COLORS['TEXT_CYAN'], 100), (remote_size, remote_size), remote_size)
+        remote_rgba = create_rgba_color(cyan_color, 100, 'remote_glow')
+        safe_pygame_draw_circle(remote_surf, remote_rgba, (remote_size, remote_size), remote_size, context="remote_glow")
         surface.blit(remote_surf, (center_x - remote_size, center_y - remote_size))
         
         # Main bomb body
-        pygame.draw.circle(surface, COLORS['BOMB_BLACK'], (center_x, center_y), bomb_size)
-        pygame.draw.circle(surface, COLORS['TEXT_CYAN'], (center_x, center_y), bomb_size, 2)
+        safe_pygame_draw_circle(surface, bomb_black, (center_x, center_y), bomb_size, context="remote_bomb_body")
+        safe_pygame_draw_circle(surface, cyan_color, (center_x, center_y), bomb_size, 2, context="remote_bomb_border")
 
     def draw_ignited_bomb(self, surface, center_x, center_y, bomb_data):
         """Draw bomb in ignited state"""
         pulse = 0.9 + 0.1 * math.sin(self.time * 10)
         bomb_size = int(18 * pulse)
         
+        fuse_color = safe_get_color('BOMB_FUSE', 'ignited_bomb')
+        bomb_black = safe_get_color('BOMB_BLACK', 'bomb_body')
+        
         # Danger glow
         danger_size = int(bomb_size * 2)
         danger_surf = pygame.Surface((danger_size * 2, danger_size * 2), pygame.SRCALPHA)
-        pygame.draw.circle(danger_surf, (*COLORS['BOMB_FUSE'], 150), (danger_size, danger_size), danger_size)
+        danger_rgba = create_rgba_color(fuse_color, 150, 'danger_glow')
+        safe_pygame_draw_circle(danger_surf, danger_rgba, (danger_size, danger_size), danger_size, context="danger_glow")
         surface.blit(danger_surf, (center_x - danger_size, center_y - danger_size))
         
         # Main bomb body
-        pygame.draw.circle(surface, COLORS['BOMB_BLACK'], (center_x, center_y), bomb_size)
-        pygame.draw.circle(surface, COLORS['BOMB_FUSE'], (center_x, center_y), bomb_size, 3)
+        safe_pygame_draw_circle(surface, bomb_black, (center_x, center_y), bomb_size, context="ignited_bomb_body")
+        safe_pygame_draw_circle(surface, fuse_color, (center_x, center_y), bomb_size, 3, context="ignited_bomb_border")
 
     def draw_standard_bomb(self, surface, center_x, center_y, bomb_data):
         """Draw bomb in standard armed state"""
         pulse = 0.8 + 0.2 * math.sin(self.time * 8)
         bomb_size = int(16 * pulse)
 
+        bomb_black = safe_get_color('BOMB_BLACK', 'bomb_body')
+        shadow_color = safe_get_color('SHADOW_RGB', 'bomb_shadow')
+
+        # Drop shadow
+        shadow_surf = pygame.Surface((bomb_size * 2 + 4, bomb_size * 2 + 4), pygame.SRCALPHA)
+        shadow_rgba = create_rgba_color(shadow_color, 60, 'bomb_shadow')
+        safe_pygame_draw_circle(shadow_surf, shadow_rgba, (bomb_size + 2, bomb_size + 2), bomb_size, context="bomb_shadow")
+        surface.blit(shadow_surf, (center_x - bomb_size - 2, center_y - bomb_size - 2))
+
         # Main bomb body
-        pygame.draw.circle(surface, COLORS['BOMB_BLACK'], (center_x, center_y), bomb_size)
-        pygame.draw.circle(surface, (80, 80, 80), (center_x, center_y), bomb_size, 2)
+        safe_pygame_draw_circle(surface, bomb_black, (center_x, center_y), bomb_size, context="bomb_body")
+        safe_pygame_draw_circle(surface, (80, 80, 80), (center_x, center_y), bomb_size, 2, context="bomb_border")
 
         # Highlight
-        pygame.draw.circle(surface, (120, 120, 120), 
-                         (center_x - bomb_size // 3, center_y - bomb_size // 3), bomb_size // 4)
+        safe_pygame_draw_circle(surface, (120, 120, 120), 
+                         (center_x - bomb_size // 3, center_y - bomb_size // 3), bomb_size // 4, context="bomb_highlight")
 
     def draw_enhanced_player_with_complete_effects(self, surface, x, y, player: PlayerState):
         """Draw player with complete status effects and timer visualization"""
@@ -1381,21 +1552,25 @@ class GNGameVisualizer:
         if player_id in self.current_game_state.dead_players:
             # Dead player colors
             player_colors = {
-                1: COLORS['PLAYER_1_DEAD'], 2: COLORS['PLAYER_2_DEAD'],
-                3: COLORS['PLAYER_3_DEAD'], 4: COLORS['PLAYER_4_DEAD']
+                1: safe_get_color('PLAYER_1_DEAD', 'dead_player'), 
+                2: safe_get_color('PLAYER_2_DEAD', 'dead_player'),
+                3: safe_get_color('PLAYER_3_DEAD', 'dead_player'), 
+                4: safe_get_color('PLAYER_4_DEAD', 'dead_player')
             }
-            skin_color = COLORS['SKIN_DEAD']
-            skin_shadow_color = COLORS['SKIN_SHADOW_DEAD']
+            skin_color = safe_get_color('SKIN_DEAD', 'dead_skin')
+            skin_shadow_color = safe_get_color('SKIN_SHADOW_DEAD', 'dead_skin_shadow')
         else:
             # Alive player colors with speed enhancement
             player_colors = {
-                1: COLORS['PLAYER_1'], 2: COLORS['PLAYER_2'],
-                3: COLORS['PLAYER_3'], 4: COLORS['PLAYER_4']
+                1: safe_get_color('PLAYER_1', 'alive_player'), 
+                2: safe_get_color('PLAYER_2', 'alive_player'),
+                3: safe_get_color('PLAYER_3', 'alive_player'), 
+                4: safe_get_color('PLAYER_4', 'alive_player')
             }
-            skin_color = COLORS['SKIN']
-            skin_shadow_color = COLORS['SKIN_SHADOW']
+            skin_color = safe_get_color('SKIN', 'alive_skin')
+            skin_shadow_color = safe_get_color('SKIN_SHADOW', 'alive_skin_shadow')
 
-        base_color = player_colors.get(player_id, COLORS['PLAYER_1'])
+        base_color = player_colors.get(player_id, safe_get_color('PLAYER_1', 'default_player'))
 
         # Handle walking animation with enhanced interpolation
         char_x, char_y = x, y
@@ -1430,51 +1605,68 @@ class GNGameVisualizer:
         # Enhanced drop shadow
         shadow_surf = pygame.Surface((TILE_SIZE + 4, 16), pygame.SRCALPHA)
         shadow_alpha = 80 if player_id not in self.current_game_state.dead_players else 40
-        pygame.draw.ellipse(shadow_surf, (*COLORS['SHADOW'][:3], shadow_alpha), (2, 0, TILE_SIZE, 16))
+        shadow_color = safe_get_color('SHADOW_RGB', 'player_shadow')
+        shadow_rgba = create_rgba_color(shadow_color, shadow_alpha, 'player_shadow')
+        safe_pygame_draw_ellipse(shadow_surf, shadow_rgba, (2, 0, TILE_SIZE, 16), context="player_shadow")
         surface.blit(shadow_surf, (x - 2, y + TILE_SIZE - 12))
 
         # Enhanced body with better gradient
         body_rect = pygame.Rect(center_x - 10, char_y - 4, 20, 24)
-        self.draw_gradient_rect(surface, outfit_color, 
-                               tuple(max(0, c - 50) for c in outfit_color), body_rect)
-        pygame.draw.rect(surface, tuple(max(0, c - 70) for c in outfit_color), body_rect, 2)
+        body_dark_color = tuple(max(0, c - 50) for c in outfit_color)
+        body_dark_color = validate_color(body_dark_color, 'player_body_dark')
+        
+        self.draw_gradient_rect(surface, outfit_color, body_dark_color, body_rect)
+        
+        body_border_color = tuple(max(0, c - 70) for c in outfit_color)
+        body_border_color = validate_color(body_border_color, 'player_body_border')
+        safe_pygame_draw_rect(surface, body_border_color, body_rect, 2, context="player_body_border")
 
         # Enhanced head with better shading
         head_y = char_y - 15
-        pygame.draw.circle(surface, skin_shadow_color, (center_x + 1, head_y + 1), 12)
-        pygame.draw.circle(surface, skin_color, (center_x, head_y), 12)
-        pygame.draw.circle(surface, tuple(max(0, c - 40) for c in skin_color), (center_x, head_y), 12, 1)
+        safe_pygame_draw_circle(surface, skin_shadow_color, (center_x + 1, head_y + 1), 12, context="player_head_shadow")
+        safe_pygame_draw_circle(surface, skin_color, (center_x, head_y), 12, context="player_head")
+        
+        head_border_color = tuple(max(0, c - 40) for c in skin_color)
+        head_border_color = validate_color(head_border_color, 'player_head_border')
+        safe_pygame_draw_circle(surface, head_border_color, (center_x, head_y), 12, 1, context="player_head_border")
 
         # Enhanced facial features
-        pygame.draw.ellipse(surface, (255, 255, 255), (center_x - 7, head_y - 5, 7, 5))
-        pygame.draw.ellipse(surface, (255, 255, 255), (center_x + 1, head_y - 5, 7, 5))
+        safe_pygame_draw_ellipse(surface, (255, 255, 255), (center_x - 7, head_y - 5, 7, 5), context="player_left_eye")
+        safe_pygame_draw_ellipse(surface, (255, 255, 255), (center_x + 1, head_y - 5, 7, 5), context="player_right_eye")
         
         # Pupils with reflection
-        pygame.draw.circle(surface, (0, 0, 0), (center_x - 3, head_y - 2), 2)
-        pygame.draw.circle(surface, (0, 0, 0), (center_x + 4, head_y - 2), 2)
-        pygame.draw.circle(surface, (255, 255, 255), (center_x - 2, head_y - 3), 1)
-        pygame.draw.circle(surface, (255, 255, 255), (center_x + 5, head_y - 3), 1)
+        safe_pygame_draw_circle(surface, (0, 0, 0), (center_x - 3, head_y - 2), 2, context="player_left_pupil")
+        safe_pygame_draw_circle(surface, (0, 0, 0), (center_x + 4, head_y - 2), 2, context="player_right_pupil")
+        safe_pygame_draw_circle(surface, (255, 255, 255), (center_x - 2, head_y - 3), 1, context="player_left_reflection")
+        safe_pygame_draw_circle(surface, (255, 255, 255), (center_x + 5, head_y - 3), 1, context="player_right_reflection")
 
         # Player number badge
         badge_surf = pygame.Surface((20, 12), pygame.SRCALPHA)
-        pygame.draw.rect(badge_surf, (255, 255, 255, 220), (0, 0, 20, 12))
-        pygame.draw.rect(badge_surf, (0, 0, 0), (0, 0, 20, 12), 1)
-        pygame.draw.rect(badge_surf, outfit_color, (1, 1, 18, 10), 1)
+        badge_bg_rgba = create_rgba_color((255, 255, 255), 220, 'player_badge_bg')
+        safe_pygame_draw_rect(badge_surf, badge_bg_rgba, (0, 0, 20, 12), context="player_badge_bg")
+        safe_pygame_draw_rect(badge_surf, (0, 0, 0), (0, 0, 20, 12), 1, context="player_badge_border1")
+        safe_pygame_draw_rect(badge_surf, outfit_color, (1, 1, 18, 10), 1, context="player_badge_border2")
 
         num_text = self.small_font.render(str(player_id), True, (0, 0, 0))
         badge_surf.blit(num_text, (7, -1))
         surface.blit(badge_surf, (center_x - 10, char_y + 30))
 
     def draw_gradient_rect(self, surface, color1, color2, rect, vertical=True):
-        """Enhanced gradient rectangle with smooth blending"""
+        """Enhanced gradient rectangle with smooth blending and safe colors"""
+        # Validate colors
+        color1 = validate_color(color1, 'gradient_color1')
+        color2 = validate_color(color2, 'gradient_color2')
+        
         if vertical:
             for y in range(rect.height):
                 ratio = y / rect.height if rect.height > 0 else 0
                 r = int(color1[0] * (1 - ratio) + color2[0] * ratio)
                 g = int(color1[1] * (1 - ratio) + color2[1] * ratio)
                 b = int(color1[2] * (1 - ratio) + color2[2] * ratio)
-                pygame.draw.line(surface, (r, g, b),
-                               (rect.x, rect.y + y), (rect.x + rect.width, rect.y + y))
+                
+                gradient_color = validate_color((r, g, b), 'gradient_line')
+                safe_pygame_draw_line(surface, gradient_color,
+                               (rect.x, rect.y + y), (rect.x + rect.width, rect.y + y), context="gradient_line")
 
     def draw_enhanced_explosion_effect(self, surface, explosion):
         """Draw enhanced explosion effects"""
@@ -1493,16 +1685,17 @@ class GNGameVisualizer:
         
         if pulse_size > 0:
             if explosion_type == 'ice':
-                color = COLORS['FREEZE_COLOR']
+                color = safe_get_color('FREEZE_COLOR', 'ice_explosion')
             elif explosion_type == 'remote':
-                color = COLORS['TEXT_CYAN']
+                color = safe_get_color('TEXT_CYAN', 'remote_explosion')
             else:
-                color = COLORS['EXPLOSION_MIDDLE']
+                color = safe_get_color('EXPLOSION_MIDDLE', 'standard_explosion')
 
             explosion_surf = pygame.Surface((pulse_size * 2, pulse_size * 2), pygame.SRCALPHA)
             alpha = int(200 * (1 - progress))
-            pygame.draw.circle(explosion_surf, (*color, alpha), 
-                             (pulse_size, pulse_size), pulse_size)
+            explosion_rgba = create_rgba_color(color, alpha, 'explosion_effect')
+            safe_pygame_draw_circle(explosion_surf, explosion_rgba, 
+                             (pulse_size, pulse_size), pulse_size, context="explosion_circle")
             surface.blit(explosion_surf, (center_x - pulse_size, center_y - pulse_size))
 
     def draw_all_enhanced_game_effects(self, surface):
@@ -1529,6 +1722,8 @@ class GNGameVisualizer:
             spiral_progress = progress / 0.7
             spiral_size = int(50 * spiral_progress)
             
+            text_red = safe_get_color('TEXT_RED', 'death_effect')
+            
             for i in range(8):
                 angle = (spiral_progress * 720 + i * 45) % 360
                 particle_x = center_x + int(spiral_size * math.cos(math.radians(angle)))
@@ -1539,22 +1734,27 @@ class GNGameVisualizer:
                 
                 if particle_alpha > 0:
                     particle_surf = pygame.Surface((particle_size * 2, particle_size * 2), pygame.SRCALPHA)
-                    pygame.draw.circle(particle_surf, (*COLORS['TEXT_RED'], particle_alpha),
-                                     (particle_size, particle_size), particle_size)
+                    particle_rgba = create_rgba_color(text_red, particle_alpha, 'death_particle')
+                    safe_pygame_draw_circle(particle_surf, particle_rgba,
+                                     (particle_size, particle_size), particle_size, context="death_particle")
                     surface.blit(particle_surf, (particle_x - particle_size, particle_y - particle_size))
 
     def draw_enhanced_player_stats_panel(self):
         """Draw enhanced player statistics panel"""
-        self.player_panel_surface.fill(COLORS['UI_BACKGROUND'])
+        self.player_panel_surface.fill(safe_get_color('UI_BACKGROUND', 'player_panel_bg'))
 
         # Enhanced panel border
-        pygame.draw.rect(self.player_panel_surface, COLORS['PANEL_BORDER'], 
-                        (0, 0, PLAYER_PANEL_WIDTH, MAP_SIZE * TILE_SIZE), 2)
+        panel_border_color = safe_get_color('PANEL_BORDER', 'player_panel_border')
+        safe_pygame_draw_rect(self.player_panel_surface, panel_border_color, 
+                        (0, 0, PLAYER_PANEL_WIDTH, MAP_SIZE * TILE_SIZE), 2, context="player_panel_border")
 
         # Panel title with glow
         title_text = f"GN {self.gn_id.upper()} PLAYERS"
-        title_shadow = self.title_font.render(title_text, True, COLORS['TEXT_SHADOW'])
-        title_main = self.title_font.render(title_text, True, COLORS['TEXT_GOLD'])
+        title_shadow_color = safe_get_color('TEXT_SHADOW', 'panel_title_shadow')
+        title_main_color = safe_get_color('TEXT_GOLD', 'panel_title_main')
+        
+        title_shadow = self.title_font.render(title_text, True, title_shadow_color)
+        title_main = self.title_font.render(title_text, True, title_main_color)
 
         # Multi-layer title effect
         for offset in [(2, 2), (1, 1), (0, 0)]:
@@ -1566,15 +1766,15 @@ class GNGameVisualizer:
         # Connection status
         status_y = 45
         status_text = f"Socket: {self.connection_status}"
-        status_color = COLORS['TEXT_GREEN'] if self.connection_status == "Connected" else COLORS['TEXT_RED']
+        status_color = safe_get_color('TEXT_GREEN', 'status_ok') if self.connection_status == "Connected" else safe_get_color('TEXT_RED', 'status_error')
         status_surface = self.mini_font.render(status_text, True, status_color)
         self.player_panel_surface.blit(status_surface, (12, status_y))
 
         # Local player indicator
         local_text = f"Local Player: {self.local_player_id}"
-        local_color = COLORS['TEXT_CYAN']
+        local_color = safe_get_color('TEXT_CYAN', 'local_player_ok')
         if self.local_player_dead:
-            local_color = COLORS['TEXT_RED']
+            local_color = safe_get_color('TEXT_RED', 'local_player_dead')
             local_text += " (DEAD)"
         local_surface = self.mini_font.render(local_text, True, local_color)
         self.player_panel_surface.blit(local_surface, (12, status_y + 15))
@@ -1598,26 +1798,30 @@ class GNGameVisualizer:
         # Choose colors and status based on death state
         if is_dead:
             player_colors = {
-                1: COLORS['PLAYER_1_DEAD'], 2: COLORS['PLAYER_2_DEAD'],
-                3: COLORS['PLAYER_3_DEAD'], 4: COLORS['PLAYER_4_DEAD']
+                1: safe_get_color('PLAYER_1_DEAD', 'dead_player_1'), 
+                2: safe_get_color('PLAYER_2_DEAD', 'dead_player_2'),
+                3: safe_get_color('PLAYER_3_DEAD', 'dead_player_3'), 
+                4: safe_get_color('PLAYER_4_DEAD', 'dead_player_4')
             }
-            text_color = COLORS['TEXT_GREY']
-            status_text = "💀 DEAD"
-            status_color = COLORS['TEXT_RED']
+            text_color = safe_get_color('TEXT_GREY', 'dead_text')
+            status_text = "DEAD"
+            status_color = safe_get_color('TEXT_RED', 'dead_status')
         else:
             player_colors = {
-                1: COLORS['PLAYER_1'], 2: COLORS['PLAYER_2'],
-                3: COLORS['PLAYER_3'], 4: COLORS['PLAYER_4']
+                1: safe_get_color('PLAYER_1', 'alive_player_1'), 
+                2: safe_get_color('PLAYER_2', 'alive_player_2'),
+                3: safe_get_color('PLAYER_3', 'alive_player_3'), 
+                4: safe_get_color('PLAYER_4', 'alive_player_4')
             }
-            text_color = COLORS['TEXT_WHITE']
+            text_color = safe_get_color('TEXT_WHITE', 'alive_text')
             if player_data:
-                status_text = f"✅ ALIVE at ({player_data.x}, {player_data.y})"
-                status_color = COLORS['TEXT_GREEN']
+                status_text = f"ALIVE at ({player_data.x}, {player_data.y})"
+                status_color = safe_get_color('TEXT_GREEN', 'alive_status')
             else:
-                status_text = "⏳ WAITING"
-                status_color = COLORS['TEXT_ORANGE']
+                status_text = "WAITING"
+                status_color = safe_get_color('TEXT_ORANGE', 'waiting_status')
 
-        player_color = player_colors.get(player_id, COLORS['PLAYER_1'])
+        player_color = player_colors.get(player_id, safe_get_color('PLAYER_1', 'default_player'))
 
         # Enhanced background with animated border for local player
         bg_rect = pygame.Rect(10, y_pos, PLAYER_PANEL_WIDTH - 20, height - 10)
@@ -1626,22 +1830,30 @@ class GNGameVisualizer:
         if is_local:
             border_pulse = 1.0 + 0.5 * math.sin(self.time * 4)  # More pronounced for local player
         
-        # Background gradient
+        # Background gradient with safe colors
         bg_alpha = int((30 if is_dead else 60) + 20 * border_pulse)
         if is_local and not is_dead:
             bg_alpha = int(80 + 40 * border_pulse)  # Brighter for local player
-            
-        self.draw_gradient_rect(surface, (*player_color, bg_alpha), (*player_color, bg_alpha // 2), bg_rect)
         
-        # Animated border
-        border_color = tuple(int(c * border_pulse) for c in player_color)
+        # Create safe background colors
+        bg_color1 = player_color
+        bg_alpha_clamped = max(0, min(255, bg_alpha))
+        bg_color2 = tuple(max(0, min(255, int(c * 0.5))) for c in bg_color1)
+        
+        self.draw_gradient_rect(surface, bg_color1, bg_color2, bg_rect)
+        
+        # Animated border with safe color
+        border_intensity = max(0.3, min(1.5, border_pulse))
+        border_color = tuple(max(0, min(255, int(c * border_intensity))) for c in player_color)
+        border_color = validate_color(border_color, 'player_stats_border')
         border_width = 3 if is_local else 2
-        pygame.draw.rect(surface, border_color, bg_rect, border_width)
+        safe_pygame_draw_rect(surface, border_color, bg_rect, border_width, context="player_stats_border")
 
         # Local player indicator
         if is_local:
-            local_indicator = "👤 YOU"
-            local_surface = self.mini_font.render(local_indicator, True, COLORS['TEXT_GOLD'])
+            local_indicator = "YOU"
+            local_gold = safe_get_color('TEXT_GOLD', 'local_indicator')
+            local_surface = self.mini_font.render(local_indicator, True, local_gold)
             surface.blit(local_surface, (15, y_pos + 5))
 
         # Enhanced player avatar
@@ -1665,7 +1877,7 @@ class GNGameVisualizer:
         # Health with visual hearts
         current_health = 0 if is_dead else (player_data.health if player_data else 3)
         health_text = "Health:"
-        health_color = COLORS['TEXT_GREY'] if is_dead else COLORS['TEXT_RED']
+        health_color = safe_get_color('TEXT_GREY', 'health_dead') if is_dead else safe_get_color('TEXT_RED', 'health_alive')
         health_surface = self.small_font.render(health_text, True, health_color)
         surface.blit(health_surface, (avatar_x + 35, stats_start_y + stat_height * 2))
 
@@ -1681,11 +1893,11 @@ class GNGameVisualizer:
             speed_text = f"Speed: {current_speed}"
             
             if current_speed > 3:
-                speed_color = COLORS['TEXT_PURPLE']
+                speed_color = safe_get_color('TEXT_PURPLE', 'speed_high')
             elif current_speed > 1:
-                speed_color = COLORS['TEXT_GREEN']
+                speed_color = safe_get_color('TEXT_GREEN', 'speed_medium')
             else:
-                speed_color = COLORS['TEXT_CYAN']
+                speed_color = safe_get_color('TEXT_CYAN', 'speed_low')
                 
             speed_surface = self.small_font.render(speed_text, True, speed_color)
             surface.blit(speed_surface, (avatar_x + 35, stats_start_y + stat_height * 3))
@@ -1694,52 +1906,67 @@ class GNGameVisualizer:
         """Draw enhanced mini player"""
         if is_dead:
             player_colors = {
-                1: COLORS['PLAYER_1_DEAD'], 2: COLORS['PLAYER_2_DEAD'],
-                3: COLORS['PLAYER_3_DEAD'], 4: COLORS['PLAYER_4_DEAD']
+                1: safe_get_color('PLAYER_1_DEAD', 'mini_dead_1'), 
+                2: safe_get_color('PLAYER_2_DEAD', 'mini_dead_2'),
+                3: safe_get_color('PLAYER_3_DEAD', 'mini_dead_3'), 
+                4: safe_get_color('PLAYER_4_DEAD', 'mini_dead_4')
             }
-            skin_color = COLORS['SKIN_DEAD']
+            skin_color = safe_get_color('SKIN_DEAD', 'mini_dead_skin')
         else:
             player_colors = {
-                1: COLORS['PLAYER_1'], 2: COLORS['PLAYER_2'],
-                3: COLORS['PLAYER_3'], 4: COLORS['PLAYER_4']
+                1: safe_get_color('PLAYER_1', 'mini_alive_1'), 
+                2: safe_get_color('PLAYER_2', 'mini_alive_2'),
+                3: safe_get_color('PLAYER_3', 'mini_alive_3'), 
+                4: safe_get_color('PLAYER_4', 'mini_alive_4')
             }
-            skin_color = COLORS['SKIN']
+            skin_color = safe_get_color('SKIN', 'mini_alive_skin')
 
-        outfit_color = player_colors.get(player_num, COLORS['PLAYER_1'])
+        outfit_color = player_colors.get(player_num, safe_get_color('PLAYER_1', 'mini_default'))
         size = int(18 * scale)
 
         # Enhanced body
         body_rect = pygame.Rect(x - size // 2, y, size, int(size * 1.3))
-        self.draw_gradient_rect(surface, outfit_color, tuple(max(0, c - 40) for c in outfit_color), body_rect)
-        pygame.draw.rect(surface, tuple(max(0, c - 60) for c in outfit_color), body_rect, 1)
+        body_dark_color = tuple(max(0, c - 40) for c in outfit_color)
+        body_dark_color = validate_color(body_dark_color, 'mini_body_dark')
+        
+        self.draw_gradient_rect(surface, outfit_color, body_dark_color, body_rect)
+        
+        body_border_color = tuple(max(0, c - 60) for c in outfit_color)
+        body_border_color = validate_color(body_border_color, 'mini_body_border')
+        safe_pygame_draw_rect(surface, body_border_color, body_rect, 1, context="mini_body_border")
 
         # Enhanced head
         head_y = y - size // 2
-        pygame.draw.circle(surface, skin_color, (x, head_y), size // 2)
-        pygame.draw.circle(surface, tuple(max(0, c - 30) for c in skin_color), (x, head_y), size // 2, 1)
+        safe_pygame_draw_circle(surface, skin_color, (x, head_y), size // 2, context="mini_head")
+        
+        head_border_color = tuple(max(0, c - 30) for c in skin_color)
+        head_border_color = validate_color(head_border_color, 'mini_head_border')
+        safe_pygame_draw_circle(surface, head_border_color, (x, head_y), size // 2, 1, context="mini_head_border")
 
         # Face
         if is_dead:
             # X eyes for dead players
+            eye_color = validate_color((100, 100, 100), 'dead_eyes')
             eye_size = 2
-            pygame.draw.line(surface, (100, 100, 100), 
-                           (x - 5, head_y - 5), (x - 3, head_y - 3), eye_size)
-            pygame.draw.line(surface, (100, 100, 100), 
-                           (x - 3, head_y - 5), (x - 5, head_y - 3), eye_size)
-            pygame.draw.line(surface, (100, 100, 100), 
-                           (x + 3, head_y - 5), (x + 5, head_y - 3), eye_size)
-            pygame.draw.line(surface, (100, 100, 100), 
-                           (x + 5, head_y - 5), (x + 3, head_y - 3), eye_size)
+            safe_pygame_draw_line(surface, eye_color, 
+                           (x - 5, head_y - 5), (x - 3, head_y - 3), eye_size, context="dead_eye_x1")
+            safe_pygame_draw_line(surface, eye_color, 
+                           (x - 3, head_y - 5), (x - 5, head_y - 3), eye_size, context="dead_eye_x2")
+            safe_pygame_draw_line(surface, eye_color, 
+                           (x + 3, head_y - 5), (x + 5, head_y - 3), eye_size, context="dead_eye_x3")
+            safe_pygame_draw_line(surface, eye_color, 
+                           (x + 5, head_y - 5), (x + 3, head_y - 3), eye_size, context="dead_eye_x4")
         else:
             # Normal eyes
-            pygame.draw.circle(surface, (0, 0, 0), (x - size // 4, head_y - 2), 1)
-            pygame.draw.circle(surface, (0, 0, 0), (x + size // 4, head_y - 2), 1)
+            safe_pygame_draw_circle(surface, (0, 0, 0), (x - size // 4, head_y - 2), 1, context="mini_left_eye")
+            safe_pygame_draw_circle(surface, (0, 0, 0), (x + size // 4, head_y - 2), 1, context="mini_right_eye")
 
         # Player number badge
         badge_surf = pygame.Surface((16, 10), pygame.SRCALPHA)
         badge_alpha = int(220 * scale) if not is_dead else 120
-        pygame.draw.rect(badge_surf, (255, 255, 255, badge_alpha), (0, 0, 16, 10))
-        pygame.draw.rect(badge_surf, (0, 0, 0), (0, 0, 16, 10), 1)
+        badge_bg_rgba = create_rgba_color((255, 255, 255), badge_alpha, 'mini_badge_bg')
+        safe_pygame_draw_rect(badge_surf, badge_bg_rgba, (0, 0, 16, 10), context="mini_badge_bg")
+        safe_pygame_draw_rect(badge_surf, (0, 0, 0), (0, 0, 16, 10), 1, context="mini_badge_border")
 
         num_text = self.mini_font.render(str(player_num), True, (0, 0, 0))
         badge_surf.blit(num_text, (5, -1))
@@ -1750,23 +1977,35 @@ class GNGameVisualizer:
         size = 7 if not is_dead else 5
         alpha = 255 if not is_dead else 120
         
-        # Heart shape
-        pygame.draw.circle(surface, (*color[:3], alpha), (x - 2, y - 1), 2)
-        pygame.draw.circle(surface, (*color[:3], alpha), (x + 2, y - 1), 2)
-        points = [(x - 3, y), (x + 3, y), (x, y + 5)]
+        # Validate color
+        heart_color = validate_color(color, 'mini_heart')
+        
+        # Heart shape with alpha
+        heart_rgba = create_rgba_color(heart_color, alpha, 'mini_heart_shape')
+        
+        # Create temporary surface for heart
+        heart_surf = pygame.Surface((14, 12), pygame.SRCALPHA)
+        safe_pygame_draw_circle(heart_surf, heart_rgba, (x - 2 - (x-7), y - 1 - (y-6)), 2, context="heart_left")
+        safe_pygame_draw_circle(heart_surf, heart_rgba, (x + 2 - (x-7), y - 1 - (y-6)), 2, context="heart_right")
+        
+        points = [(x - 3 - (x-7), y - (y-6)), (x + 3 - (x-7), y - (y-6)), (x - (x-7), y + 5 - (y-6))]
         if len(points) >= 3:
-            pygame.draw.polygon(surface, (*color[:3], alpha), points)
+            safe_pygame_draw_polygon(heart_surf, heart_rgba, points, context="heart_triangle")
+        
+        surface.blit(heart_surf, (x-7, y-6))
 
     def draw_enhanced_timer_panel(self):
         """Draw enhanced timer panel"""
-        self.timer_panel_surface.fill(COLORS['UI_BACKGROUND'])
+        self.timer_panel_surface.fill(safe_get_color('UI_BACKGROUND', 'timer_panel_bg'))
         
-        pygame.draw.rect(self.timer_panel_surface, COLORS['PANEL_BORDER'], 
-                        (0, 0, TIMER_PANEL_WIDTH, MAP_SIZE * TILE_SIZE), 2)
+        panel_border_color = safe_get_color('PANEL_BORDER', 'timer_panel_border')
+        safe_pygame_draw_rect(self.timer_panel_surface, panel_border_color, 
+                        (0, 0, TIMER_PANEL_WIDTH, MAP_SIZE * TILE_SIZE), 2, context="timer_panel_border")
 
         # Title
         title_text = "GN TIMERS"
-        title_surface = self.font.render(title_text, True, COLORS['TEXT_GOLD'])
+        title_color = safe_get_color('TEXT_GOLD', 'timer_panel_title')
+        title_surface = self.font.render(title_text, True, title_color)
         self.timer_panel_surface.blit(title_surface, (10, 10))
 
         # GN Information
@@ -1778,21 +2017,22 @@ class GNGameVisualizer:
         ]
         
         for i, info in enumerate(gn_info):
-            color = COLORS['TEXT_CYAN']
+            info_color = safe_get_color('TEXT_CYAN', 'gn_info')
             if i == 2 and self.local_player_dead:
-                color = COLORS['TEXT_RED']
-            info_surface = self.mini_font.render(info, True, color)
+                info_color = safe_get_color('TEXT_RED', 'gn_info_dead')
+            info_surface = self.mini_font.render(info, True, info_color)
             self.timer_panel_surface.blit(info_surface, (10, gn_info_y + i * 15))
 
         # Performance info
         perf_y = MAP_SIZE * TILE_SIZE - 80
         fps_text = f"FPS: {self.current_fps:.1f}"
-        fps_color = COLORS['TEXT_GREEN'] if self.current_fps > 50 else COLORS['TEXT_ORANGE']
+        fps_color = safe_get_color('TEXT_GREEN', 'fps_good') if self.current_fps > 50 else safe_get_color('TEXT_ORANGE', 'fps_low')
         fps_surface = self.mini_font.render(fps_text, True, fps_color)
         self.timer_panel_surface.blit(fps_surface, (10, perf_y))
         
         msg_text = f"Messages: {self.message_count}"
-        msg_surface = self.mini_font.render(msg_text, True, COLORS['TEXT_WHITE'])
+        msg_color = safe_get_color('TEXT_WHITE', 'msg_count')
+        msg_surface = self.mini_font.render(msg_text, True, msg_color)
         self.timer_panel_surface.blit(msg_surface, (10, perf_y + 15))
 
         # Blit to virtual surface
@@ -1800,14 +2040,16 @@ class GNGameVisualizer:
 
     def draw_enhanced_powerups_panel(self):
         """Draw enhanced power-ups panel"""
-        self.powerup_panel_surface.fill(COLORS['UI_BACKGROUND'])
+        self.powerup_panel_surface.fill(safe_get_color('UI_BACKGROUND', 'powerup_panel_bg'))
         
-        pygame.draw.rect(self.powerup_panel_surface, COLORS['PANEL_BORDER'], 
-                        (0, 0, WINDOW_WIDTH, POWERUP_PANEL_HEIGHT), 2)
+        panel_border_color = safe_get_color('PANEL_BORDER', 'powerup_panel_border')
+        safe_pygame_draw_rect(self.powerup_panel_surface, panel_border_color, 
+                        (0, 0, WINDOW_WIDTH, POWERUP_PANEL_HEIGHT), 2, context="powerup_panel_border")
 
         # Title
         title_text = f"GN {self.gn_id.upper()} CONTROLS & POWER-UPS"
-        title_surface = self.title_font.render(title_text, True, COLORS['TEXT_GOLD'])
+        title_color = safe_get_color('TEXT_GOLD', 'powerup_panel_title')
+        title_surface = self.title_font.render(title_text, True, title_color)
         self.powerup_panel_surface.blit(title_surface, (20, 15))
 
         # Controls info
@@ -1816,35 +2058,37 @@ class GNGameVisualizer:
             f"GN Socket connection to localhost:{self.socket_manager.port} with real-time updates"
         ]
         
+        control_color = safe_get_color('TEXT_WHITE', 'control_text')
         for i, control in enumerate(controls):
-            control_surface = self.small_font.render(control, True, COLORS['TEXT_WHITE'])
+            control_surface = self.small_font.render(control, True, control_color)
             self.powerup_panel_surface.blit(control_surface, (20, 50 + i * 20))
 
-        # Enhanced power-up legend (same as CN version)
+        # Enhanced power-up legend
         powerups = [
-            ("⚡", "SPEED", COLORS['TEXT_CYAN']),
-            ("📡", "REMOTE", COLORS['TEXT_ORANGE']),
-            ("💣", "BOMBS", COLORS['TEXT_GOLD']),
-            ("💥", "BLAST", COLORS['TEXT_RED']),
-            ("❤️", "LIFE", COLORS['TEXT_GREEN']),
-            ("🧊", "FREEZE", COLORS['FREEZE_COLOR']),
-            ("👻", "GHOST", COLORS['TEXT_PURPLE']),
-            ("🦵", "KICK", (255, 100, 255))
+            ("SPEED", safe_get_color('TEXT_CYAN', 'powerup_speed')),
+            ("REMOTE", safe_get_color('TEXT_ORANGE', 'powerup_remote')),
+            ("BOMBS", safe_get_color('TEXT_GOLD', 'powerup_bombs')),
+            ("BLAST", safe_get_color('TEXT_RED', 'powerup_blast')),
+            ("LIFE", safe_get_color('TEXT_GREEN', 'powerup_life')),
+            ("FREEZE", safe_get_color('FREEZE_COLOR', 'powerup_freeze')),
+            ("GHOST", safe_get_color('TEXT_PURPLE', 'powerup_ghost')),
+            ("KICK", validate_color((255, 100, 255), 'powerup_kick'))
         ]
 
         start_x = 20
         start_y = 100
-        for i, (icon, name, color) in enumerate(powerups):
+        for i, (name, color) in enumerate(powerups):
             x = start_x + (i % 8) * 100
             y = start_y + (i // 8) * 25
             
             # Animated glow
             glow_intensity = 0.7 + 0.3 * math.sin(self.time * 3 + i * 0.5)
             
-            icon_surface = self.font.render(icon, True, tuple(int(c * glow_intensity) for c in color))
+            glow_color = tuple(int(c * glow_intensity) for c in color)
+            glow_color = validate_color(glow_color, 'powerup_glow')
+            
             name_surface = self.small_font.render(name, True, color)
             
-            self.powerup_panel_surface.blit(icon_surface, (x, y))
             self.powerup_panel_surface.blit(name_surface, (x + 25, y + 3))
 
         # Blit to virtual surface
@@ -1864,7 +2108,11 @@ class GNGameVisualizer:
         
         # Main "YOU DIED" text in red
         death_text = "YOU DIED"
-        text_main = self.death_font.render(death_text, True, tuple(int(c * pulse) for c in COLORS['DEATH_TEXT']))
+        death_color = safe_get_color('DEATH_TEXT', 'death_overlay')
+        pulsed_death_color = tuple(int(c * pulse) for c in death_color)
+        pulsed_death_color = validate_color(pulsed_death_color, 'death_text_pulsed')
+        
+        text_main = self.death_font.render(death_text, True, pulsed_death_color)
         
         # Center the text
         text_rect = text_main.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2))
@@ -1875,13 +2123,15 @@ class GNGameVisualizer:
         # Additional message
         time_since_death = time.time() - self.death_message_start_time
         sub_text = f"Game continues... ({time_since_death:.1f}s)"
-        sub_surface = self.font.render(sub_text, True, COLORS['TEXT_WHITE'])
+        sub_color = safe_get_color('TEXT_WHITE', 'death_sub_text')
+        sub_surface = self.font.render(sub_text, True, sub_color)
         sub_rect = sub_surface.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 80))
         overlay.blit(sub_surface, sub_rect)
     
         # Instructions
         instruction_text = "Press ESC to exit"
-        instruction_surface = self.small_font.render(instruction_text, True, COLORS['TEXT_GREY'])
+        instruction_color = safe_get_color('TEXT_GREY', 'death_instruction')
+        instruction_surface = self.small_font.render(instruction_text, True, instruction_color)
         instruction_rect = instruction_surface.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 110))
         overlay.blit(instruction_surface, instruction_rect)
     
@@ -1898,14 +2148,14 @@ class GNGameVisualizer:
                 if event.key == pygame.K_ESCAPE:
                     return False
                 elif event.key == pygame.K_r:
-                    print("🔄 Manual refresh requested")
+                    print("Manual refresh requested")
                     if self.socket_manager.connected:
                         self.socket_manager.send_message({
                             "type": "refresh_request",
                             "timestamp": int(time.time() * 1000)
                         })
                 elif event.key == pygame.K_h:
-                    print(f"🔧 GN {self.gn_id.upper()} Game Visualizer Controls:")
+                    print(f"GN {self.gn_id.upper()} Game Visualizer Controls:")
                     print("   ESC - Exit")
                     print("   R - Request refresh from server")
                     print("   H - This help")
@@ -1960,31 +2210,31 @@ class GNGameVisualizer:
         tile_names = {0: 'FREE_SPACE', 1: 'WOODEN_BARREL', 2: 'BRICK_WALL', 3: 'METAL_BARREL'}
         tile_name = tile_names.get(tile_type, f'UNKNOWN_{tile_type}')
 
-        print(f"\n🎯 GN {self.gn_id.upper()} Tile Inspection at ({tile_x}, {tile_y}):")
-        print(f"   📍 Tile Type: {tile_name}")
-        print(f"   🎁 Power-up: {powerup}")
+        print(f"\nGN {self.gn_id.upper()} Tile Inspection at ({tile_x}, {tile_y}):")
+        print(f"   Tile Type: {tile_name}")
+        print(f"   Power-up: {powerup}")
 
         # Check for players
         players_here = [p for p in self.current_game_state.players.values() 
                        if p.x == tile_x and p.y == tile_y]
         for player in players_here:
             local_indicator = " (YOU!)" if player.player_id == self.local_player_id else ""
-            print(f"   👤 Player {player.player_id}{local_indicator}:")
-            print(f"      💖 Health: {player.health}")
-            print(f"      ⚡ Speed: {player.speed}")
-            print(f"      🧭 Direction: {player.direction}")
-            print(f"      ⏱️ Timers: Move={player.timers.movement_timer}ms, Immunity={player.timers.immunity_timer}ms")
+            print(f"   Player {player.player_id}{local_indicator}:")
+            print(f"      Health: {player.health}")
+            print(f"      Speed: {player.speed}")
+            print(f"      Direction: {player.direction}")
+            print(f"      Timers: Move={player.timers.movement_timer}ms, Immunity={player.timers.immunity_timer}ms")
 
         # Check for bombs
         bombs_here = [b for b in self.current_game_state.bombs.values() 
                      if b.x == tile_x and b.y == tile_y]
         for bomb in bombs_here:
             owner_indicator = " (YOUR BOMB!)" if bomb.owner == self.local_player_id else ""
-            print(f"   💣 Bomb{owner_indicator}:")
-            print(f"      🎯 Type: {bomb.bomb_type}")
-            print(f"      ⏰ Timer: {bomb.timer}ms")
-            print(f"      👤 Owner: Player {bomb.owner}")
-            print(f"      🎰 FSM State: {bomb.status}")
+            print(f"   Bomb{owner_indicator}:")
+            print(f"      Type: {bomb.bomb_type}")
+            print(f"      Timer: {bomb.timer}ms")
+            print(f"      Owner: Player {bomb.owner}")
+            print(f"      FSM State: {bomb.status}")
 
         print()
 
@@ -2004,8 +2254,11 @@ class GNGameVisualizer:
             return
 
         # Clear virtual surface with enhanced background
+        bg_color = safe_get_color('BACKGROUND', 'main_bg')
+        panel_bg_color = safe_get_color('PANEL_BG', 'main_panel_bg')
+        
         bg_rect = pygame.Rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.draw_gradient_rect(self.virtual_surface, COLORS['BACKGROUND'], COLORS['PANEL_BG'], bg_rect)
+        self.draw_gradient_rect(self.virtual_surface, bg_color, panel_bg_color, bg_rect)
 
         # Draw all enhanced components
         self.draw_enhanced_map()
@@ -2026,7 +2279,8 @@ class GNGameVisualizer:
             scaled_surface = self.virtual_surface
 
         # Center and display
-        self.screen.fill(COLORS['BACKGROUND'])
+        main_bg_color = safe_get_color('BACKGROUND', 'screen_bg')
+        self.screen.fill(main_bg_color)
         x_offset = (self.current_width - scaled_surface.get_width()) // 2
         y_offset = (self.current_height - scaled_surface.get_height()) // 2
         self.screen.blit(scaled_surface, (max(0, x_offset), max(0, y_offset)))
@@ -2040,21 +2294,21 @@ class GNGameVisualizer:
         status_y = 10
         
         if self.waiting_for_initial_map:
-            status_text = f"⏳ Waiting for game to start on GN {self.gn_id.upper()}..."
-            color = COLORS['TEXT_ORANGE']
+            status_text = f"Waiting for game to start on GN {self.gn_id.upper()}..."
+            color = safe_get_color('TEXT_ORANGE', 'status_waiting')
         elif not self.socket_manager.connected:
-            status_text = f"❌ Disconnected from GN {self.gn_id.upper()} server"
-            color = COLORS['TEXT_RED']
+            status_text = f"Disconnected from GN {self.gn_id.upper()} server"
+            color = safe_get_color('TEXT_RED', 'status_disconnected')
         else:
             dead_count = len(self.current_game_state.dead_players)
             active_animations = (len(self.player_animations) + len(self.bomb_animations) + 
                                len(self.explosion_animations) + len(self.game_effects))
             
             death_indicator = " | YOU ARE DEAD" if self.local_player_dead else ""
-            status_text = (f"🔗 GN {self.gn_id.upper()} Connected | Player {self.local_player_id} | "
+            status_text = (f"GN {self.gn_id.upper()} Connected | Player {self.local_player_id} | "
                          f"Dead: {dead_count} | Animations: {active_animations} | "
                          f"FPS: {self.current_fps:.1f}{death_indicator}")
-            color = COLORS['TEXT_RED'] if self.local_player_dead else COLORS['TEXT_GREEN']
+            color = safe_get_color('TEXT_RED', 'status_dead') if self.local_player_dead else safe_get_color('TEXT_GREEN', 'status_connected')
 
         status_surface = self.small_font.render(status_text, True, color)
         status_rect = status_surface.get_rect(topleft=(10, status_y))
@@ -2062,22 +2316,23 @@ class GNGameVisualizer:
         # Enhanced background
         bg_rect = status_rect.inflate(8, 4)
         bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(bg_surf, (0, 0, 0, 150), (0, 0, bg_rect.width, bg_rect.height))
-        pygame.draw.rect(bg_surf, color, (0, 0, bg_rect.width, bg_rect.height), 1)
+        bg_rgba = create_rgba_color((0, 0, 0), 150, 'status_bg')
+        safe_pygame_draw_rect(bg_surf, bg_rgba, (0, 0, bg_rect.width, bg_rect.height), context="status_bg")
+        safe_pygame_draw_rect(bg_surf, color, (0, 0, bg_rect.width, bg_rect.height), 1, context="status_border")
         
         self.screen.blit(bg_surf, bg_rect)
         self.screen.blit(status_surface, status_rect)
 
     def run_enhanced_game_loop(self):
         """Main enhanced game loop with GN socket communication"""
-        print(f"🚀 Starting GN {self.gn_id.upper()} Game Visualizer...")
-        print(f"🔗 Connecting to GN server at localhost:{self.socket_manager.port}")
-        print(f"👤 Local player: Player {self.local_player_id}")
-        print("🎨 Features: Enhanced graphics, GN socket communication, FSM states, real-time effects")
+        print(f"Starting GN {self.gn_id.upper()} Game Visualizer...")
+        print(f"Connecting to GN server at localhost:{self.socket_manager.port}")
+        print(f"Local player: Player {self.local_player_id}")
+        print("Features: Enhanced graphics, GN socket communication, FSM states, real-time effects")
         
         # Initial connection attempt
         if not self.connect_to_server():
-            print("❌ Failed to connect to GN server. Will retry automatically...")
+            print("Failed to connect to GN server. Will retry automatically...")
 
         running = True
         last_reconnect_attempt = 0
@@ -2094,7 +2349,7 @@ class GNGameVisualizer:
             elif current_time - last_reconnect_attempt > RECONNECT_DELAY:
                 # Attempt reconnection
                 if self.socket_manager.attempt_reconnect():
-                    print(f"✅ Reconnected to GN {self.gn_id.upper()} server!")
+                    print(f"Reconnected to GN {self.gn_id.upper()} server!")
                     self.connection_status = "Connected"
                 else:
                     self.connection_status = "Reconnecting..."
@@ -2108,23 +2363,29 @@ class GNGameVisualizer:
                 self.draw_complete_enhanced_visualization()
             else:
                 # Enhanced waiting screen
-                self.screen.fill(COLORS['BACKGROUND'])
+                main_bg_color = safe_get_color('BACKGROUND', 'waiting_bg')
+                self.screen.fill(main_bg_color)
                 
                 waiting_pulse = 0.8 + 0.2 * math.sin(self.time * 3)
                 
-                main_text = f"⏳ Waiting for game to start..."
-                main_surface = self.font.render(main_text, True, 
-                                              tuple(int(c * waiting_pulse) for c in COLORS['TEXT_WHITE']))
+                main_text = f"Waiting for game to start..."
+                text_color = safe_get_color('TEXT_WHITE', 'waiting_text')
+                pulsed_color = tuple(int(c * waiting_pulse) for c in text_color)
+                pulsed_color = validate_color(pulsed_color, 'waiting_text_pulsed')
+                
+                main_surface = self.font.render(main_text, True, pulsed_color)
                 main_rect = main_surface.get_rect(center=(self.current_width // 2, self.current_height // 2 - 30))
                 self.screen.blit(main_surface, main_rect)
 
                 sub_text = f"GN {self.gn_id.upper()} - Player {self.local_player_id} - Port {self.socket_manager.port}"
-                sub_surface = self.small_font.render(sub_text, True, COLORS['TEXT_CYAN'])
+                sub_color = safe_get_color('TEXT_CYAN', 'waiting_sub_text')
+                sub_surface = self.small_font.render(sub_text, True, sub_color)
                 sub_rect = sub_surface.get_rect(center=(self.current_width // 2, self.current_height // 2 + 10))
                 self.screen.blit(sub_surface, sub_rect)
                 
                 features_text = "Enhanced Graphics | Real-time Effects | FSM States | GN Socket Communication"
-                features_surface = self.mini_font.render(features_text, True, COLORS['TEXT_GOLD'])
+                features_color = safe_get_color('TEXT_GOLD', 'waiting_features')
+                features_surface = self.mini_font.render(features_text, True, features_color)
                 features_rect = features_surface.get_rect(center=(self.current_width // 2, self.current_height // 2 + 40))
                 self.screen.blit(features_surface, features_rect)
 
@@ -2133,8 +2394,8 @@ class GNGameVisualizer:
             self.clock.tick(FPS)
 
         # Cleanup
-        print(f"\n🛑 GN {self.gn_id.upper()} Game Visualizer shutting down...")
-        print(f"📊 Final Statistics: FPS: {self.current_fps:.1f}, Messages: {self.message_count}")
+        print(f"\nGN {self.gn_id.upper()} Game Visualizer shutting down...")
+        print(f"Final Statistics: FPS: {self.current_fps:.1f}, Messages: {self.message_count}")
         
         self.socket_manager.running = False
         self.socket_manager.close()
@@ -2146,20 +2407,6 @@ class GNGameVisualizer:
         sys.exit()
 
 
-# def determine_gn_id():
-#     """Determine GN ID from command line argument passed by Erlang"""
-#     if len(sys.argv) > 1:
-#         arg = sys.argv[1].lower()
-#         if arg in ['gn1', 'gn2', 'gn3', 'gn4']:
-#             print(f"✅ GN ID received from Erlang: {arg}")
-#             return arg
-    
-#     # This should never happen if called properly by Erlang
-#     print("❌ No GN ID provided as command line argument!")
-#     print("   This script should be started by gn_graphics_server.erl")
-#     print("   Falling back to gn1...")
-#     return 'gn1'
-
 def read_node_id():
     """Read the GN ID from node_id.txt file"""
     try:
@@ -2167,12 +2414,12 @@ def read_node_id():
         script_dir = os.path.dirname(os.path.abspath(__file__))
         node_id_file = os.path.join(script_dir, "node_id.txt")
         
-        print(f"🔍 Looking for node ID file: {node_id_file}")
+        print(f"Looking for node ID file: {node_id_file}")
         
         with open(node_id_file, 'r') as f:
             gn_id = f.read().strip()
             
-        print(f"✅ Read GN ID from file: '{gn_id}'")
+        print(f"Read GN ID from file: '{gn_id}'")
         
         # Validate format
         if not gn_id.startswith('gn') or len(gn_id) != 3:
@@ -2181,34 +2428,34 @@ def read_node_id():
         return gn_id
         
     except FileNotFoundError:
-        print("❌ ERROR: node_id.txt file not found!")
+        print("ERROR: node_id.txt file not found!")
         print("Make sure the Erlang GN graphics server creates this file first.")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ ERROR reading node ID file: {e}")
+        print(f"ERROR reading node ID file: {e}")
         sys.exit(1)
 
 # Main execution
 if __name__ == "__main__":
     try:
-        print("🐍 GN Python Visualizer Starting...")
+        print("GN Python Visualizer Starting...")
         
         # Get the GN ID first
         gn_id = read_node_id()
         
-        print(f"🎯 GN ID: {gn_id.upper()}")
-        print(f"👤 Local Player: Player {int(gn_id[-1])}")
+        print(f"GN ID: {gn_id.upper()}")
+        print(f"Local Player: Player {int(gn_id[-1])}")
         
         # Create visualizer once with correct arguments
         visualizer = GNGameVisualizer(gn_id)
         visualizer.run_enhanced_game_loop()
         
     except KeyboardInterrupt:
-        print("\n⏹️ Game interrupted by user")
+        print("\nGame interrupted by user")
         pygame.quit()
         sys.exit(0)
     except Exception as e:
-        print(f"\n❌ Fatal error: {e}")
+        print(f"\nFatal error: {e}")
         import traceback
         traceback.print_exc()
         pygame.quit()
