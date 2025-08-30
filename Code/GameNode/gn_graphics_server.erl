@@ -709,6 +709,9 @@ convert_player_safely_gn({PlayerID, Life, Speed, Direction, Movement, MovementTi
         RequestTimer
     ];
 
+convert_player_safely_gn(_) ->
+    <<"none">>.
+
 monitor_python_output(Port) ->
     receive
         {Port, {data, Data}} ->
@@ -722,5 +725,3 @@ monitor_python_output(Port) ->
     after 30000 ->
         io:format("🐍 Python output monitoring timeout~n")
     end.
-convert_player_safely_gn(_) ->
-    <<"none">>.
