@@ -140,7 +140,6 @@ COLORS = {
     'TIMER_BAR_BG': (50, 50, 50),
     'TIMER_BAR_FILL': (100, 255, 100),
     'TIMER_BAR_DANGER': (255, 100, 100),
-}
     
     # YOU DIED overlay colors
     'DEATH_OVERLAY_BG': (0, 0, 0),
