@@ -801,13 +801,20 @@ monitor_python_output(Port) ->
 
 %% send input (keypress) from GUI to IO handler, if it exists.
 process_input_from_gui(KeyPress, Socket) ->
-    LocalPlayerNum = Socket - ?PYTHON_SOCKET_PORT_BASE,
-    IOHandler = list_to_atom("io_handler_" ++ integer_to_list(LocalPlayerNum)),
-    case whereis(IOHandler) of
-        undefined -> % no such handler - ignore message
-            io:format("****GN GRAPHICS - No IO Handler found****~n"),
-            ok;
-        IOPid when is_pid(IOPid) -> 
-            io:format("****GN GRAPHICS - Found Pid for IO Handler - sending data~p~n",[KeyPress]),
-            IOPid ! {keyboard_input, KeyPress}
+    % Get the local port number from the socket
+    case inet:sockname(Socket) of
+        {ok, {_Address, LocalPort}} ->
+            LocalPlayerNum = LocalPort - ?PYTHON_SOCKET_PORT_BASE,
+            IOHandler = list_to_atom("io_handler_" ++ integer_to_list(LocalPlayerNum)),
+            case whereis(IOHandler) of
+                undefined -> % no such handler - ignore message
+                    io:format("****GN GRAPHICS - No IO Handler found for player ~p****~n", [LocalPlayerNum]),
+                    ok;
+                IOPid when is_pid(IOPid) -> 
+                    io:format("****GN GRAPHICS - Found Pid for IO Handler - sending data~p to player ~p~n",[KeyPress, LocalPlayerNum]),
+                    IOPid ! {keyboard_input, KeyPress}
+            end;
+        {error, Reason} ->
+            io:format("****GN GRAPHICS - Failed to get socket port: ~p****~n", [Reason]),
+            ok
     end.
