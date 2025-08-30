@@ -209,25 +209,34 @@ handle_cast(_Msg, State) ->
 
 %% Handle messages
 handle_info(start_python_socket_client, State) ->
-    io:format("🔍 DEBUG: Received start_python_socket_client message~n"),
     spawn(fun() ->
         {ok, Cwd} = file:get_cwd(),
-        io:format("🔍 DEBUG: Current working directory: ~s~n", [Cwd]),
-        PythonScript = filename:join([Cwd, "src", "code", "map", "gn_map_live.py"]),
-        io:format("🔍 DEBUG: Looking for Python script at: ~s~n", [PythonScript]),
-        case filelib:is_file(PythonScript) of
-            true ->
-                GNId = atom_to_list(State#state.local_gn_name),
-                Command = "python3 " ++ PythonScript ++ " " ++ GNId,
-                io:format("🚀 Starting GN Python visualizer with command: ~s~n", [Command]),
-                % Capture output from Python
-                Port = open_port({spawn, Command}, 
-                    [{cd, filename:dirname(PythonScript)}, binary, exit_status, stderr_to_stdout]),
-                io:format("✅ GN Python socket visualizer started, Port: ~p~n", [Port]),
-                % Monitor the port for output
-                monitor_python_output(Port);
-            false ->
-                io:format("❌ Python socket script not found at: ~s~n", [PythonScript])
+        MapDir = filename:join([Cwd, "src", "code", "map"]),
+        
+        % Create node_id.txt file with the GN ID
+        NodeIdFile = filename:join([MapDir, "node_id.txt"]),
+        GNId = atom_to_list(State#state.local_gn_name),
+        
+        io:format("🔍 Writing GN ID '~s' to file: ~s~n", [GNId, NodeIdFile]),
+        case file:write_file(NodeIdFile, GNId) of
+            ok ->
+                io:format("✅ Node ID file created successfully~n"),
+                
+                % Now start the Python script
+                PythonScript = filename:join([MapDir, "gn_map_live.py"]),
+                Command = "python3 " ++ PythonScript,
+                
+                io:format("🚀 Starting Python visualizer: ~s~n", [Command]),
+                case filelib:is_file(PythonScript) of
+                    true ->
+                        Port = open_port({spawn, Command}, 
+                            [{cd, MapDir}, binary, exit_status, stderr_to_stdout]),
+                        monitor_python_output(Port);
+                    false ->
+                        io:format("❌ Python script not found: ~s~n", [PythonScript])
+                end;
+            {error, Reason} ->
+                io:format("❌ Failed to create node ID file: ~p~n", [Reason])
         end
     end),
     {noreply, State};
@@ -713,15 +722,16 @@ convert_player_safely_gn(_) ->
     <<"none">>.
 
 monitor_python_output(Port) ->
+    io:format("🔍 Starting to monitor Python output from port ~p~n", [Port]),
     receive
         {Port, {data, Data}} ->
-            io:format("🐍 Python output: ~s~n", [Data]),
+            io:format("🐍 Python stdout/stderr: ~s~n", [Data]),
             monitor_python_output(Port);
         {Port, {exit_status, Status}} ->
-            io:format("🐍 Python exited with status: ~p~n", [Status]);
+            io:format("🐍 Python process exited with status: ~p~n", [Status]);
         Other ->
-            io:format("🐍 Python port message: ~p~n", [Other]),
+            io:format("🐍 Python port received: ~p~n", [Other]),
             monitor_python_output(Port)
     after 30000 ->
-        io:format("🐍 Python output monitoring timeout~n")
+        io:format("🐍 Python output monitoring timeout (30 seconds)~n")
     end.
