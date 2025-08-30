@@ -210,34 +210,6 @@ class GNSocketManager:
         self.message_queue = []
         self.connection_attempts = 0
         self.last_connect_time = 0
-
-    def read_node_id():
-        """Read the GN ID from node_id.txt file"""
-        try:
-            # Get the directory where this script is located
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            node_id_file = os.path.join(script_dir, "node_id.txt")
-            
-            print(f"🔍 Looking for node ID file: {node_id_file}")
-            
-            with open(node_id_file, 'r') as f:
-                gn_id = f.read().strip()
-                
-            print(f"✅ Read GN ID from file: '{gn_id}'")
-            
-            # Validate format
-            if not gn_id.startswith('gn') or len(gn_id) != 3:
-                raise ValueError(f"Invalid GN ID format: '{gn_id}'")
-                
-            return gn_id
-            
-        except FileNotFoundError:
-            print("❌ ERROR: node_id.txt file not found!")
-            print("Make sure the Erlang GN graphics server creates this file first.")
-            sys.exit(1)
-        except Exception as e:
-            print(f"❌ ERROR reading node ID file: {e}")
-            sys.exit(1)
         
     def connect(self) -> bool:
         """Establish connection to GN server"""
@@ -2194,8 +2166,34 @@ class GNGameVisualizer:
 #     print("   Falling back to gn1...")
 #     return 'gn1'
 
+def read_node_id():
+    """Read the GN ID from node_id.txt file"""
+    try:
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        node_id_file = os.path.join(script_dir, "node_id.txt")
+        
+        print(f"🔍 Looking for node ID file: {node_id_file}")
+        
+        with open(node_id_file, 'r') as f:
+            gn_id = f.read().strip()
+            
+        print(f"✅ Read GN ID from file: '{gn_id}'")
+        
+        # Validate format
+        if not gn_id.startswith('gn') or len(gn_id) != 3:
+            raise ValueError(f"Invalid GN ID format: '{gn_id}'")
+            
+        return gn_id
+        
+    except FileNotFoundError:
+        print("❌ ERROR: node_id.txt file not found!")
+        print("Make sure the Erlang GN graphics server creates this file first.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ ERROR reading node ID file: {e}")
+        sys.exit(1)
 
-# Main execution
 # Main execution
 if __name__ == "__main__":
     try:
