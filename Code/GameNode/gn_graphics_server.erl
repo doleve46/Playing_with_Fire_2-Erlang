@@ -511,6 +511,7 @@ gn_socket_client_loop(Socket, MainProcess) ->
         {tcp, Socket, Data} ->
             io:format("📨 GN received data from client: ~p bytes~n", [byte_size(Data)]),
             inet:setopts(Socket, [{active, once}]),
+            process_input_from_gui(Data, Socket),
             gn_socket_client_loop(Socket, MainProcess);
         {tcp_closed, Socket} ->
             io:format("🔌 GN client disconnected~n"),
@@ -795,4 +796,18 @@ monitor_python_output(Port) ->
             monitor_python_output(Port)
     after 30000 ->
         io:format("🐍 Python output monitoring timeout (30 seconds)~n")
+    end.
+
+
+%% send input (keypress) from GUI to IO handler, if it exists.
+process_input_from_gui(KeyPress, Socket) ->
+    LocalPlayerNum = Socket - ?PYTHON_SOCKET_PORT_BASE,
+    IOHandler = list_to_atom("io_handler_" ++ integer_to_list(LocalPlayerNum)),
+    case whereis(IOHandler) of
+        undefined -> % no such handler - ignore message
+            io:format("****GN GRAPHICS - No IO Handler found****~n"),
+            ok;
+        IOPid when is_pid(IOPid) -> 
+            io:format("****GN GRAPHICS - Found Pid for IO Handler - sending data~p~n",[KeyPress]),
+            IOPid ! {keyboard_input, KeyPress}
     end.

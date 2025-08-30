@@ -88,20 +88,16 @@ handle_cast({player_ack, Response}, State) ->
             process_input(NextInput, UpdatedState)
     end;
 
-handle_cast(game_start, State) ->
+handle_cast(game_start, State) -> % TODO: This is actually not working in current iteration - need to adapt (add field to state?)
     io:format("**##**IO HANDLER: Game started for player ~p**##**~n", [State#io_state.player_number]),
-    io:format("**##** SPAWNING KEYBOARD LOOP PROCESS**##**~n"),
-    NewState = State#io_state{keyboard_pid = spawn_link(fun() -> keyboard_input_handler(self()) end)},
-    io:format("**##** STARTING POLL_INPUT TIMER**##**~n"),
-    erlang:send_after(?TICK_DELAY, self(), poll_input),
-    {noreply, NewState};
+    {noreply, State};
 
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(poll_input, State) ->
+handle_info({keyboard_input, Keypress}, State) ->
     % Poll for keyboard input
-    Input = read_keyboard_input(),
+    Input = read_keyboard_input(Keypress),
     
     NewState = case Input of
         no_input -> State;
@@ -113,15 +109,12 @@ handle_info(poll_input, State) ->
             end
     end,
     
-    % Schedule next poll
-    erlang:send_after(?TICK_DELAY, self(), poll_input),
     {noreply, NewState};
 
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, State) ->
-    State#io_state.keyboard_pid ! stop,
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -222,25 +215,19 @@ display_response(Response, PlayerNumber) ->
     end.
 
 %% @doc Read keyboard input (non-blocking)
-read_keyboard_input() ->
-    % Check if there's a pending input message
-    receive
-        {keyboard_input, Key} -> 
-            io:format("**##** READ_INPUT: Received keyboard_input message: ~p~n", [Key]),
-            case Key of
-                " " -> space;
-                "w" -> w;
-                "a" -> a;
-                "s" -> s;
-                "d" -> d;
-                "e" -> e;
-                "q" -> q;
-                _ -> 
-                    io:format("**##** READ_INPUT: Unknown key: ~p~n", [Key]),
-                    no_input
-            end
-    after 0 -> 
-        no_input  % No input available immediately
+read_keyboard_input(Key) ->
+    io:format("**##** READ_INPUT: Received keyboard_input message: ~p~n", [Key]),
+    case Key of
+        " " -> space;
+        "w" -> w;
+        "a" -> a;
+        "s" -> s;
+        "d" -> d;
+        "e" -> e;
+        "q" -> q;
+        _ -> 
+            io:format("**##** READ_INPUT: Unknown key: ~p~n", [Key]),
+            no_input
     end.
 
 %%%===================================================================
