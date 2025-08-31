@@ -151,5 +151,5 @@ notify_gn(State = #tile_state{}, Message) ->
     %% Messages supported: tile_breaking, one_hit
     [X,Y] = State#tile_state.position,
     GN_name = req_player_move:get_managing_node_by_coord(X, Y),
-    gen_server:cast(GN_name, {tile_update, Message, State#tile_state.position}),
+    gn_server:cast_message(GN_name, {tile_update, Message, State#tile_state.position}),
     ok.

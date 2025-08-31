@@ -95,7 +95,7 @@ handle_cast({query_request, AskingGN, Request}, State) ->
             Player_record = req_player_move:read_player_from_table(PlayerNum, Players_table),
             case erlang:is_record(Player_record, mnesia_players) of
                 true -> 
-                    gen_server:cast(TargetGN,
+                    gn_server:cast_message(TargetGN,
                         {move_request_out_of_bounds, player,
                             {PlayerNum, Destination_coord, Direction, Player_record#mnesia_players.special_abilities, AskingGN}
                     });   
@@ -136,7 +136,7 @@ handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
         {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
         ok -> 
             %% Message the new GN to check for collisions
-            gen_server:cast(New_GN,{incoming_player, PlayerNum})
+            gn_server:cast_message(New_GN,{incoming_player, PlayerNum})
     end,
     {noreply, State};
 

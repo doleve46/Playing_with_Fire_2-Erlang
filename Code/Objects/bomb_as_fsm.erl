@@ -161,7 +161,7 @@ armed({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     %% Reply with direction change (to be updated in mnesia table) 
     %% request movement in said direction, sent to local GN
     %% remain in the same state until answered, retain state_timeout
-    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
     {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
 
 armed(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
@@ -240,7 +240,7 @@ active_movement({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
             TimeLeft = TempTime - erlang:system_time(millisecond),
             if
                 TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
-                    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+                    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
                     {next_state, armed, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode},
                         {reply, GN, {UpdatedData#bomb_state{direction=Direction}, false}}]
                     };
@@ -333,7 +333,7 @@ remote_idle({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     %% message from GN received - kicked by player.
     %% Reply with request for movement in said direction: {request_movement, Direction}
     %% remain in the same state until answered, retain state_timeout
-    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
     {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
 
 remote_idle(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
@@ -381,7 +381,7 @@ remote_armed({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     TimeLeft = calc_new_explode_delay(StateData) - erlang:system_time(millisecond),
     if
         TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
-            gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
             {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
         true -> % not enough time - do not make request
             {keep_state, StateData, [{reply, GN, StateData#bomb_state.direction}]}
@@ -442,7 +442,7 @@ remote_idle_movement({call, GN}, {kick, Direction}, StateData = #bomb_state{}) -
             {next_state, remote_idle, UpdatedData, [{reply, GN, {none, false}}]};
         true ->
             %% any other direction - send request to move at new direction
-            gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
             {next_state, remote_idle, UpdatedData, [{reply, GN, {none, false}}]}
     end;
 
@@ -538,7 +538,7 @@ remote_armed_frozen_movement({call, GN}, {kick, Direction}, StateData = #bomb_st
             TimeLeft = TempTime - erlang:system_time(millisecond),
             if
                 TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
-                    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+                    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
                     {next_state, remote_armed, UpdatedData#bomb_state{direction = Direction},
                         [{state_timeout, TempTime - erlang:system_time(millisecond), explode},
                         {reply, GN, {Direction, false}}]};

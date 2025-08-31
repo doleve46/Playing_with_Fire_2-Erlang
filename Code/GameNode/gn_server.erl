@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, generate_atom_table_names/2]).
+-export([start_link/1, generate_atom_table_names/2, cast_message/2]).
 
 -export([get_registered_name/1]).
 
@@ -40,6 +40,14 @@ start_link({GN_number, IsBot}) ->
     GN_name = list_to_atom("GN" ++ integer_to_list(GN_number) ++ "_server"),
     gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, IsBot], [{priority, high}]).
 
+%% Sending a message to GN using API call
+cast_message(GN_Name, Message) ->
+    case global:whereis_name(GN_Name) of
+        Pid when is_pid(Pid) ->
+            gen_server:cast(Pid, Message);
+        _ ->
+            io:format("**##** GN ~p: Not found**##**~n", [GN_Name])
+    end.
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -123,13 +131,13 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
                     Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
                     %% Calculate destination coordinates
                     Destination_coord = req_player_move:calc_new_coordinates(Player#mnesia_players.position, Direction),
-                    gen_server:cast(cn_server,
+                    gn_server:cast_message(cn_server,
                         {query_request, get_registered_name(self()), 
                             {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction}})
             end,
             {noreply, State};
         {move_request, PlayerNum, TargetGN, Direction} -> % move request from a player outside my quarter
-            gen_server:cast(cn_server, {forward_request, TargetGN, {move_request, player, PlayerNum, Direction}}),
+            gn_server:cast_message(cn_server, {forward_request, TargetGN, {move_request, player, PlayerNum, Direction}}),
             {noreply, State};
 
         %% * Player requesting to place bombs mechanism
@@ -149,14 +157,14 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
             end,
             {noreply, State};
         {place_bomb_request, PlayerNum, TargetGN} -> % place bomb request from a player outside my quarter
-            gen_server:cast(cn_server, {forward_request, TargetGN, {place_bomb_request, PlayerNum, ThisGN}}),
+            gn_server:cast_message(cn_server, {forward_request, TargetGN, {place_bomb_request, PlayerNum, ThisGN}}),
             {noreply, State};
 
         %% * Player requesting to ignite remote bombs
         %% Must check if any of his bombs are 'remote' type, and if any of them are - ignite them
         %% This takes place within cn_server, as the bombs can be across all quarters on theory
         {ignite_bomb_request, PlayerNum} ->
-            gen_server:cast(cn_server, {query_request, self(), {ignite_bomb_request, PlayerNum}}),
+            gn_server:cast_message(cn_server, {query_request, self(), {ignite_bomb_request, PlayerNum}}),
             {noreply, State};
 
         %% * Cooldown updates
@@ -164,7 +172,7 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
             req_player_move:update_player_cooldowns(UpdateContent, State#gn_state.players_table_name),
             {noreply, State};
         {cooldown_update, TargetGN, UpdateContent} ->
-            gen_server:cast(cn_server, {forward_request, TargetGN, {cooldown_update, TargetGN, UpdateContent}}),
+            gn_server:cast_message(cn_server, {forward_request, TargetGN, {cooldown_update, TargetGN, UpdateContent}}),
             {noreply, State}
     end;
 
@@ -183,18 +191,18 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     %% move is possible. Update data, open halfway timer, respond to player FSM
                     req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
                     %% respond to the player FSM via CN->hosting GN
-                    gen_server:cast(cn_server,
+                    gn_server:cast_message(cn_server,
                         {forward_request, Player#mnesia_players.local_gn, 
                             {gn_answer, {move_result, player, PlayerNum, accepted}}
                         });
                 cant_move -> % can't move, obstacle blocking
                     req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
-                    gen_server:cast(cn_server,
+                    gn_server:cast_message(cn_server,
                         {forward_request, Player#mnesia_players.local_gn, 
                             {gn_answer, {move_result, player, PlayerNum, denied}}
                         });
                 dest_not_here -> % destination coordinate is overseen by another GN
-                    gen_server:cast(cn_server,
+                    gn_server:cast_message(cn_server,
                         {query_request, get_registered_name(self()), 
                             {move_request_out_of_bounds, player, PlayerNum, Destination_coord, Direction}})
             end,
@@ -239,7 +247,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                 bomb_placed ->
                     %% bomb was placed successfully, added into mnesia table by helper function
                     %% Player is NOT physically no our machine - forward the response through cn server to local gn server
-                    gen_server:cast(cn_server, {forward_request, AskingGN, {bomb_result, accepted}});
+                    gn_server:cast_message(cn_server, {forward_request, AskingGN, {bomb_result, accepted}});
                 Error ->
                     %% Notify player FSM of failed placement
                     %% Error logging for debugging
@@ -247,7 +255,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     io:format("[~2..0B:~2..0B:~2..0B]: Failed to place bomb for player ~p: ~p~n", [Hour, Min, Sec, PlayerNum, Error]),
                     error_logger:info_msg("Failed to place bomb for player ~p: ~p", [PlayerNum, Error]),
                     %% Player is NOT physically no our machine - forward the response through cn server to local gn server
-                    gen_server:cast(cn_server, {forward_request, AskingGN, {PlayerNum, bomb_result, denied}})
+                    gn_server:cast_message(cn_server, {forward_request, AskingGN, {PlayerNum, bomb_result, denied}})
             end,
             {noreply, State};
 
@@ -267,7 +275,7 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
             %% checks destination coordinate for obstacles (if the move is possible),
             %% this should also "kickstart" any action caused by this attempted movement
             Move_result = req_player_move:check_for_obstables(Destination_coord, BuffsList, Direction, State),
-            gen_server:cast(cn_server, 
+            gn_server:cast_message(cn_server,
                 {forward_request, AskingGN,
                     {movement_clearance, player, PlayerNum, Move_result}});
         bomb -> % a bomb wants to pass to this GN
@@ -316,7 +324,7 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
 
             {switch_gn, Current_GN, New_GN} ->
                 %% transfer records to new GN
-                gen_server:cast(cn_server,
+                gn_server:cast_message(cn_server,
                     {transfer_records, player, PlayerNum, Current_GN, New_GN}),
                 %% Let player FSM know of the GN change
                 player_fsm:update_target_gn(PlayerNum, New_GN);
@@ -330,7 +338,7 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
 handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
     %% Read and remove bomb from mnesia table. Pass record to cn_server to process explosion
     {atomic, Record} = req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name),
-    gen_server:cast(cn_server, 
+    gn_server:cast_message(cn_server, 
         {query_request, get_registered_name(self()), 
             {handle_bomb_explosion, Record#mnesia_bombs.position, Record#mnesia_bombs.radius}}),
     %% Update player's active bombs count, let playerFSM know.
@@ -452,7 +460,7 @@ notify_owner_of_bomb_explosion(OwnerID, State) ->
                     player_fsm:bomb_exploded(MatchingPlayerRecord#mnesia_players.pid);
                 [] -> % player not found within GN, forward request to CN
                     %% send cn_server a request to update active bomb in mnesia, and also notify relevant fsm_player
-                    gen_server:cast(cn_server, 
+                    gn_server:cast_message(cn_server,
                         {player_bomb_exploded, Pid});
                 _ReturnValue -> % ! shouldn't happen - error out, this is for debugging
                     erlang:error(bad_return_value, [Pid, Result])

@@ -231,7 +231,7 @@ idle(cast, inflict_damage, Data) ->
             %% notify io/bot handler (to stop sending things, can also terminate)
             send_io_ack(player_died, NewData),
             %% notify GN - to remove player from mnesia table
-            gen_server:cast(Data#player_data.local_gn, {player_died, NewData#player_data.player_number}),
+            gn_server:cast_message(Data#player_data.local_gn, {player_died, NewData#player_data.player_number}),
             %% Switch to 'dead' state - process doesn't terminate, only when receiving 'killswitch'
             {next_state, dead, NewData}
     end;
@@ -302,7 +302,7 @@ waiting_for_response(cast, inflict_damage, Data) ->
             %% notify io/bot handler (to stop sending things, can also terminate)
             send_io_ack(player_died, NewData),
             %% notify GN - to remove player from mnesia table
-            gen_server:cast(Data#player_data.local_gn, {player_died, NewData#player_data.player_number}),
+            gn_server:cast_message(Data#player_data.local_gn, {player_died, NewData#player_data.player_number}),
             %% Switch to 'dead' state - process doesn't terminate, only when receiving 'killswitch'
             {next_state, dead, NewData}
     end;
@@ -468,8 +468,7 @@ handle_input_command(Command, Data) ->
             case process_command(Command, Data) of
                 {ok, Request, NewData} -> % 
                     % Request was pre-checked, send to local GN
-                    gen_server:cast(Data#player_data.local_gn, 
-                        {player_message, Request}),
+                    gn_server:cast_message(Data#player_data.local_gn, {player_message, Request}),
                     io:format("**##** PLAYER FSM: Sent request ~p to local GN ~p**##**~n", [Request, Data#player_data.local_gn]),
                     case Data#player_data.immunity_timer of
                         0 -> %% we were at idle state, no immunity
@@ -628,7 +627,7 @@ handle_tick(CurrentState, Data) ->
         Immunity_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % cooldown just ended, notify GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn, 
                     {request_cooldown_update, Data#player_data.player_number, Updated_requestCooldown}
                 }
@@ -641,7 +640,7 @@ handle_tick(CurrentState, Data) ->
         Move_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % Report movement cooldown changes every 200 ms to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
                 }
@@ -661,7 +660,7 @@ handle_tick(CurrentState, Data) ->
             erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 0 -> % immunity ended, notify GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
             erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
@@ -670,13 +669,13 @@ handle_tick(CurrentState, Data) ->
                 immunity_waiting_for_response -> {next_state, waiting_for_response, NewData}
             end;
         Updated_immunityTimer == 1000 -> % 1sec immunity left, report to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
             erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 2000 -> % 2sec immunity left, report to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
             erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick

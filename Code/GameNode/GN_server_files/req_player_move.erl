@@ -284,7 +284,7 @@ handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
             player_fsm:gn_response(PlayerNum, {move_result, Answer}); 
         true ->
             %% Player FSM is on another machine, forward through CN->local GN
-            gen_server:cast(cn_server,
+            gn_server:cast_message(cn_server,
                 {forward_request, Player_record#mnesia_players.local_gn,
                     {gn_answer, {move_result, player, PlayerNum, Answer}}
                 })
