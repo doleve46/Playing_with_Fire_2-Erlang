@@ -240,10 +240,10 @@ read_and_remove_bomb(BombPid, Bombs_table) ->
 %% =====================================================================
 
 -spec get_managing_node_by_coord(X::integer(), Y::integer()) -> atom().
-get_managing_node_by_coord(X,Y) when X >= 0, X =< 7, Y > 7, Y =< 15 -> 'GN1_server';
-get_managing_node_by_coord(X,Y) when X > 7, X =< 15 , Y > 7 , Y =< 15 -> 'GN2_server';
-get_managing_node_by_coord(X,Y) when X >= 0 , X =< 7 , Y >= 0 , Y =< 7 -> 'GN3_server';
-get_managing_node_by_coord(X,Y) when X > 7 , X =< 15 , Y >= 0 , Y =< 7 -> 'GN4_server';
+get_managing_node_by_coord(X,Y) when X > 0, X =< 7, Y > 7, Y < 15 -> 'GN1_server';
+get_managing_node_by_coord(X,Y) when X > 7, X < 15 , Y > 7 , Y < 15 -> 'GN2_server';
+get_managing_node_by_coord(X,Y) when X > 0 , X =< 7 , Y > 0 , Y =< 7 -> 'GN3_server';
+get_managing_node_by_coord(X,Y) when X > 7 , X < 15 , Y > 0 , Y =< 7 -> 'GN4_server';
 get_managing_node_by_coord(_X, _Y) -> out_of_map_bounds.
 
 

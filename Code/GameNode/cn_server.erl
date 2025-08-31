@@ -377,13 +377,13 @@ link_GNs_loop(NodeNumbers) ->
     end, NodeNumbers),
     Pids. % return list of linked PIDs
 
-link_with_retry(GN_server_name, RetryCount) when RetryCount > 4 ->
+link_with_retry(GN_server_name, RetryCount) when RetryCount > 8 ->
     erlang:error({link_failed_after_retries, GN_server_name, RetryCount});
 link_with_retry(GN_server_name, RetryCount) ->
     Pid = global:whereis_name(GN_server_name),
     case Pid of
         undefined ->
-            io:format("Process ~p not found globally, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+            io:format("Process ~p not found globally, attempt ~w/8, retrying...~n", [GN_server_name, RetryCount + 1]),
             timer:sleep(500),
             link_with_retry(GN_server_name, RetryCount + 1);
         _ ->
@@ -393,7 +393,7 @@ link_with_retry(GN_server_name, RetryCount) ->
                 Pid
             catch
                 _:_ ->
-                    io:format("Failed to link to ~p, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+                    io:format("Failed to link to ~p, attempt ~w/8, retrying...~n", [GN_server_name, RetryCount + 1]),
                     timer:sleep(500),
                     link_with_retry(GN_server_name, RetryCount + 1)
             end
