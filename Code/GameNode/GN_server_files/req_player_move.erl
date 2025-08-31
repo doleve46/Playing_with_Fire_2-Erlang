@@ -108,6 +108,8 @@ handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
     Destination = calc_new_coordinates(Player_record#mnesia_players.position, Direction),
     Current_gn_name = get_registered_name(self()),
     case get_managing_node_by_coord(hd(Destination),lists:last(Destination)) of
+        out_of_map_bounds -> % player tried to move outside the map
+            cant_move;
         Current_gn_name -> % destination coordinate is managed by this GN
             %% ? Checks for obstacles in the target coordinate, kickstarting any movements caused by this attempt
             check_for_obstacles(Destination, Player_record#mnesia_players.special_abilities, Direction, State);
@@ -241,7 +243,8 @@ read_and_remove_bomb(BombPid, Bombs_table) ->
 get_managing_node_by_coord(X,Y) when X >= 0, X =< 7, Y > 7, Y =< 15 -> 'GN1_server';
 get_managing_node_by_coord(X,Y) when X > 7, X =< 15 , Y > 7 , Y =< 15 -> 'GN2_server';
 get_managing_node_by_coord(X,Y) when X >= 0 , X =< 7 , Y >= 0 , Y =< 7 -> 'GN3_server';
-get_managing_node_by_coord(X,Y) when X > 7 , X =< 15 , Y >= 0 , Y =< 7 -> 'GN4_server'.
+get_managing_node_by_coord(X,Y) when X > 7 , X =< 15 , Y >= 0 , Y =< 7 -> 'GN4_server';
+get_managing_node_by_coord(_X, _Y) -> out_of_map_bounds.
 
 
 node_name_to_number(Name) ->
