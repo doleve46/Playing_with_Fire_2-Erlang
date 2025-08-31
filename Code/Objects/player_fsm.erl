@@ -150,12 +150,12 @@ init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
 %%% -------------------------------------------------------------------
 %% @doc Start-up state - awaiting starting signal before allowing inputs.
 %% when receiving said start signal, updates io/bot handler they can start
-startup(cast, {game_start}, Data) -> %% TODO: this message does not arrive - check why
+startup(cast, {game_start}, Data) ->
     %% Notify I/O and bot handlers that the game has started
-    io:format("**## PLAYER FSM RECEIVED 'game_start'~n"),
+    io:format("**##** PLAYER FSM RECEIVED 'game_start'~n"),
     ok = if
         Data#player_data.bot == false -> 
-            io_handler:game_start(Data#player_data.io_handler_pid); %% TODO: these functions do NOT EXIST
+            io_handler:game_start(Data#player_data.io_handler_pid);
         true -> 
             bot_handler:game_start(Data#player_data.io_handler_pid)
     end,
@@ -470,6 +470,7 @@ handle_input_command(Command, Data) ->
                     % Request was pre-checked, send to local GN
                     gen_server:cast(Data#player_data.local_gn, 
                         {player_message, Request}),
+                    io:format("**##** PLAYER FSM: Sent request ~p to local GN ~p**##**~n", [Request, Data#player_data.local_gn]),
                     case Data#player_data.immunity_timer of
                         0 -> %% we were at idle state, no immunity
                             {next_state, waiting_for_response, NewData};
@@ -479,11 +480,13 @@ handle_input_command(Command, Data) ->
                 {not_ok, Reason} ->
                     %% Operation blocked - send ACK to io/bot handler, keep state, set request cooldown timer
                     send_io_ack({request_denied_by_player_fsm, Reason}, Data),
+                    io:format("**##** PLAYER FSM: Command ~p denied - ~p**##**~n", [Command, Reason]),
                     NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
                     {keep_state, NewData};
                 {error, Reason} ->
                     % Invalid command
                     send_io_ack({error, Reason}, Data),
+                    io:format("**##** PLAYER FSM: Command ~p error - ~p**##**~n", [Command, Reason]),
                     {keep_state, Data}
             end;
         false -> % Still in cooldown

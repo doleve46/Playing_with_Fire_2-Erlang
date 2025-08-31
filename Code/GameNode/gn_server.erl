@@ -106,6 +106,7 @@ handle_call(_Request, _From, State = #gn_state{}) ->
 %% @doc Handle player requests
 handle_cast({player_message, Request}, State = #gn_state{}) ->
     ThisGN = get_registered_name(self()),
+    io:format("**##** GN ~p: Received player message ~p**##**~n", [ThisGN, Request]),
     case Request of
         %% * Player movement request mechanism
         {move_request, PlayerNum, ThisGN , Direction} -> % move request from a player in our quarter

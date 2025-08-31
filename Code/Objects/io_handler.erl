@@ -129,7 +129,8 @@ process_input(Input, State) ->
         {ok, Command} ->
             case State#io_state.waiting_for_ack of
                 true ->
-                    % Buffer input while waiting for ack
+                    %% Buffer input while waiting for ack
+                    %% ? I think it's better to just drop additional inputs
                     NewBuffer = State#io_state.input_buffer ++ [Input],
                     NewState = State#io_state{input_buffer = NewBuffer},
                     {noreply, NewState};
@@ -215,7 +216,7 @@ display_response(Response, PlayerNumber) ->
     end.
 
 %% @doc Read keyboard input (non-blocking)
-read_keyboard_input(Key) -> %% TODO: the input is a binary, not a string
+read_keyboard_input(Key) ->
     io:format("**##** READ_INPUT: Received keyboard_input message: ~p~n", [Key]),
     case Key of
         <<" ">> -> space;
@@ -225,6 +226,10 @@ read_keyboard_input(Key) -> %% TODO: the input is a binary, not a string
         <<"d">> -> d;
         <<"e">> -> e;
         <<"q">> -> q;
+        <<27, 91, 65>> -> arrow_up; %% todo: unsure if it works or needs adjustment
+        <<27, 91, 66>> -> arrow_down;
+        <<27, 91, 67>> -> arrow_right;
+        <<27, 91, 68>> -> arrow_left;
         _ -> 
             io:format("**##** READ_INPUT: Unknown key: ~p~n", [Key]),
             no_input
