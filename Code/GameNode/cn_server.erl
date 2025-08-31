@@ -91,7 +91,9 @@ handle_cast({query_request, AskingGN, Request}, State) ->
         %% * pass the appropriate GN the message:
         %% * {forwarded, {move_request_out_of_bounds, player, {playerNum, Destination_coord, Direction, [relevant buffs], AskingGN}
             TargetGN = req_player_move:get_managing_node_by_coord(X, Y),
-            Players_table = lists:nth(req_player_move:node_name_to_number(TargetGN), State#gn_data.players),
+            TargetGNIndex = req_player_move:node_name_to_number(TargetGN),
+            TargetGNData = lists:nth(TargetGNIndex, State),
+            Players_table = TargetGNData#gn_data.players,
             Player_record = req_player_move:read_player_from_table(PlayerNum, Players_table),
             case erlang:is_record(Player_record, mnesia_players) of
                 true -> 
@@ -107,7 +109,8 @@ handle_cast({query_request, AskingGN, Request}, State) ->
         {handle_bomb_explosion, Coord, Radius} ->
             %% handled in a side function
             %% Calculates affected coordinates, then sends damage_taken messages to all objects impacted
-            bomb_explosion_handler(Coord, Radius);
+            bomb_explosion_handler(Coord, Radius),
+            {noreply, State};
 
         {ignite_bomb_request, PlayerNum} ->
             RemoteBombs = bomb_helper_functions:find_remote_bombs_for_player(PlayerNum),
@@ -130,8 +133,12 @@ handle_cast({query_request, AskingGN, Request}, State) ->
 
 %% * handles a player transfer from one GN to another
 handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
-    Current_GN_players_table = lists:nth(req_player_move:node_name_to_number(Current_GN), State#gn_data.players),
-    New_GN_players_table = lists:nth(req_player_move:node_name_to_number(New_GN), State#gn_data.players),
+    Current_GNIndex = req_player_move:node_name_to_number(Current_GN),
+    New_GNIndex = req_player_move:node_name_to_number(New_GN),
+    Current_GNData = lists:nth(Current_GNIndex, State),
+    New_GNData = lists:nth(New_GNIndex, State),
+    Current_GN_players_table = Current_GNData#gn_data.players,
+    New_GN_players_table = New_GNData#gn_data.players,
     case transfer_player_records(PlayerNum, Current_GN_players_table, New_GN_players_table) of
         {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
         ok -> 
@@ -141,8 +148,9 @@ handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
     {noreply, State};
 
 %% * Update active bombs in mnesia table and notify controlling player_fsm
-handle_cast({player_bomb_exploded, PlayerPid}, _State = #gn_data{}) ->
-    update_player_active_bombs(PlayerPid);
+handle_cast({player_bomb_exploded, PlayerPid}, State) ->
+    update_player_active_bombs(PlayerPid),
+    {noreply, State};
 
 
 %% @doc General cast messages - as of now ignored.
