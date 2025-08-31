@@ -387,8 +387,19 @@ code_change(_OldVsn, State = #gn_state{}, _Extra) ->
 
 %% @doc returns the registered name of a Pid
 get_registered_name(Pid) ->
-    {_, Registered_name} = process_info(Pid, registered_name),
-    Registered_name.
+    case process_info(Pid, registered_name) of
+        {registered_name, Name} -> Name;
+        [] ->
+            % Process is not locally registered, check global registry
+            case global:registered_names() of
+                Names ->
+                    case lists:keyfind(Pid, 2, [{Name, global:whereis_name(Name)} || Name <- Names]) of
+                        {Name, Pid} -> Name;
+                        false -> undefined
+                    end
+            end;
+        undefined -> undefined
+    end.
 
 %% @doc helper function to create mnesia table names
 generate_atom_table_names(Number, Type) ->
