@@ -380,11 +380,19 @@ terminate(Reason, State) ->
     end,
    
     % Terminate GN graphics servers
-    lists:foreach(fun({_Node, Pid}) ->
-        case is_pid(Pid) andalso is_process_alive(Pid) of
-            true ->
-                exit(Pid, shutdown);
-            false -> ok
+    lists:foreach(fun(ServerEntry) ->
+        case ServerEntry of
+            {_MonitorRef, _Node, Pid} when is_pid(Pid) ->
+                % 3-tuple format with PID
+                case is_process_alive(Pid) of
+                    true -> exit(Pid, shutdown);
+                    false -> ok
+                end;
+            {_MonitorRef, _Node} ->
+                % 2-tuple format without PID - nothing to terminate
+                ok;
+            Other ->
+                io:format("⚠️ Unknown server entry format in terminate: ~p~n", [Other])
         end
     end, State#state.gn_graphics_servers),
    
