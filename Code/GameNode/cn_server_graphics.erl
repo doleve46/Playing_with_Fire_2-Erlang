@@ -73,8 +73,8 @@ init([GNNodes]) ->
     % Set up mnesia subscriptions
     erlang:send(self(), setup_subscriptions),
    
-    % Monitoring of gn graphics servers
-    erlang:send_after(?TICK_DELAY, self(), monitor_gn_graphics_servers),
+    % Monitoring of gn graphics servers - CHANGED TO 4X THE TICK_DELAY (=200MS NOW)
+    erlang:send_after(4*?TICK_DELAY, self(), monitor_gn_graphics_servers),
    
     % Start socket server
     erlang:send(self(), start_socket_server),
@@ -1100,10 +1100,10 @@ gn_monitoring_receive_loop(RefsList, ServersNotFound) ->
         AnythingElse ->
             erlang:send_after(5000, self(), AnythingElse),
             gn_monitoring_receive_loop(RefsList, ServersNotFound)
-     after 1500 ->
+     after 2000 ->
         case length(ServersNotFound) =/= 0 of
             true ->
-                io:format("❌ Failed to monitor ~p servers. The following were not monitored:~w~n", [length(ServersNotFound), ServersNotFound]),
+                io:format("⏳ Retrying to monitor ~p. Failed servers: ~w~n", [length(ServersNotFound), ServersNotFound]),
                 NewRefs = monitor_gn_graphics_servers(ServersNotFound),
                 NewRefs ++ RefsList;
             false ->
@@ -1124,7 +1124,7 @@ attempt_gn_graphics_monitoring(NodeList) ->
                     MonitorRef = erlang:monitor(process, {gn_graphics_server, Node}),
                     {MonitorRef, Node};
                 undefined ->
-                    io:format("⚠️ gn_graphics_server not found on ~w~n", [Node]),
+                    io:format("⚠️ gn_graphics_server not registered on ~w yet~n", [Node]),
                     MonitorRef = erlang:monitor(process, {gn_graphics_server, Node}),
                     {MonitorRef, Node};
                 Pid when is_pid(Pid) ->
@@ -1140,7 +1140,6 @@ attempt_gn_graphics_monitoring(NodeList) ->
         end
     end, NodeList),
     
-    timer:sleep(1000),
     RefsList.
 
 create_empty_map() ->
