@@ -17,7 +17,7 @@
 -record(map_state, {
     size = ?MAP_SIZE,
     grid,  % Single grid with tuples: {tile_type, powerup_type, bomb_type, player_id}
-    corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     steiner_paths = [],
     statistics = #{} % Tracks tile and power-up counts
 }).
@@ -192,7 +192,7 @@ set_borders(Grid) ->
     end, Grid2).
 
 clear_player_areas(Grid) ->
-    Corners = [{1, 1}, {14, 1}, {1, 14}, {14, 14}],
+    Corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     
     lists:foldl(fun({CX, CY}, AccGrid) ->
         % Clear 2x2 area around each corner
@@ -347,7 +347,7 @@ create_game_graph() ->
 %% ===================================================================
 
 select_terminals(NumRandom) ->
-    Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    Corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     
     % Add random terminals
     RandomTerminals = select_random_terminals(NumRandom, Corners, []),
@@ -464,7 +464,7 @@ apply_steiner_tree(MapState, SteinerPaths, BreakableChance) ->
     end, MapState#map_state{steiner_paths = SteinerPaths}, SteinerPaths).
 
 is_in_player_area(X, Y) ->
-    Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    Corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     lists:any(fun({CX, CY}) ->
         abs(X - CX) =< 1 andalso abs(Y - CY) =< 1
     end, Corners).
@@ -513,7 +513,7 @@ select_random_tile_type(BreakableProb, StrongProb, UnbreakableProb) ->
 %% ===================================================================
 
 mark_player_starts(MapState) ->
-    Corners = [{1, 1}, {14, 1}, {1, 14}, {14, 14}],
+    Corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     PlayerIDs = [?PLAYER_1, ?PLAYER_2, ?PLAYER_3, ?PLAYER_4],
     
     lists:foldl(fun({{X, Y}, PlayerID}, AccMapState) ->
@@ -728,7 +728,7 @@ export_map(Grid, Filename) ->
     io:format(File, "    PlayerID.~n~n", []),
     
     io:format(File, "get_player_starts() ->~n", []),
-    io:format(File, "    [{player_1, 1, 1}, {player_2, 1, 14}, {player_3, 14, 1}, {player_4, 14, 14}].~n", []),
+    io:format(File, "    [{player_1, 1, 14}, {player_2, 14, 14}, {player_3, 1, 1}, {player_4, 14, 1}].~n", []),
     
     file:close(File),
     io:format("📄 Unified grid map exported to ~s~n", [Filename]).
