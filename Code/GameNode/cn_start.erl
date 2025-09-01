@@ -96,10 +96,6 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     %% Enter loop for initial connections from GNs
     ConnectedNodeNames = initial_connections_loop(0, []),
     io:format("All GN nodes (gn_start) connected successfully: ~p~n", [ConnectedNodeNames]),
-    %% Send message to all GN's gn_start to choose playmode (bot/human)
-    lists:foreach(fun(NodeName) ->
-        {gn_start, NodeName} ! {cn_start, {choose_playmode, are_you_bot}} end,
-    ConnectedNodeNames),
     %% * From this point until the game actually starts, the GNs shouldn't be able to disconnect/crash.
     %% Initialize mnesia
     AllNodes = [node()] ++ ConnectedNodeNames,
@@ -158,11 +154,14 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     %% Load map into mnesia - synchronously
     %Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
     ok = initial_mnesia_load(TableNamesList, Map),
-    %% Await GNs decisions to play as bot or human
+    io:format("Mnesia loading completed successfully.~n"),
+    %% Send message to all GN's gn_start to choose playmode (bot/human) & Await their decisions
+    lists:foreach(fun(NodeName) ->
+        {gn_start, NodeName} ! {cn_start, {choose_playmode, are_you_bot}} end,
+    ConnectedNodeNames),
     io:format("📋 Waiting for player decisions from 4 GN nodes...~n"),
     GNs_decisions = await_players_decisions(4, [], ConnectedNodeNames),
     io:format("✅ GNs decisions received: ~p~n", [GNs_decisions]),
-    io:format("Mnesia loading completed successfully.~n"),
     %% Open cn_server and cn_graphics_server
     io:format("🚀 Starting CN server and CN graphics server...~n"),
     {ok, _Pid_cn_server} = cn_server:start_link(GNs_decisions),
