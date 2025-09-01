@@ -20,7 +20,7 @@ place_bomb(PlayerNum, PlayersTableName, BombsTableName) ->
             _Multiple -> {error, multiple_players_found}
         end
     end,
-    {atomic, Result} = mnesia:activity(transaction, Fun),
+    {atomic, Result} = mnesia:transaction(Fun),
 
     case Result of
         {ok, PlayerRecord} ->
