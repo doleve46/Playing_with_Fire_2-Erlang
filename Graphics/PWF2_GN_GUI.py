@@ -181,6 +181,12 @@ def show_player_choice(mouse_pos):
 
 # Show game setup screen with a loading animation
 def show_game_setup():
+    global game_setup_start_time
+    
+    # Initialize timer if not set
+    if 'game_setup_start_time' not in globals():
+        game_setup_start_time = time.time()
+    
     draw_screen_template("Game Setting Up")
 
     # Show a progress bar or loading animation
@@ -197,6 +203,11 @@ def show_game_setup():
     pygame.draw.rect(screen, GREEN, (progress_x, progress_y, filled_width, progress_height))
 
     draw_text("Initializing game world...", progress_y + 50, size=32, color=WHITE)
+    
+    # Check if 1.5 seconds have passed
+    if time.time() - game_setup_start_time >= 1.5:
+        pygame.quit()
+        sys.exit(0)
 
 # Show error message with retry and return buttons
 def show_error(mouse_pos):
