@@ -237,7 +237,7 @@ class SocketManager:
             print("❌ Connection timeout - CN server may not be running")
             self.connected = False
             return False
-        except ConnectionRefused:
+        except ConnectionRefusedError:
             print("❌ Connection refused - CN server not accepting connections")
             self.connected = False
             return False

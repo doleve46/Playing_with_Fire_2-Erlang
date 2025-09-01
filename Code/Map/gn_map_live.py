@@ -367,7 +367,7 @@ class GNSocketManager:
             print(f"Connection timeout - GN {self.gn_id} server may not be running")
             self.connected = False
             return False
-        except ConnectionRefused:
+        except ConnectionRefusedError:
             print(f"Connection refused - GN {self.gn_id} server not accepting connections")
             self.connected = False
             return False
