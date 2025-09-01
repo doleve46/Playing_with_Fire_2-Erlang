@@ -146,9 +146,13 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
         end
     end, AllNodes),
     
+    % Sort the connected nodes to ensure GN1, GN2, GN3, GN4 order
+    SortedConnectedNodeNames = lists:sort(ConnectedNodeNames),
+    io:format("CN: Sorted GN nodes for table creation: ~p~n", [SortedConnectedNodeNames]),
+    
     TableNamesList = lists:map(fun(X) ->
-            create_tables(lists:nth(X, ConnectedNodeNames), node(), X)
-        end, lists:seq(1,length(ConnectedNodeNames))),
+            create_tables(lists:nth(X, SortedConnectedNodeNames), node(), X)
+        end, lists:seq(1,length(SortedConnectedNodeNames))),
     %% Create map
     Map = map_generator:create_map(),
     %% Load map into mnesia - synchronously
