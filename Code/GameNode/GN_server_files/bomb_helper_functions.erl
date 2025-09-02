@@ -71,7 +71,7 @@ update_player_bomb_count(PlayerNum, PlayersTableName, Increment) ->
         UpdatedRecord = PlayerRecord#mnesia_players{
             bombs_placed = PlayerRecord#mnesia_players.bombs_placed + Increment
         },
-        mnesia:write(UpdatedRecord)
+        mnesia:write(PlayersTableName, UpdatedRecord, write)
     end,
     mnesia:activity(transaction, Fun).
 

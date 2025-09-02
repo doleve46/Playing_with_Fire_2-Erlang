@@ -57,7 +57,7 @@ read_and_update_coord(player, PlayerNum, Table) ->
                             movement = false,
                             direction = none
                         },
-                        mnesia:write(Updated_record),
+                        mnesia:write(Table, Updated_record, write),
                         {retain_gn, Player_record}; %% return value to calling function
                     Other_name -> %% destination coordinate is managed by another GN (=Other_name)
                     %% update position, target_gn name, reset movement and direction
@@ -68,7 +68,7 @@ read_and_update_coord(player, PlayerNum, Table) ->
                             movement = false,
                             direction = none
                         },
-                        mnesia:write(Updated_record),
+                        mnesia:write(Table, Updated_record, write),
                         {switch_gn, Current_gn_name, Other_name} %% return value
                     end;
             [] -> not_found % should cause an error
@@ -138,8 +138,8 @@ insert_player_movement(PlayerNum, Table) ->
                     movement = true,
                     movement_timer = ?TILE_MOVE - (Player_record#mnesia_players.speed -1)*?MS_REDUCTION % * Set counter based on movespeed
                     },
-                %% Insert updated record into table
-                mnesia:write(Updated_record),
+                %% Insert updated record into the correct table (not inferred from record name)
+                mnesia:write(Table, Updated_record, sticky_write),
                 ok;
             [] -> % didn't find 
                 io:format("DEBUG: Player ~p not found in table ~p~n", [PlayerNum, Table]),
@@ -272,7 +272,7 @@ update_player_direction(PlayerNum, Table, NewValue) ->
             [Player_record = #mnesia_players{}] ->
                 Updated_record = Player_record#mnesia_players{direction = NewValue},
                 %% Insert updated record into table
-                mnesia:write(Updated_record),
+                mnesia:write(Table, Updated_record, sticky_write),
                 Updated_record;
             [] -> % didn't find 
                 not_found

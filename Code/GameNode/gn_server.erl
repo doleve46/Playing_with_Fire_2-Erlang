@@ -460,7 +460,7 @@ notify_owner_of_bomb_explosion(OwnerID, State) ->
                 )),
                 case Result of
                     [{player, PlayerRecord}] -> %% update active bomb count in mnesia table
-                        mnesia:write(PlayerRecord#mnesia_players{bombs_placed = (PlayerRecord#mnesia_players.bombs_placed - 1)});
+                        mnesia:write(State#gn_state.players_table_name, PlayerRecord#mnesia_players{bombs_placed = (PlayerRecord#mnesia_players.bombs_placed - 1)}, write);
                     [] -> ok % no player found
                 end,
                 Result % return list back from function
