@@ -1418,7 +1418,7 @@ class EnhancedSocketGameVisualizer:
         for x in range(MAP_SIZE):
             for y in range(MAP_SIZE):
                 pixel_x = y * TILE_SIZE + shake_x
-                pixel_y = x * TILE_SIZE + shake_y
+                pixel_y = (MAP_SIZE - 1 - x) * TILE_SIZE + shake_y
 
                 tile_type = self.current_game_state.tiles[x][y]
                 powerup = self.current_game_state.powerups[x][y]
@@ -1443,13 +1443,13 @@ class EnhancedSocketGameVisualizer:
         # Draw enhanced bombs with FSM state visualization
         for pos, bomb in self.current_game_state.bombs.items():
             pixel_x = bomb.y * TILE_SIZE + shake_x
-            pixel_y = bomb.x * TILE_SIZE + shake_y
+            pixel_y = (MAP_SIZE - 1 - bomb.x) * TILE_SIZE + shake_y
             self.draw_enhanced_bomb_with_fsm_state(self.map_surface, pixel_x, pixel_y, bomb)
 
         # Draw enhanced players with complete status effects
         for player_id, player in self.current_game_state.players.items():
             pixel_x = player.y * TILE_SIZE + shake_x
-            pixel_y = player.x * TILE_SIZE + shake_y
+            pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
             self.draw_enhanced_player_with_complete_effects(self.map_surface, pixel_x, pixel_y, player)
 
         # Draw all enhanced explosions
@@ -2489,7 +2489,7 @@ class EnhancedSocketGameVisualizer:
             return
 
         center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
         bomb_type = effect.get('bomb_type', 'normal_bomb')
 
         # Impact burst with type-specific colors
@@ -2522,7 +2522,7 @@ class EnhancedSocketGameVisualizer:
             return
 
         center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
         speed = effect.get('speed', 1)
 
         # Speed aura
@@ -2546,7 +2546,7 @@ class EnhancedSocketGameVisualizer:
             return
 
         center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
         direction = effect.get('direction', 'north')
         particle_id = effect.get('particle_id', 0)
 
@@ -2578,7 +2578,7 @@ class EnhancedSocketGameVisualizer:
             return
 
         center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
         angle = effect.get('angle', 0)
 
         # Particle trajectory
@@ -2602,7 +2602,7 @@ class EnhancedSocketGameVisualizer:
             return
 
         center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
         player_id = effect.get('player_id', 1)
 
         # Death spiral effect
@@ -2633,7 +2633,7 @@ class EnhancedSocketGameVisualizer:
             return
 
         center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
         angle = effect.get('angle', 0)
 
         # Expanding particle
@@ -2657,7 +2657,7 @@ class EnhancedSocketGameVisualizer:
             return
 
         center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
         
         # Flash effect
         flash_intensity = math.sin(progress * math.pi * 6) * (1 - progress)
