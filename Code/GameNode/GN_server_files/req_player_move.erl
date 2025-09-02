@@ -103,17 +103,30 @@ calc_new_coordinates(Position, Direction) ->
 
 %% @doc returns can_move/cant_move/dest_not_here
 handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
+    io:format("DEBUG: handle_player_movement called for Player ~p, Direction ~p~n", [PlayerNum, Direction]),
     %% ? calculate the destination coordinate, find out if the coordinate is within limits of current GN (the one initiating the function call)
     Player_record = read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+    io:format("DEBUG: Player record: ~p~n", [Player_record]),
     Destination = calc_new_coordinates(Player_record#mnesia_players.position, Direction),
+    io:format("DEBUG: Calculated destination: ~p~n", [Destination]),
     Current_gn_name = get_registered_name(self()),
-    case get_managing_node_by_coord(hd(Destination),lists:last(Destination)) of
+    io:format("DEBUG: Current GN name: ~p~n", [Current_gn_name]),
+    
+    ManagingNode = get_managing_node_by_coord(hd(Destination),lists:last(Destination)),
+    io:format("DEBUG: Managing node for destination: ~p~n", [ManagingNode]),
+    
+    case ManagingNode of
         out_of_map_bounds -> % player tried to move outside the map
+            io:format("DEBUG: Movement result: cant_move (out of bounds)~n"),
             cant_move;
         Current_gn_name -> % destination coordinate is managed by this GN
+            io:format("DEBUG: Destination is within current GN, checking obstacles~n"),
             %% ? Checks for obstacles in the target coordinate, kickstarting any movements caused by this attempt
-            check_for_obstacles(Destination, Player_record#mnesia_players.special_abilities, Direction, State);
+            Result = check_for_obstacles(Destination, Player_record#mnesia_players.special_abilities, Direction, State),
+            io:format("DEBUG: check_for_obstacles result: ~p~n", [Result]),
+            Result;
         _Other_name ->
+            io:format("DEBUG: Movement result: dest_not_here (managed by ~p)~n", [ManagingNode]),
             dest_not_here
     end.
 
@@ -128,12 +141,9 @@ check_for_obstacles(Coordinate, BuffsList, Initiator_Direction, State = #gn_stat
 %% @doc Update movement to 'true', set time remainning based on movespeed
 %% time remaining = <Base_time> - (Player_speed - 1) * <MS_REDUCTION>
 insert_player_movement(PlayerNum, Table) ->
-    io:format("DEBUG: insert_player_movement called with PlayerNum=~p, Table=~p~n", [PlayerNum, Table]),
     Fun = fun() ->
-        io:format("DEBUG: About to read from table ~p for player ~p~n", [Table, PlayerNum]),
         case mnesia:read(Table, PlayerNum, sticky_write) of
             [Player_record = #mnesia_players{}] ->
-                io:format("DEBUG: Found player record, updating movement~n"),
                 Updated_record = Player_record#mnesia_players{
                     movement = true,
                     movement_timer = ?TILE_MOVE - (Player_record#mnesia_players.speed -1)*?MS_REDUCTION % * Set counter based on movespeed
@@ -142,13 +152,11 @@ insert_player_movement(PlayerNum, Table) ->
                 mnesia:write(Table, Updated_record, sticky_write),
                 ok;
             [] -> % didn't find 
-                io:format("DEBUG: Player ~p not found in table ~p~n", [PlayerNum, Table]),
                 not_found
         end
     end,
-    io:format("DEBUG: Starting mnesia transaction~n"),
     Result = mnesia:activity(transaction, Fun),
-    io:format("DEBUG: Transaction result: ~p~n", [Result]),
+    io:format("DEBUG: insert_player_movement result: ~p~n", [Result]),
     Result.
 
 

@@ -118,15 +118,20 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
     case Request of
         %% * Player movement request mechanism
         {move_request, PlayerNum, ThisGN , Direction} -> % move request from a player in our quarter
+            io:format("DEBUG GN_SERVER: Processing move request for Player ~p, Direction ~p~n", [PlayerNum, Direction]),
             Move_verdict = req_player_move:handle_player_movement(PlayerNum, Direction, State),
+            io:format("DEBUG GN_SERVER: Move verdict: ~p~n", [Move_verdict]),
             case Move_verdict of
                 can_move ->
+                    io:format("DEBUG GN_SERVER: Player can move, updating movement~n"),
                     req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
                     player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
                 cant_move ->
+                    io:format("DEBUG GN_SERVER: Player can't move, updating direction to none~n"),
                     req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
                     player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
                 dest_not_here ->
+                    io:format("DEBUG GN_SERVER: Destination not here, forwarding to CN~n"),
                     %% extracts the player's record from mnesia's player table
                     Player = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
                     %% Calculate destination coordinates
