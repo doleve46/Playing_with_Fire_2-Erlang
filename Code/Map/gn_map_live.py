@@ -1181,7 +1181,7 @@ class GNGameVisualizer:
         for x in range(MAP_SIZE):
             for y in range(MAP_SIZE):
                 pixel_x = y * TILE_SIZE + shake_x
-                pixel_y = x * TILE_SIZE + shake_y
+                pixel_y = (MAP_SIZE - 1 - x) * TILE_SIZE + shake_y
 
                 tile_type = self.current_game_state.tiles[x][y]
                 powerup = self.current_game_state.powerups[x][y]
@@ -1206,13 +1206,13 @@ class GNGameVisualizer:
         # Draw enhanced bombs
         for pos, bomb in self.current_game_state.bombs.items():
             pixel_x = bomb.y * TILE_SIZE + shake_x
-            pixel_y = bomb.x * TILE_SIZE + shake_y
+            pixel_y = (MAP_SIZE - 1 - bomb.x) * TILE_SIZE + shake_y
             self.draw_enhanced_bomb_with_fsm_state(self.map_surface, pixel_x, pixel_y, bomb)
 
         # Draw enhanced players
         for player_id, player in self.current_game_state.players.items():
             pixel_x = player.y * TILE_SIZE + shake_x
-            pixel_y = player.x * TILE_SIZE + shake_y
+            pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
             self.draw_enhanced_player_with_complete_effects(self.map_surface, pixel_x, pixel_y, player)
 
         # Draw all enhanced explosions
@@ -1686,7 +1686,7 @@ class GNGameVisualizer:
             return
 
         center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = explosion['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
         explosion_type = explosion.get('explosion_type', 'standard')
         
         # Pulsing explosion
@@ -1724,7 +1724,7 @@ class GNGameVisualizer:
             return
 
         center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = effect['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
 
         # Death spiral effect
         if progress < 0.7:
