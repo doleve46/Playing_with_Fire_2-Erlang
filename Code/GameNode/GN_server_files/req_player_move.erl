@@ -128,9 +128,12 @@ check_for_obstacles(Coordinate, BuffsList, Initiator_Direction, State = #gn_stat
 %% @doc Update movement to 'true', set time remainning based on movespeed
 %% time remaining = <Base_time> - (Player_speed - 1) * <MS_REDUCTION>
 insert_player_movement(PlayerNum, Table) ->
+    io:format("DEBUG: insert_player_movement called with PlayerNum=~p, Table=~p~n", [PlayerNum, Table]),
     Fun = fun() ->
+        io:format("DEBUG: About to read from table ~p for player ~p~n", [Table, PlayerNum]),
         case mnesia:read(Table, PlayerNum, sticky_write) of
             [Player_record = #mnesia_players{}] ->
+                io:format("DEBUG: Found player record, updating movement~n"),
                 Updated_record = Player_record#mnesia_players{
                     movement = true,
                     movement_timer = ?TILE_MOVE - (Player_record#mnesia_players.speed -1)*?MS_REDUCTION % * Set counter based on movespeed
@@ -139,10 +142,14 @@ insert_player_movement(PlayerNum, Table) ->
                 mnesia:write(Updated_record),
                 ok;
             [] -> % didn't find 
+                io:format("DEBUG: Player ~p not found in table ~p~n", [PlayerNum, Table]),
                 not_found
         end
     end,
-    mnesia:activity(transaction, Fun).
+    io:format("DEBUG: Starting mnesia transaction~n"),
+    Result = mnesia:activity(transaction, Fun),
+    io:format("DEBUG: Transaction result: ~p~n", [Result]),
+    Result.
 
 
 
