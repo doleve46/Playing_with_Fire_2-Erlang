@@ -146,6 +146,10 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     SortedConnectedNodeNames = lists:sort(ConnectedNodeNames),
     io:format("CN: Sorted GN nodes for table creation: ~p~n", [SortedConnectedNodeNames]),
     
+    % Clean up any existing tables from previous runs
+    io:format("CN: Cleaning up existing tables...~n"),
+    cleanup_existing_tables(length(SortedConnectedNodeNames)),
+    
     TableNamesList = lists:map(fun(X) ->
             create_tables(lists:nth(X, SortedConnectedNodeNames), node(), X)
         end, lists:seq(1,length(SortedConnectedNodeNames))),
@@ -246,6 +250,27 @@ await_players_decisions(N, Acc, GN_list) ->
 %% helper function to create mnesia table names
 generate_atom_table_names(Number, Type) ->
     list_to_atom("gn" ++ integer_to_list(Number) ++ Type).
+
+%% @doc Clean up existing tables from previous runs to avoid configuration conflicts
+cleanup_existing_tables(NumNodes) ->
+    lists:foreach(fun(NodeNum) ->
+        TilesTable = generate_atom_table_names(NodeNum, "_tiles"),
+        BombsTable = generate_atom_table_names(NodeNum, "_bombs"),
+        PowerupsTable = generate_atom_table_names(NodeNum, "_powerups"),
+        PlayersTable = generate_atom_table_names(NodeNum, "_players"),
+        
+        % Try to delete each table, ignore errors if they don't exist
+        lists:foreach(fun(TableName) ->
+            case mnesia:delete_table(TableName) of
+                {atomic, ok} ->
+                    io:format("CN: Deleted existing table ~p~n", [TableName]);
+                {aborted, {no_exists, _}} ->
+                    io:format("CN: Table ~p didn't exist (OK)~n", [TableName]);
+                {aborted, Reason} ->
+                    io:format("CN: Warning - couldn't delete table ~p: ~p~n", [TableName, Reason])
+            end
+        end, [TilesTable, BombsTable, PowerupsTable, PlayersTable])
+    end, lists:seq(1, NumNodes)).
 
 create_tables(GN_node, CN_node, Node_number) ->
     Mnesia_tiles_name = generate_atom_table_names(Node_number, "_tiles"),
