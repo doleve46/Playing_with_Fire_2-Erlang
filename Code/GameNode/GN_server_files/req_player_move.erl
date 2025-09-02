@@ -168,7 +168,7 @@ get_records_at_location(Coordinate, State = #gn_state{}) ->
         Players = qlc:eval(qlc:q([ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.position == Coordinate])),
         Tiles ++ Bombs ++ Players
     end,
-    mnesia:activity(read_only, Fun).
+    mnesia:activity(sync_dirty, Fun).
 
 
 -spec interact_with_entity(list(), list(), up|down|left|right, #gn_state{}) -> can_move|cant_move.
