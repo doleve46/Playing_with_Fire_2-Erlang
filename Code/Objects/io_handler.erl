@@ -219,14 +219,14 @@ display_response(Response, PlayerNumber) ->
 read_keyboard_input(Key) ->
     io:format("**##** READ_INPUT: Received keyboard_input message: ~p~n", [Key]),
     case Key of
-        <<" ">> -> space;
+        <<"space">> -> space;
         <<"w">> -> w;
         <<"a">> -> a;
         <<"s">> -> s;
         <<"d">> -> d;
         <<"e">> -> e;
         <<"q">> -> q;
-        <<27, 91, 65>> -> arrow_up; %% todo: unsure if it works or needs adjustment
+        <<27, 91, 65>> -> arrow_up; %% todo: doesn't work - doesnt even register on the graphics as a message
         <<27, 91, 66>> -> arrow_down;
         <<27, 91, 67>> -> arrow_right;
         <<27, 91, 68>> -> arrow_left;
