@@ -561,7 +561,7 @@ send_enhanced_map_to_socket(undefined, _MapState) ->
     % io:format("⚠️ No socket client connected to send map~n"),
     ok;
 send_enhanced_map_to_socket(ClientPid, MapState) ->
-    io:format("📡 Sending map via socket to PID: ~p~n", [ClientPid]),
+    % io:format("📡 Sending map via socket to PID: ~p~n", [ClientPid]),
     try
         % Create simpler JSON structure
         SimpleMapData = create_simple_map_data(MapState),
@@ -577,8 +577,8 @@ send_enhanced_map_to_socket(ClientPid, MapState) ->
         LengthPrefix = <<DataLength:32/big>>,
         Message = <<LengthPrefix/binary, JsonBinary/binary>>,
         
-        ClientPid ! {send_data, Message},
-        io:format("✅ Map data sent via socket (~w bytes)~n", [DataLength])
+        ClientPid ! {send_data, Message}
+        % io:format("✅ Map data sent via socket (~w bytes)~n", [DataLength])
         
     catch
         Error:Reason ->
