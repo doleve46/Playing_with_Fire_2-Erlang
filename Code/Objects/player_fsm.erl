@@ -25,7 +25,7 @@
 
 -export([start_link/4]).
 -export([start_signal/1, send_killswitch/1, input_command/2, gn_response/2, inflict_damage/1, bomb_exploded/1, 
-        update_target_gn/2, notify_power_up/2]).
+        update_target_gn/2, notify_power_up/2, get_player_pid/1]).
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
@@ -77,6 +77,7 @@ start_link(PlayerNumber, GN_Pid, IsBot, IO_pid) ->
 start_signal(PlayerPid) ->
     gen_statem:cast(PlayerPid, {game_start}).
 
+
 %% @doc Send killswitch to the player
 send_killswitch(PlayerPid) ->
     gen_statem:cast(PlayerPid, {killswitch}).
@@ -85,9 +86,11 @@ send_killswitch(PlayerPid) ->
 input_command(PlayerPid, Command) ->
     gen_statem:cast(PlayerPid, {input_command, Command}).
 
+
 %% @doc Send response from GN
 gn_response(PlayerNum, Response) ->
-    gen_statem:cast(list_to_atom("player_" ++ integer_to_list(PlayerNum)), {gn_response, Response}).
+    gen_statem:cast(get_player_pid(PlayerNum), {gn_response, Response}).
+    
 
 %% @doc Inflict damage on player (from explosion)
 inflict_damage(PlayerPid) ->
@@ -272,6 +275,7 @@ waiting_for_response(cast, {input_command, Command}, Data) ->
     {keep_state, Data};
 
 waiting_for_response(cast, {gn_response, Response}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received GN response ~p**##**~n", [waiting_for_response, Response]),
     handle_gn_response(Response, Data);
 
 waiting_for_response(cast, {killswitch}, Data) ->
@@ -398,6 +402,7 @@ immunity_waiting_for_response(cast, {input_command, _Command}, Data) ->
     {keep_state, Data};
 
 immunity_waiting_for_response(cast, {gn_response, Response}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received GN response ~p**##**~n", [immunity_waiting_for_response, Response]),
     handle_gn_response(Response, Data);
 
 immunity_waiting_for_response(cast, {killswitch}, Data) ->
@@ -734,3 +739,12 @@ terminate(_Reason, _State, _Data) ->
 
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
+
+%% @doc helper function to get player's PID from his number
+get_player_pid(PlayerNumber) ->
+    case global:whereis_name(list_to_atom("player_" ++ integer_to_list(PlayerNumber))) of
+        Pid when is_pid(Pid) ->
+            Pid;
+        _ ->
+            {error, player_not_found}
+    end.

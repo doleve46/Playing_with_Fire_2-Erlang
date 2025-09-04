@@ -149,6 +149,7 @@ insert_player_movement(PlayerNum, Table) ->
                     movement_timer = ?TILE_MOVE - (Player_record#mnesia_players.speed -1)*?MS_REDUCTION % * Set counter based on movespeed
                     },
                 %% Insert updated record into the correct table (not inferred from record name)
+                io:format("DEBUG: insert_player_movement - player num ~p movement timer is ~p~n", [Updated_record#mnesia_players.player_number, Updated_record#mnesia_players.movement_timer]),
                 mnesia:write(Table, Updated_record, sticky_write),
                 ok;
             [] -> % didn't find 
