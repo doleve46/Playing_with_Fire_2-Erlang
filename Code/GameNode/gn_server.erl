@@ -342,7 +342,13 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
 %% * handle bomb explosions
 handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
     %% Read and remove bomb from mnesia table. Pass record to cn_server to process explosion
-    {atomic, Record} = req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name),
+    Record = case req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name) of
+        {atomic, R} -> R;
+        R when is_record(R, mnesia_bombs) -> R;
+        Other -> 
+            io:format("ERROR: read_and_remove_bomb returned unexpected value: ~p~n", [Other]),
+            throw({unexpected_return, Other})
+    end,
     gn_server:cast_message(cn_server, 
         {query_request, get_registered_name(self()), 
             {handle_bomb_explosion, Record#mnesia_bombs.position, Record#mnesia_bombs.radius}}),
@@ -470,7 +476,10 @@ notify_owner_of_bomb_explosion(OwnerID, State) ->
                 end,
                 Result % return list back from function
             end, % fun()'s "end"
-            {atomic, Result} = mnesia:activity(transaction, Fun),
+            Result = case mnesia:activity(transaction, Fun) of
+                {atomic, R} -> R;
+                R -> R
+            end,
             case Result of
                 [{player, MatchingPlayerRecord}] -> % player found within GN
                     player_fsm:bomb_exploded(MatchingPlayerRecord#mnesia_players.pid);

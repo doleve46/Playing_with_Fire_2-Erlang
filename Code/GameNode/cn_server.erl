@@ -347,7 +347,10 @@ inflict_damage_handler(PidsList, Module, Function) ->
 update_player_active_bombs(PlayerPid) ->
     Tables = [gn1_players, gn2_players, gn3_players, gn4_players],
     Fun = fun() -> find_in_player_tables(PlayerPid, Tables) end,
-    {atomic, Result} = mnesia:activity(transaction, Fun),
+    Result = case mnesia:activity(transaction, Fun) of
+        {atomic, R} -> R;
+        R -> R
+    end,
     case Result of
         not_found ->
             erlang:error(player_not_found, [PlayerPid]);

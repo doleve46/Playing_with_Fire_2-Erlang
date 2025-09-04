@@ -45,5 +45,8 @@ update_to_one_hit(Position, TableName) ->
             [] -> not_found
         end
     end,
-    {atomic, ReturnVal} = mnesia:activity(transaction, Fun),
+    ReturnVal = case mnesia:activity(transaction, Fun) of
+        {atomic, R} -> R;
+        R -> R
+    end,
     ReturnVal.

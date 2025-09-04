@@ -33,9 +33,7 @@ place_bomb(PlayerNum, PlayersTableName, BombsTableName) ->
             case bomb_as_fsm:start_monitor(X, Y, BombType, [PlayerRecord#mnesia_players.pid, BombRadius]) of
                 {ok, {BombPid, _MonitorRef}} ->
                     %% Update player's active bomb within mnesia
-                    TestReturnVal = update_player_bomb_count(PlayerNum, PlayersTableName, 1), %% TODO: figure out which of these is correct
-                    io:format("DEBUG: update_player_bomb_count returned: ~p~n", [TestReturnVal]),
-                    case TestReturnVal of
+                    case update_player_bomb_count(PlayerNum, PlayersTableName, 1) of
                         {atomic, _} -> ok;
                         ok -> ok;
                         Error1 -> 
@@ -50,19 +48,13 @@ place_bomb(PlayerNum, PlayersTableName, BombsTableName) ->
                         owner = PlayerRecord#mnesia_players.player_number,
                         gn_pid = PlayerRecord#mnesia_players.target_gn,
                         pid = BombPid},
-                        TestReturnVal2 = add_bomb_to_table(BombRecord, BombsTableName),
-                        io:format("DEBUG: add_bomb_to_table returned: ~p~n", [TestReturnVal2]),
-                        case TestReturnVal2 of
-                            {atomic, _} -> 
-                                io:format("DEBUG: Bomb added to table successfully~n"),
-                                bomb_placed;
-                            ok -> 
-                                io:format("DEBUG: Bomb added to table (got ok instead of {atomic, ok})~n"),
-                                bomb_placed;
-                            Error2 -> 
-                                io:format("ERROR: add_bomb_to_table failed: ~p~n", [Error2]),
-                                {error, {failed_to_add_bomb_to_table, Error2}}
-                        end;
+                    case add_bomb_to_table(BombRecord, BombsTableName) of
+                        {atomic, _} -> bomb_placed;
+                        ok -> bomb_placed;
+                        Error2 -> 
+                            io:format("ERROR: add_bomb_to_table failed: ~p~n", [Error2]),
+                            {error, {failed_to_add_bomb_to_table, Error2}}
+                    end;
                 Error ->
                     {error, {failed_to_create_bomb, Error}}
             end;
@@ -119,5 +111,8 @@ find_remote_bombs_for_player(PlayerNum) ->
             [], % Initial accumulator
             BombTables)
     end,
-    {atomic, RemoteBombs} = mnesia:activity(transaction, Fun),
+    RemoteBombs = case mnesia:activity(transaction, Fun) of
+        {atomic, R} -> R;
+        R -> R
+    end,
     RemoteBombs.
