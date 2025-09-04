@@ -93,12 +93,12 @@ init([Position, Type, Gn_Pid, Optional]) ->
                         radius = Radius}
     end,
     case StateData#bomb_state.type of
-        regular ->
+        ?NORMAL_BOMB ->
             UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]};
-        remote -> 
+        ?REMOTE_IGNITION -> 
             {ok, remote_idle, StateData}; % TODO: complete implementation
-        repeating -> % repeating bomb, w.i.p
+        ?REPEAT_BOMBS -> % repeating bomb, w.i.p
             UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]}
     end.

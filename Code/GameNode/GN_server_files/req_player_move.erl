@@ -17,7 +17,7 @@
         update_player_direction/3, handle_player_movement_clearance/3, handle_bomb_movement_clearance/3,
         get_managing_node_by_coord/2, node_name_to_number/1,
         get_records_at_location/2, interact_with_entity/4,
-        handle_player_movement/3, insert_player_movement/2, check_for_obstacles/4,
+        handle_player_movement/3, insert_player_movement/2, insert_player_movement/3, check_for_obstacles/4,
         read_and_remove_bomb/2, get_gn_number_by_coord/2,
         read_and_update_coord/3, check_entered_coord/2, update_player_cooldowns/2]).
 
@@ -138,8 +138,30 @@ check_for_obstacles(Coordinate, BuffsList, Initiator_Direction, State = #gn_stat
     interact_with_entity(Entities_at_coord, BuffsList, Initiator_Direction, State).
 
 
-%% @doc Update movement to 'true', set time remainning based on movespeed
+%% @doc Update movement to 'true', set time remaining based on movespeed, and set direction
 %% time remaining = <Base_time> - (Player_speed - 1) * <MS_REDUCTION>
+insert_player_movement(PlayerNum, Table, Direction) ->
+    Fun = fun() ->
+        case mnesia:read(Table, PlayerNum, sticky_write) of
+            [Player_record = #mnesia_players{}] ->
+                Updated_record = Player_record#mnesia_players{
+                    movement = true,
+                    direction = Direction,
+                    movement_timer = ?TILE_MOVE - (Player_record#mnesia_players.speed -1)*?MS_REDUCTION % * Set counter based on movespeed
+                    },
+                %% Insert updated record into the correct table (not inferred from record name)
+                io:format("DEBUG: insert_player_movement - player num ~p movement timer is ~p, direction is ~p~n", [Updated_record#mnesia_players.player_number, Updated_record#mnesia_players.movement_timer, Direction]),
+                mnesia:write(Table, Updated_record, sticky_write),
+                ok;
+            [] -> % didn't find 
+                not_found
+        end
+    end,
+    Result = mnesia:activity(transaction, Fun),
+    io:format("DEBUG: insert_player_movement result: ~p~n", [Result]),
+    Result.
+
+%% @doc Legacy function for backward compatibility - update movement only
 insert_player_movement(PlayerNum, Table) ->
     Fun = fun() ->
         case mnesia:read(Table, PlayerNum, sticky_write) of

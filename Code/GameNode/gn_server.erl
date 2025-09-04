@@ -124,7 +124,7 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
             case Move_verdict of
                 can_move ->
                     io:format("DEBUG GN_SERVER: Player can move, updating movement~n"),
-                    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
+                    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name, Direction),
                     player_fsm:gn_response(PlayerNum, {move_result, Move_verdict});
                 cant_move ->
                     io:format("DEBUG GN_SERVER: Player can't move, updating direction to none~n"),
