@@ -638,6 +638,7 @@ handle_tick(CurrentState, Data) ->
         Immunity_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % cooldown just ended, notify GN
+            io:format("**PLAYER FSM: Request cooldown ended**~n"),
             gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn, 
                     {request_cooldown_update, Data#player_data.player_number, Updated_requestCooldown}
@@ -651,6 +652,7 @@ handle_tick(CurrentState, Data) ->
         Move_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % Report movement cooldown changes every 200 ms to GN
+            io:format("**PLAYER FSM: New movement cooldown is ~p ms**~n", [Updated_movementCooldown]),
             gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
@@ -671,6 +673,7 @@ handle_tick(CurrentState, Data) ->
             erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 0 -> % immunity ended, notify GN
+            io:format("**PLAYER FSM: Immunity ended**~n"),
             gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
@@ -680,12 +683,14 @@ handle_tick(CurrentState, Data) ->
                 immunity_waiting_for_response -> {next_state, waiting_for_response, NewData}
             end;
         Updated_immunityTimer == 1000 -> % 1sec immunity left, report to GN
+            io:format("**PLAYER FSM: 1 second of immunity left**~n"),
             gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
             erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 2000 -> % 2sec immunity left, report to GN
+            io:format("**PLAYER FSM: 2 seconds of immunity left**~n"),
             gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
