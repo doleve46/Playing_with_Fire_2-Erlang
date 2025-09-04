@@ -531,7 +531,7 @@ process_command(Command, Data) ->
 
 handle_gn_response(Response, Data) ->
     case Response of
-         {move_result, accepted} ->
+         {move_result, can_move} ->
             io:format("**PLAYER FSM: Move accepted by GN**~n"),
             %% Move accepted - player is now moving, cannot move again for X seconds
             %% but can still drop bombs or use other abilities
@@ -546,7 +546,7 @@ handle_gn_response(Response, Data) ->
                     {next_state, immunity_idle, NewData}
             end;
 
-        {move_result, denied} ->
+        {move_result, cant_move} ->
             io:format("**PLAYER FSM: Move denied by GN**~n"),
             %% Move denied - short cooldown before any request
             NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
@@ -665,8 +665,6 @@ handle_tick(CurrentState, Data) ->
         request_cooldown = Updated_requestCooldown,
         movement_cooldown = Updated_movementCooldown
     },
-    io:format("**PLAYER FSM: Timers after tick - Immunity: ~p, Request: ~p, Movement: ~p**~n",
-        [NewData#player_data.immunity_timer, NewData#player_data.request_cooldown, NewData#player_data.movement_cooldown]),
     %% immunity handling - this timer is the only one responsible for state changes
     if
         Updated_immunityTimer == Immunity_cd -> % was at 0, nothing to report
