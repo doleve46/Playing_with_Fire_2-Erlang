@@ -532,10 +532,12 @@ process_command(Command, Data) ->
 handle_gn_response(Response, Data) ->
     case Response of
          {move_result, accepted} ->
+            io:format("**PLAYER FSM: Move accepted by GN**~n"),
             %% Move accepted - player is now moving, cannot move again for X seconds
             %% but can still drop bombs or use other abilities
             NewData = Data#player_data{
                 movement_cooldown = ?TILE_MOVE - ((Data#player_data.speed - 1) * ?MS_REDUCTION)},
+            io:format("**PLAYER FSM: New movement cooldown is ~p ms**~n", [NewData#player_data.movement_cooldown]),
             send_io_ack({move_accepted}, NewData), % "release" the io/bot handler to send more requests
             if
                 Data#player_data.immunity_timer == 0 ->
@@ -545,6 +547,7 @@ handle_gn_response(Response, Data) ->
             end;
 
         {move_result, denied} ->
+            io:format("**PLAYER FSM: Move denied by GN**~n"),
             %% Move denied - short cooldown before any request
             NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
             send_io_ack({move_denied}, NewData), %% "release" the io/bot handler to send more requests
@@ -561,6 +564,7 @@ handle_gn_response(Response, Data) ->
                 request_cooldown = ?REQUEST_COOLDOWN,
                 bombs_placed = Data#player_data.bombs_placed + 1
             },
+            io:format("**PLAYER FSM: New bomb count is ~p**~n", [NewData#player_data.bombs_placed]),
             send_io_ack(bomb_placed, NewData), % "release" the io/bot handler to send more requests
             if 
                 Data#player_data.immunity_timer == 0 ->
@@ -570,7 +574,7 @@ handle_gn_response(Response, Data) ->
             end;
 
         {bomb_result, denied} ->
-            %% Bomb drop failed - restore bomb count
+            %% Bomb drop failed - begin request cooldown
             NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
             send_io_ack({bomb_not_placed}, NewData),
             if 
@@ -582,6 +586,7 @@ handle_gn_response(Response, Data) ->
 
         {ignite_result, accepted} ->
             %% Remote bombs ignited
+            io:format("**PLAYER FSM: Remote bombs ignited by GN**~n"),
             NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
             send_io_ack({ignited_bombs}, NewData),
             if 
@@ -593,6 +598,7 @@ handle_gn_response(Response, Data) ->
 
         {ignite_result, denied} ->
             %% Remote ignition failed
+            io:format("**PLAYER FSM: Remote bomb ignition failed by GN**~n"),
             %% ? This will be sent when we we don't have remote bombs to blow
             NewData = Data#player_data{
                 request_cooldown = 200     % short cooldown before retry
@@ -617,7 +623,7 @@ handle_gn_response(Response, Data) ->
 
 
 handle_tick(CurrentState, Data) ->
-    %% Reduce cooldowns, notify GN of significant changes (every 1 sec), switch states if necessary
+    %% Reduce cooldowns, notify GN of significant changes, switch states if necessary
     %% Fetch Current counters
     {Immunity_cd, Request_cd, Move_cd} = {Data#player_data.immunity_timer, 
                                          Data#player_data.request_cooldown, 
@@ -659,6 +665,8 @@ handle_tick(CurrentState, Data) ->
         request_cooldown = Updated_requestCooldown,
         movement_cooldown = Updated_movementCooldown
     },
+    io:format("**PLAYER FSM: Timers after tick - Immunity: ~p, Request: ~p, Movement: ~p**~n",
+        [NewData#player_data.immunity_timer, NewData#player_data.request_cooldown, NewData#player_data.movement_cooldown]),
     %% immunity handling - this timer is the only one responsible for state changes
     if
         Updated_immunityTimer == Immunity_cd -> % was at 0, nothing to report
