@@ -109,6 +109,7 @@ handle_cast({query_request, AskingGN, Request}, State) ->
         {handle_bomb_explosion, Coord, Radius} ->
             %% handled in a side function
             %% Calculates affected coordinates, then sends damage_taken messages to all objects impacted
+            io:format("💣 CN SERVER: Processing bomb explosion at ~p with radius ~p~n", [Coord, Radius]),
             bomb_explosion_handler(Coord, Radius),
             {noreply, State};
 
@@ -244,16 +245,23 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
     mnesia:activity(transaction, Fun).
 
 bomb_explosion_handler(Coord, Radius) ->
+    io:format("💥 EXPLOSION_HANDLER: Starting explosion calculation for ~p with radius ~p~n", [Coord, Radius]),
     ResultList = case calculate_explosion_reach(Coord, Radius) of
-        {atomic, Result} -> Result;
-        Result when is_list(Result) -> Result;
+        {atomic, Result} -> 
+            io:format("💥 EXPLOSION_HANDLER: Got atomic result with ~p coordinates~n", [length(lists:flatten(Result))]),
+            Result;
+        Result when is_list(Result) -> 
+            io:format("💥 EXPLOSION_HANDLER: Got list result with ~p coordinates~n", [length(lists:flatten(Result))]),
+            Result;
         Other -> 
             io:format("ERROR: Unexpected result from calculate_explosion_reach: ~p~n", [Other]),
             throw({unexpected_explosion_result, Other})
     end,
     %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
     %% ResultList can be passed to the graphics server so it knows where to show an explosion
-    cn_server_graphics:show_explosion(lists:flatten(ResultList)),
+    FlattenedCoords = lists:flatten(ResultList),
+    io:format("💥 EXPLOSION_HANDLER: Sending ~p coordinates to graphics: ~p~n", [length(FlattenedCoords), FlattenedCoords]),
+    cn_server_graphics:show_explosion(FlattenedCoords),
     %% Sends inflict_damage messages to all objects affected by the explosion
     notify_affected_objects(ResultList).
 
