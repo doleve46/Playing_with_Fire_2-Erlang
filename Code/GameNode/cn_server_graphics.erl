@@ -1315,10 +1315,8 @@ update_cell_enhanced_player({Tile, Powerup, Bomb, _, Explosion, Special}, Enhanc
     {Tile, Powerup, Bomb, EnhancedPlayerInfo, Explosion, Special}.
 
 add_enhanced_bombs_to_map(Map) ->
-    io:format("🧨 Starting to add bombs to map~n"),
     BombTables = [gn1_bombs, gn2_bombs, gn3_bombs, gn4_bombs],
     lists:foldl(fun(Table, AccMap) ->
-        io:format("🧨 Processing bomb table: ~p~n", [Table]),
         add_enhanced_bombs_from_table(Table, AccMap)
     end, Map, BombTables).
 
@@ -1329,9 +1327,7 @@ add_enhanced_bombs_from_table(Table, Map) ->
    
     case mnesia:activity(transaction, Fun) of
         BombRecords when is_list(BombRecords) ->
-            io:format("🧨 Found ~p bomb records in table ~p~n", [length(BombRecords), Table]),
             lists:foldl(fun(BombRecord, AccMap) ->
-                io:format("🧨 Processing bomb record: ~p~n", [BombRecord]),
                 update_map_with_enhanced_bomb(AccMap, BombRecord)
             end, Map, BombRecords);
         Error ->
