@@ -7,7 +7,6 @@
 %%% Created : 11. Jul 2025 23:29
 %%%-------------------------------------------------------------------
 -author("dolev").
--include("../common_parameters.hrl").
 
 %% * All record definitions regarding the mnesia database are defined here
 
@@ -37,7 +36,7 @@
     direction = none, % none/up/down/left/right
     owner = none, % player name/ID (?) of whoever placed the bomb. 'none' is for a bomb that fell from a broken tile (or simply no owner)
     gn_pid, % GN Pid who oversees this process
-    internal_timer = ?EXPLODE_DELAY, % timer for having restore points for bomb explosion timer
+    internal_timer = 3000, % timer for having restore points for bomb explosion timer
     pid = none
 }).
 
