@@ -27,7 +27,7 @@
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %%% Windows compatible - Fixed relative paths
 -include("../Objects/object_records.hrl").
--include("../common_parameters.hrl").
+%% common_parameters.hrl is already included via mnesia_records.hrl
 
 %%%===================================================================
 %%% API
