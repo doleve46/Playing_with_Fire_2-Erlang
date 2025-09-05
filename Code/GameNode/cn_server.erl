@@ -62,6 +62,15 @@ start_link(GN_playmode_list) ->
 %% "named" (records in the list are named, [Gn1_names, Gn2_names, ...] ): Gn2_names#gn_data.players
 init([GN_playmode_list]) -> % [ {GN_number, Answer, NodeID} , {..} ]
     process_flag(trap_exit, true), % set to trap exits of GNs
+    %% Verify that we're registered correctly
+    io:format("🔧 CN SERVER: Initializing, PID: ~p~n", [self()]),
+    timer:sleep(100), % Give registration time to complete
+    case global:whereis_name(cn_server) of
+        Pid when Pid == self() ->
+            io:format("✅ CN SERVER: Successfully registered globally as 'cn_server'~n");
+        OtherPid ->
+            io:format("❌ CN SERVER: Registration issue - global name points to ~p, but I am ~p~n", [OtherPid, self()])
+    end,
     %% Attempt to monitor the processes right after initialization
     erlang:send_after(0, self(), {monitor_GNs, GN_playmode_list}),
 

@@ -1061,19 +1061,12 @@ send_enhanced_map_to_gn_servers(State) ->
 
 create_enhanced_map_state(State) ->
     try
-        io:format("🗺️ Creating enhanced map state - step 1: empty map~n"),
         EmptyMap = create_empty_map(),
-        io:format("🗺️ Creating enhanced map state - step 2: adding tiles~n"),
         MapWithTiles = add_tiles_to_map(EmptyMap),
-        io:format("🗺️ Creating enhanced map state - step 3: adding powerups~n"),
         MapWithPowerups = add_powerups_to_map(MapWithTiles),
-        io:format("🗺️ Creating enhanced map state - step 4: adding bombs~n"),
         MapWithBombs = add_enhanced_bombs_to_map(MapWithPowerups),
-        io:format("🗺️ Creating enhanced map state - step 5: adding players~n"),
         MapWithPlayers = add_enhanced_players_to_map(MapWithBombs),
-        io:format("🗺️ Creating enhanced map state - step 6: adding explosions~n"),
         MapWithExplosions = add_explosions_to_map(MapWithPlayers, State#state.active_explosions),
-        io:format("🗺️ Enhanced map state created successfully~n"),
        
         #{
             map => MapWithExplosions,
