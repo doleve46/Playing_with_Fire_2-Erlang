@@ -265,7 +265,7 @@ bomb_explosion_handler(Coord, Radius) ->
             io:format("💥 EXPLOSION_HANDLER: Got atomic result with ~p coordinates~n", [length(lists:flatten(Result))]),
             Result;
         Result when is_list(Result) -> 
-            io:format("💥 EXPLOSION_HANDLER: Got list result with ~p coordinates~n", [length(lists:flatten(Result))]),
+            io:format("💥 EXPLOSION_HANDLER: Got list result with ~p coordinates~nFull list is:~p", [length(Result), Result]),
             Result;
         Other -> 
             io:format("ERROR: Unexpected result from calculate_explosion_reach: ~p~n", [Other]),
