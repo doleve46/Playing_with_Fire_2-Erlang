@@ -1456,7 +1456,7 @@ class GNGameVisualizer:
                 current_y = start_y + (end_y - start_y) * eased_progress
 
                 actual_x = current_y * TILE_SIZE
-                actual_y = current_x * TILE_SIZE
+                actual_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
 
         center_x = actual_x + TILE_SIZE // 2
         center_y = actual_y + TILE_SIZE // 2
@@ -1595,7 +1595,7 @@ class GNGameVisualizer:
             current_y = start_y + (end_y - start_y) * eased_progress
 
             char_x = current_y * TILE_SIZE
-            char_y = current_x * TILE_SIZE
+            char_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
             center_x = char_x + TILE_SIZE // 2
             center_y = char_y + TILE_SIZE // 2
 

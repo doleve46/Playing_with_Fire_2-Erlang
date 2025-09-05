@@ -1695,9 +1695,9 @@ class EnhancedSocketGameVisualizer:
                 current_x = start_x + (end_x - start_x) * eased_progress
                 current_y = start_y + (end_y - start_y) * eased_progress
 
-                # Convert to screen coordinates
+                # Convert to screen coordinates (match static map drawing)
                 actual_x = current_y * TILE_SIZE
-                actual_y = current_x * TILE_SIZE
+                actual_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
 
                 # Add enhanced movement trail
                 self.draw_enhanced_bomb_movement_trail(surface, anim, progress)
@@ -1953,7 +1953,7 @@ class EnhancedSocketGameVisualizer:
             trail_y = start_y + (anim['end_pos'][1] - start_y) * trail_progress
 
             screen_x = trail_y * TILE_SIZE + TILE_SIZE // 2
-            screen_y = trail_x * TILE_SIZE + TILE_SIZE // 2
+            screen_y = (MAP_SIZE - 1 - trail_x) * TILE_SIZE + TILE_SIZE // 2
 
             alpha = int(120 * (1 - i / trail_length) * (1 - progress))
             if alpha > 0:
@@ -2010,9 +2010,9 @@ class EnhancedSocketGameVisualizer:
             current_x = start_x + (end_x - start_x) * eased_progress
             current_y = start_y + (end_y - start_y) * eased_progress
 
-            # Convert to screen coordinates
+            # Convert to screen coordinates (match static map drawing)
             char_x = current_y * TILE_SIZE
-            char_y = current_x * TILE_SIZE
+            char_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
             center_x = char_x + TILE_SIZE // 2
             center_y = char_y + TILE_SIZE // 2
 
