@@ -69,11 +69,7 @@ get_player_number_from_pid(Pid) when is_pid(Pid) ->
       end,
       global:registered_names()),
       io:format("Found name ~p for PID ~p~n", [Name, Pid]),
-      Name;
-
-get_player_number_from_pid(NotPid) ->
-    io:format("🔍 Not a PID: ~p, using fallback~n", [NotPid]),
-    1. % Default fallback for non-PID values
+      list_to_integer([lists:last(atom_to_list(Name))]).
 
 %%%===================================================================
 %%% gen_server callbacks
