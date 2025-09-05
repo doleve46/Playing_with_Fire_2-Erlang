@@ -1356,8 +1356,15 @@ update_map_with_enhanced_bomb(Map, BombRecord) ->
         Row = lists:nth(X + 1, Map),
         OldCell = lists:nth(Y + 1, Row),
         
+        % Convert Owner PID to player number here, before creating EnhancedBombInfo
+        OwnerNumber = if
+            is_pid(Owner) -> get_player_number_from_pid(Owner);
+            is_integer(Owner) -> Owner;
+            true -> 1
+        end,
+        
         EnhancedBombInfo = {
-            Type, Ignited, Status, Radius, Owner, Movement, Direction
+            Type, Ignited, Status, Radius, OwnerNumber, Movement, Direction
         },
         
         NewCell = update_cell_enhanced_bomb(OldCell, EnhancedBombInfo),
