@@ -43,7 +43,12 @@
 start_monitor(Pos_x, Pos_y, Type, Optional) ->
     %% optional is a list containing [Player_ID, Radius]
     %% bomb is nameless - identified based on Pid
-    gen_statem:start_monitor(?MODULE, [[Pos_x, Pos_y], Type, self(), Optional], []).
+    %% Get the registered name of the calling GN server instead of its PID
+    GN_Name = case gn_server:get_registered_name(self()) of
+        undefined -> self(); % Fallback to PID if name not found
+        Name -> Name
+    end,
+    gen_statem:start_monitor(?MODULE, [[Pos_x, Pos_y], Type, GN_Name, Optional], []).
 
 %% @doc send freeze message to bomb
 freeze_bomb(BombPid) ->
@@ -302,10 +307,10 @@ active_movement(info, Send_after_timers, StateData = #bomb_state{}) ->
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
                 movement = true
             },
-            UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
+            gn_server:cast_message(UpdatedData#bomb_state.gn_pid, {updated_position, UpdatedData#bomb_state.position}), % message GN with new position
             {keep_state, UpdatedData};
         full_tile_change -> % finished a full movement, checking if we can continue moving
-            StateData#bomb_state.gn_pid ! {request_movement, StateData#bomb_state.direction},
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {request_movement, StateData#bomb_state.direction}),
             {keep_state, StateData#bomb_state{movement = false}} % currently not moving, awaiting reply
     end;
 
@@ -525,10 +530,10 @@ remote_idle_movement(info, Send_after_timers, StateData = #bomb_state{}) ->
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
                 movement = true
             },
-            UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
+            gn_server:cast_message(UpdatedData#bomb_state.gn_pid, {updated_position, UpdatedData#bomb_state.position}), % message GN with new position
             {keep_state, UpdatedData};
         full_tile_change -> % finished a full movement, checking if we can continue moving
-            StateData#bomb_state.gn_pid ! {request_movement, StateData#bomb_state.direction},
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {request_movement, StateData#bomb_state.direction}),
             {keep_state, StateData#bomb_state{movement = false}} % currently not moving, awaiting reply
     end;
 
@@ -630,10 +635,10 @@ remote_armed_frozen_movement(info, Send_after_timers, StateData = #bomb_state{})
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
                 movement = true
             },
-            UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
+            gn_server:cast_message(UpdatedData#bomb_state.gn_pid, {updated_position, UpdatedData#bomb_state.position}), % message GN with new position
             {keep_state, UpdatedData};
         full_tile_change -> % finished a full movement, checking if we can continue moving
-            StateData#bomb_state.gn_pid ! {request_movement, StateData#bomb_state.direction},
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {request_movement, StateData#bomb_state.direction}),
             {keep_state, StateData#bomb_state{movement = false}} % currently not moving, awaiting reply
     end;
 

@@ -76,11 +76,7 @@ get_player_number_from_pid(Pid) when is_pid(Pid) ->
                     NameStr = atom_to_list(Name),
                     case string:prefix(NameStr, "player_") of
                         nomatch -> 1; % Default fallback
-                        NumberStr ->
-                            case string:to_integer(NumberStr) of
-                                {Number, ""} when is_integer(Number) -> Number;
-                                _ -> 1 % Default fallback
-                            end
+                        NumberStr -> list_to_integer(NumberStr)
                     end
             end
     end;
