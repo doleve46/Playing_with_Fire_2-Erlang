@@ -84,6 +84,7 @@ handle_cast({forward_request, Destination, Request}, State) ->
 
 %% @doc Handling checks to switch GNs
 handle_cast({query_request, AskingGN, Request}, State) ->
+    io:format("🔄 CN SERVER: Received query_request from ~p: ~p~n", [AskingGN, Request]),
     %% * this below is the Request's contents
     case Request of
         {move_request_out_of_bounds, player, PlayerNum, [X,Y]=Destination_coord, Direction} ->

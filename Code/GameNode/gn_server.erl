@@ -44,6 +44,7 @@ start_link({GN_number, IsBot}) ->
 cast_message(GN_Name, Message) ->
     case global:whereis_name(GN_Name) of
         Pid when is_pid(Pid) ->
+            io:format("📤 CAST_MESSAGE: Sending message to ~p (PID: ~p): ~p~n", [GN_Name, Pid, Message]),
             gen_server:cast(Pid, Message);
         _ ->
             io:format("**##** GN ~p: Not found**##**~n", [GN_Name])
@@ -353,9 +354,6 @@ handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
     io:format("💥 GN SERVER: Received bomb explosion from PID ~p~n", [Pid]),
     %% Read and remove bomb from mnesia table. Pass record to cn_server to process explosion
     Record = case req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name) of
-        {atomic, R} -> 
-            io:format("💥 GN SERVER: Found bomb record (return with atomic) at position ~p with radius ~p~n", [R#mnesia_bombs.position, R#mnesia_bombs.radius]),
-            R;
         R when is_record(R, mnesia_bombs) -> 
             io:format("💥 GN SERVER: Found bomb record (return without atomic) at position ~p with radius ~p~n", [R#mnesia_bombs.position, R#mnesia_bombs.radius]),
             R;
@@ -364,8 +362,10 @@ handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
             throw({unexpected_return, Other})
     end,
     io:format("💥 GN SERVER: Sending explosion request to cn_server for position ~p~n", [Record#mnesia_bombs.position]),
+    MyRegisteredName = get_registered_name(self()),
+    io:format("💥 GN SERVER: My registered name is ~p~n", [MyRegisteredName]),
     gn_server:cast_message(cn_server, 
-        {query_request, get_registered_name(self()), 
+        {query_request, MyRegisteredName, 
             {handle_bomb_explosion, Record#mnesia_bombs.position, Record#mnesia_bombs.radius}}),
     %% Update player's active bombs count, let playerFSM know.
     notify_owner_of_bomb_explosion(Record#mnesia_bombs.owner, State),

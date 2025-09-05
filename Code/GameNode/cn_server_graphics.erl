@@ -1061,12 +1061,19 @@ send_enhanced_map_to_gn_servers(State) ->
 
 create_enhanced_map_state(State) ->
     try
+        io:format("🗺️ Creating enhanced map state - step 1: empty map~n"),
         EmptyMap = create_empty_map(),
+        io:format("🗺️ Creating enhanced map state - step 2: adding tiles~n"),
         MapWithTiles = add_tiles_to_map(EmptyMap),
+        io:format("🗺️ Creating enhanced map state - step 3: adding powerups~n"),
         MapWithPowerups = add_powerups_to_map(MapWithTiles),
+        io:format("🗺️ Creating enhanced map state - step 4: adding bombs~n"),
         MapWithBombs = add_enhanced_bombs_to_map(MapWithPowerups),
+        io:format("🗺️ Creating enhanced map state - step 5: adding players~n"),
         MapWithPlayers = add_enhanced_players_to_map(MapWithBombs),
+        io:format("🗺️ Creating enhanced map state - step 6: adding explosions~n"),
         MapWithExplosions = add_explosions_to_map(MapWithPlayers, State#state.active_explosions),
+        io:format("🗺️ Enhanced map state created successfully~n"),
        
         #{
             map => MapWithExplosions,
@@ -1083,8 +1090,9 @@ create_enhanced_map_state(State) ->
             }
         }
     catch
-        _:Error ->
-            io:format("❌ Error creating enhanced map state: ~p~n", [Error]),
+        Error:Reason:Stacktrace ->
+            io:format("❌ Error creating enhanced map state - Error: ~p, Reason: ~p~n", [Error, Reason]),
+            io:format("❌ Stacktrace: ~p~n", [Stacktrace]),
             #{
                 map => create_empty_map(),
                 dead_players => #{},
@@ -1312,19 +1320,24 @@ update_cell_enhanced_player({Tile, Powerup, Bomb, _, Explosion, Special}, Enhanc
     {Tile, Powerup, Bomb, EnhancedPlayerInfo, Explosion, Special}.
 
 add_enhanced_bombs_to_map(Map) ->
+    io:format("🧨 Starting to add bombs to map~n"),
     BombTables = [gn1_bombs, gn2_bombs, gn3_bombs, gn4_bombs],
     lists:foldl(fun(Table, AccMap) ->
+        io:format("🧨 Processing bomb table: ~p~n", [Table]),
         add_enhanced_bombs_from_table(Table, AccMap)
     end, Map, BombTables).
 
 add_enhanced_bombs_from_table(Table, Map) ->
+    io:format("🧨 Reading from table ~p~n", [Table]),
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_bombs{_ = '_'}, [], ['$_']}])
     end,
    
     case mnesia:activity(transaction, Fun) of
         BombRecords when is_list(BombRecords) ->
+            io:format("🧨 Found ~p bomb records in table ~p~n", [length(BombRecords), Table]),
             lists:foldl(fun(BombRecord, AccMap) ->
+                io:format("🧨 Processing bomb record: ~p~n", [BombRecord]),
                 update_map_with_enhanced_bomb(AccMap, BombRecord)
             end, Map, BombRecords);
         Error ->
