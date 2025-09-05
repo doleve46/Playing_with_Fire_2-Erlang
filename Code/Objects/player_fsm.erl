@@ -652,7 +652,6 @@ handle_tick(CurrentState, Data) ->
         Move_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % Report movement cooldown changes every 200 ms to GN
-            io:format("**PLAYER FSM: New movement cooldown is ~p ms**~n", [Updated_movementCooldown]),
             gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
