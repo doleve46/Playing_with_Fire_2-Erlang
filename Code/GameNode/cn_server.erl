@@ -244,7 +244,13 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
     mnesia:activity(transaction, Fun).
 
 bomb_explosion_handler(Coord, Radius) ->
-    {atomic, ResultList} = calculate_explosion_reach(Coord, Radius),
+    ResultList = case calculate_explosion_reach(Coord, Radius) of
+        {atomic, Result} -> Result;
+        Result when is_list(Result) -> Result;
+        Other -> 
+            io:format("ERROR: Unexpected result from calculate_explosion_reach: ~p~n", [Other]),
+            throw({unexpected_explosion_result, Other})
+    end,
     %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
     %% ResultList can be passed to the graphics server so it knows where to show an explosion
     cn_server_graphics:show_explosion(lists:flatten(ResultList)),
