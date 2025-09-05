@@ -250,25 +250,24 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
     mnesia:activity(transaction, Fun).
 
 bomb_explosion_handler(Coord, Radius) ->
-    io:format("💥 EXPLOSION_HANDLER: Starting explosion calculation for ~p with radius ~p~n", [Coord, Radius]),
     ResultList = case calculate_explosion_reach(Coord, Radius) of
         {atomic, Result} -> 
             io:format("💥 EXPLOSION_HANDLER: Got atomic result with ~p coordinates~n", [length(lists:flatten(Result))]),
             Result;
         Result when is_list(Result) -> 
-            io:format("💥 EXPLOSION_HANDLER: Got list result with ~p coordinates~nFull list is:~p", [length(Result), Result]),
+            io:format("💥 EXPLOSION_HANDLER: Got list result with ~p coordinates~nFull list is:~p~n", [length(Result), Result]),
             Result;
         Other -> 
             io:format("ERROR: Unexpected result from calculate_explosion_reach: ~p~n", [Other]),
             throw({unexpected_explosion_result, Other})
     end,
-    %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
+    %% * ResultList looks like [ [X,Y], [X,Y], [X,Y] ] with duplicates on origin coordinate
     %% ResultList can be passed to the graphics server so it knows where to show an explosion
-    FlattenedCoords = lists:flatten(ResultList),
+    FlattenedCoords = lists:usort(ResultList),
     io:format("💥 EXPLOSION_HANDLER: Sending ~p coordinates to graphics: ~p~n", [length(FlattenedCoords), FlattenedCoords]),
     cn_server_graphics:show_explosion(FlattenedCoords),
     %% Sends inflict_damage messages to all objects affected by the explosion
-    notify_affected_objects(ResultList).
+    notify_affected_objects(ResultList). % TODO: something doesnt work here
 
 calculate_explosion_reach([X, Y], Max_range) ->
     Fun = fun() -> calculate_affected([X, Y], Max_range) end,
@@ -321,30 +320,40 @@ trace_ray([X, Y], {PlusX, PlusY}=Direction, StepsLeft, Accums) ->
 
 %% Handler for letting all objects be affected by the explosion in the affected coordinates list
 notify_affected_objects(ResultList) ->
-    spawn(fun() -> process_affected_objects(lists:nth(1, ResultList), gn1_tiles, gn1_bombs, gn1_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(2, ResultList), gn2_tiles, gn2_bombs, gn2_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(3, ResultList), gn3_tiles, gn3_bombs, gn3_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(4, ResultList), gn4_tiles, gn4_bombs, gn4_players) end).
+    lists:foreach(fun(Coord) -> spawn(process_affected_objects(Coord)) end, ResultList).
 
-process_affected_objects(ListOfCoords, Tiles_table, Bombs_table, Players_table) ->
-    Fun = fun() -> lists:foreach(
-        fun(Coord) -> process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) end, ListOfCoords
-    ) end,
+process_affected_objects(Coords) ->
+    Fun = fun() -> process_single_coord(Coords) end,
     mnesia:activity(read_only, Fun).
 
-process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) ->
-    %% using QLC querries to make this faster
-    TilesPids = qlc:e(qlc:q(
-        [T#mnesia_tiles.pid || T <- mnesia:table(Tiles_table), T#mnesia_tiles.position == Coord]
-    )),
-    BombsPids = qlc:e(qlc:q(
-        [B#mnesia_bombs.pid || B <- mnesia:table(Bombs_table), B#mnesia_bombs.position == Coord]
-    )),
-    PlayersPids = qlc:e(qlc:q(
-        [P#mnesia_players.pid || P <- mnesia:table(Players_table), P#mnesia_players.position == Coord]
-    )),
+process_single_coord(Coord) ->
+    %% using QLC queries to make this faster
+    TilesPids = qlc:e(
+        qlc:append([
+            qlc:q([T#mnesia_tiles.pid || T <- mnesia:table(gn1_tiles), T#mnesia_tiles.position == Coord]),
+            qlc:q([T#mnesia_tiles.pid || T <- mnesia:table(gn2_tiles), T#mnesia_tiles.position == Coord]),
+            qlc:q([T#mnesia_tiles.pid || T <- mnesia:table(gn3_tiles), T#mnesia_tiles.position == Coord]),
+            qlc:q([T#mnesia_tiles.pid || T <- mnesia:table(gn4_tiles), T#mnesia_tiles.position == Coord])
+        ])),
+    BombsPids = qlc:e(
+        qlc:append([
+            qlc:q([B#mnesia_bombs.pid || B <- mnesia:table(gn1_bombs), B#mnesia_bombs.position == Coord]),
+            qlc:q([B#mnesia_bombs.pid || B <- mnesia:table(gn2_bombs), B#mnesia_bombs.position == Coord]),
+            qlc:q([B#mnesia_bombs.pid || B <- mnesia:table(gn3_bombs), B#mnesia_bombs.position == Coord]),
+            qlc:q([B#mnesia_bombs.pid || B <- mnesia:table(gn4_bombs), B#mnesia_bombs.position == Coord])
+        ])),
+    PlayersPids = qlc:e(
+        qlc:append([
+            qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn1_players), P#mnesia_players.position == Coord]),
+            qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn2_players), P#mnesia_players.position == Coord]),
+            qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn3_players), P#mnesia_players.position == Coord]),
+            qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn4_players), P#mnesia_players.position == Coord])
+        ])),
 
     % Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
+    % io print of the affected objects
+    io:format("💥 EXPLOSION at ~p affects ~p tiles, ~p bombs, and ~p players.~n",
+              [Coord, length(TilesPids), length(BombsPids), length(PlayersPids)]),
     inflict_damage_handler(TilesPids, tile, damage_taken),
     inflict_damage_handler(BombsPids, bomb_as_fsm, damage_taken),
     inflict_damage_handler(PlayersPids, player_fsm, inflict_damage),
@@ -354,7 +363,8 @@ process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) ->
 inflict_damage_handler(PidsList, Module, Function) ->
     lists:foreach(fun(Pid) ->
         try
-            _ = apply(Module, Function, [Pid])
+            _ = apply(Module, Function, [Pid]),
+            io:format("💥 Sent damage to ~p: ~p:~p(~p)~n", [Pid, Module, Function, Pid])
         catch
             Class:Reason ->
                 io:format(standard_error, "Error calling ~p:~p(~p). Class: ~p, Reason: ~p~n", [Module, Function, Pid, Class, Reason])

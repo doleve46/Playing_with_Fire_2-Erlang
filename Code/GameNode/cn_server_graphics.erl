@@ -1323,7 +1323,6 @@ add_enhanced_bombs_to_map(Map) ->
     end, Map, BombTables).
 
 add_enhanced_bombs_from_table(Table, Map) ->
-    io:format("🧨 Reading from table ~p~n", [Table]),
     Fun = fun() ->
         mnesia:select(Table, [{#mnesia_bombs{_ = '_'}, [], ['$_']}])
     end,
