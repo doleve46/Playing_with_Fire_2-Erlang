@@ -48,6 +48,7 @@ place_bomb(PlayerNum, PlayersTableName, BombsTableName) ->
                         owner = PlayerRecord#mnesia_players.player_number,
                         gn_pid = PlayerRecord#mnesia_players.target_gn,
                         pid = BombPid},
+                    io:format("DEBUG: Created bomb record and adding to table: ~p~n", [BombsTableName]),
                     case add_bomb_to_table(BombRecord, BombsTableName) of
                         {atomic, _} -> bomb_placed;
                         ok -> bomb_placed;

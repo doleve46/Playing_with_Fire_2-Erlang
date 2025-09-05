@@ -269,12 +269,34 @@ update_bomb_direction_movement(Bomb, Bombs_table, ToUpdate) ->
     mnesia:activity(transaction, Fun).
 
 read_and_remove_bomb(BombPid, Bombs_table) ->
+    io:format("BOMB DEBUG: Attempting to remove bomb PID ~p from table ~p~n", [BombPid, Bombs_table]),
     Fun = fun() ->
-        [Record] = mnesia:match_object(Bombs_table, #mnesia_bombs{pid = BombPid, _ = '_'}, read),
-        mnesia:delete_object(Record),
-        Record
+        io:format("BOMB DEBUG: Inside transaction, searching for bomb...~n"),
+        case mnesia:match_object(Bombs_table, #mnesia_bombs{pid = BombPid, _ = '_'}, read) of
+            [] ->
+                io:format("BOMB WARNING: Bomb with PID ~p not found in table ~p~n", [BombPid, Bombs_table]),
+                {error, bomb_not_found};
+            [Record] ->
+                io:format("BOMB DEBUG: Found bomb record, removing: ~p~n", [Record]),
+                mnesia:delete_object(Record),
+                io:format("BOMB DEBUG: Bomb record removed successfully~n"),
+                Record;
+            Multiple ->
+                io:format("BOMB WARNING: Multiple bombs found for PID ~p removing head of list: ~p~n", [BombPid, Multiple]),
+                Record = hd(Multiple),
+                mnesia:delete_object(Record),
+                Record
+        end
     end,
-    mnesia:activity(transaction, Fun).
+    io:format("BOMB DEBUG: Starting mnesia transaction...~n"),
+    case mnesia:activity(transaction, Fun) of
+        {atomic, Result} -> 
+            io:format("BOMB DEBUG: Transaction succeeded with result: ~p~n", [Result]),
+            Result;
+        Result -> 
+            io:format("BOMB DEBUG: Transaction returned direct result: ~p~n", [Result]),
+            Result  % Handle direct returns from mnesia:activity
+    end.
 %% =====================================================================
 
 -spec get_managing_node_by_coord(X::integer(), Y::integer()) -> atom().
