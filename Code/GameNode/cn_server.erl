@@ -119,20 +119,28 @@ handle_cast({query_request, AskingGN, Request}, State) ->
             {noreply, State};
 
         {ignite_bomb_request, PlayerNum} ->
-            RemoteBombs = bomb_helper_functions:find_remote_bombs_for_player(player_fsm:get_player_pid(PlayerNum)),
-            lists:foreach(fun(BombRecord) ->
-                % Send ignite message to each remote bomb
-                case BombRecord#mnesia_bombs.pid of
-                    Pid when is_pid(Pid) ->
-                        bomb_as_fsm:ignite_bomb(Pid);
-                    _ ->
-                        io:format("Warning: Invalid bomb PID for remote bomb at ~p~n", [BombRecord#mnesia_bombs.position])
-                end
-            end, RemoteBombs),
-            %% Notify Player FSM about the ignition
-            case RemoteBombs of
-                [] -> player_fsm:gn_response(PlayerNum, {ignite_result, denied});
-                _  -> player_fsm:gn_response(PlayerNum, {ignite_result, accepted})
+            case bomb_helper_functions:find_remote_bombs_for_player(player_fsm:get_player_pid(PlayerNum)) of
+                RemoteBombs when is_list(RemoteBombs) ->
+                    lists:foreach(fun(BombRecord) ->
+                        % Send ignite message to each remote bomb
+                        case BombRecord#mnesia_bombs.pid of
+                            Pid when is_pid(Pid) ->
+                                bomb_as_fsm:ignite_bomb(Pid);
+                            _ ->
+                                io:format("Warning: Invalid bomb PID for remote bomb at ~p~n", [BombRecord#mnesia_bombs.position])
+                        end
+                    end, RemoteBombs),
+                    %% Notify Player FSM about the ignition
+                    case RemoteBombs of
+                        [] -> player_fsm:gn_response(PlayerNum, {ignite_result, denied});
+                        _  -> player_fsm:gn_response(PlayerNum, {ignite_result, accepted})
+                    end;
+                {aborted, Reason} ->
+                    io:format("❌ Failed to find remote bombs for player ~p: ~p~n", [PlayerNum, Reason]),
+                    player_fsm:gn_response(PlayerNum, {ignite_result, denied});
+                Other ->
+                    io:format("❌ Unexpected result finding remote bombs for player ~p: ~p~n", [PlayerNum, Other]),
+                    player_fsm:gn_response(PlayerNum, {ignite_result, denied})
             end,
             {noreply, State}
     end;
@@ -320,11 +328,38 @@ trace_ray([X, Y], {PlusX, PlusY}=Direction, StepsLeft, Accums) ->
 
 %% Handler for letting all objects be affected by the explosion in the affected coordinates list
 notify_affected_objects(ResultList) ->
-    lists:foreach(fun(Coord) -> spawn(process_affected_objects(Coord)) end, ResultList).
+    lists:foreach(fun(Coord) -> 
+        spawn(fun() -> 
+            _ = process_affected_objects(Coord),
+            ok
+        end) 
+    end, ResultList).
 
-process_affected_objects(Coords) ->
-    Fun = fun() -> process_single_coord(Coords) end,
-    mnesia:activity(read_only, Fun).
+process_affected_objects(Coord) ->
+    Fun = fun() -> 
+        process_single_coord(Coord),
+        ok
+    end,
+    MnesiaResult = mnesia:activity(read_only, Fun),
+    io:format("DEBUG: Mnesia activity return value for coord ~p: ~p~n", [Coord, MnesiaResult]),
+    case MnesiaResult of
+        {atomic, Result} -> 
+            {TilesPids, BombsPids, PlayersPids} = Result,
+            %% Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
+            %% io print of the affected objects
+            io:format("💥 EXPLOSION at ~p affects ~p tiles, ~p bombs, and ~p players.~n",
+                    [Coord, length(TilesPids), length(BombsPids), length(PlayersPids)]),
+            inflict_damage_handler(TilesPids, tile, damage_taken),
+            inflict_damage_handler(BombsPids, bomb_as_fsm, damage_taken),
+            inflict_damage_handler(PlayersPids, player_fsm, inflict_damage),
+            ok;
+        {aborted, Reason} -> 
+            io:format("❌ Mnesia transaction aborted for coord ~p: ~p~n", [Coord, Reason]),
+            ok;
+        Other -> 
+            io:format("❌ Unexpected result from mnesia activity for coord ~p: ~p~n", [Coord, Other]),
+            ok
+    end.
 
 process_single_coord(Coord) ->
     %% using QLC queries to make this faster
@@ -349,15 +384,7 @@ process_single_coord(Coord) ->
             qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn3_players), P#mnesia_players.position == Coord]),
             qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn4_players), P#mnesia_players.position == Coord])
         ])),
-
-    % Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
-    % io print of the affected objects
-    io:format("💥 EXPLOSION at ~p affects ~p tiles, ~p bombs, and ~p players.~n",
-              [Coord, length(TilesPids), length(BombsPids), length(PlayersPids)]),
-    inflict_damage_handler(TilesPids, tile, damage_taken),
-    inflict_damage_handler(BombsPids, bomb_as_fsm, damage_taken),
-    inflict_damage_handler(PlayersPids, player_fsm, inflict_damage),
-    ok.
+    {TilesPids, BombsPids, PlayersPids}.
 
 
 inflict_damage_handler(PidsList, Module, Function) ->
