@@ -105,7 +105,7 @@ start_python_visualizer() ->
         case filelib:is_file(PythonScript) of
             true ->
                 io:format("🚀 Starting CN Python visualizer...~n"),
-                Port = open_port({spawn, "python3 " ++ PythonScript}, 
+                _Port = open_port({spawn, "python3 " ++ PythonScript}, 
                     [{cd, filename:dirname(PythonScript)}, binary, exit_status]),
                 io:format("✅ CN Python visualizer started~n");
             false ->
@@ -165,9 +165,7 @@ handle_info(start_socket_server, State) ->
                 current_map_state = InitialMapState
             },
             
-            % Wait for CN server to be available
-            wait_for_cn_server_and_notify(),
-            
+            % Note: graphics_ready will be sent when Python GUI connects via socket
             {noreply, UpdatedState};
         {error, Reason} ->
             io:format("❌ Failed to start CN socket server: ~p~n", [Reason]),
@@ -185,6 +183,8 @@ handle_info({socket_connected, ClientSocket, ClientPid}, State) ->
         undefined -> ok;
         MapState -> send_map_to_socket(ClientPid, MapState)
     end,
+    % Python GUI is connected and map is displayed, notify CN server
+    wait_for_cn_server_and_notify(),
     {noreply, NewState};
 
 handle_info({socket_disconnected, ClientPid}, State) 
@@ -300,7 +300,7 @@ handle_info(cleanup_expired_elements, State) ->
     {noreply, State#state{dead_players = NewDeadPlayers, active_explosions = NewExplosions}};
 
 % Enhanced mnesia table event handling
-handle_info({mnesia_table_event, {write, Table, Record, _ActivityId}}, State) ->
+handle_info({mnesia_table_event, {write, _Table, Record, _ActivityId}}, State) ->
     NewState = case Record of
         #mnesia_players{} ->
             PlayerID = Record#mnesia_players.player_number,
@@ -351,7 +351,7 @@ handle_info({mnesia_table_event, {delete, Table, Key, _ActivityId}}, State) ->
 handle_info({mnesia_table_event, _Event}, State) ->
     handle_mnesia_update(State);
 
-handle_info({'DOWN', MonitorRef, process, RemotePid, noconnection}, State) ->
+handle_info({'DOWN', _MonitorRef, process, _RemotePid, noconnection}, State) ->
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -589,7 +589,7 @@ create_empty_16x16_grid() ->
     EmptyRow = [EmptyCell || _ <- lists:seq(1, 16)],
     [EmptyRow || _ <- lists:seq(1, 16)].
 %% Convert individual cell to JSON-safe format
-convert_cell_safely({Tile, Powerup, Bomb, Player, Explosion, Special}) ->
+convert_cell_safely({Tile, Powerup, Bomb, Player, _Explosion, _Special}) ->
     [
         safe_atom_to_binary(Tile),
         safe_atom_to_binary(Powerup),
@@ -897,7 +897,7 @@ handle_enhanced_player_death(PlayerID, Table, State) ->
         last_known_players = NewLastKnown
     }.
 
-detect_enhanced_player_movement_change(NewRecord, CurrentMapState) ->
+detect_enhanced_player_movement_change(NewRecord, _CurrentMapState) ->
     #mnesia_players{
         player_number = PlayerNum,
         position = [X, Y],
@@ -942,7 +942,7 @@ detect_enhanced_player_movement_change(NewRecord, CurrentMapState) ->
             end
     end.
 
-detect_enhanced_bomb_movement_change(NewRecord, CurrentMapState) ->
+detect_enhanced_bomb_movement_change(NewRecord, _CurrentMapState) ->
     #mnesia_bombs{
         position = [X, Y],
         movement = Movement,
