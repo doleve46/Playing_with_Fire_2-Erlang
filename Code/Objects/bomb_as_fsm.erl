@@ -94,12 +94,22 @@ init([Position, Type, Gn_Pid, Optional]) ->
     end,
     case StateData#bomb_state.type of
         ?NORMAL_BOMB ->
-            UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
+            UpdatedData = StateData#bomb_state{
+                ignited = {true, erlang:system_time(millisecond)}, 
+                internal_timer = ?EXPLODE_DELAY
+            },
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]};
         ?REMOTE_IGNITION -> 
-            {ok, remote_idle, StateData}; % TODO: complete implementation
+            UpdatedData = StateData#bomb_state{
+                ignited = false,
+                internal_timer = none
+            },
+            {ok, remote_idle, UpdatedData}; % TODO: complete implementation
         ?REPEAT_BOMBS -> % repeating bomb, w.i.p
-            UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
+            UpdatedData = StateData#bomb_state{
+                ignited = {true, erlang:system_time(millisecond)},
+                internal_timer = ?EXPLODE_DELAY
+            },
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]}
     end.
 
@@ -140,10 +150,12 @@ code_change(_OldVsn, StateName, State = #bomb_state{}, _Extra) ->
 %%% state functions
 %%%===================================================================
 %% ~~~~~~~~~ State = armed ~~~~~~~~~
-%% Syntax for state enter actions - not used here, but syntax is valid
-%armed(enter, _OldState, StateData = #bomb_state{}) ->
-%    UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
-%    {keep_state, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]};
+%% Handle state enter events
+armed(enter, _OldState, StateData = #bomb_state{}) ->
+    %% Just keep the current state when entering armed state
+    %% send a self-message "bomb tick" after 1000 ms
+    erlang:send_after(1000, self(), bomb_tick),
+    {keep_state, StateData};
 
 armed(cast, freeze, StateData = #bomb_state{}) ->
     %% if already frozen - do nothing.
@@ -189,6 +201,26 @@ armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
     {stop, exploded, StateData};
 
+armed(info, bomb_tick, StateData = #bomb_state{}) ->
+    %% internal tick message - decrease internal timer by 1000 ms
+    case StateData#bomb_state.internal_timer of
+        none -> % should not happen - remote bomb not ignited - log this and ignore
+            io:format("bomb @ armed: received bomb_tick for a bomb not ignited - ignoring~n"),
+            {keep_state_and_data};
+        Timer when is_integer(Timer) ->
+            NewTimer = Timer - 1000,
+            if
+                NewTimer =< 0 -> % time to explode
+                    %% trigger explosion immediately
+                    %% cancel state_timeout and move to exploded state
+                    {stop, exploded, StateData};
+                true -> % update timer and set new state_timeout
+                    %% let GN know about the new timer value
+                    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {update_timer, self(), NewTimer}}),
+                    erlang:send_after(1000, self(), bomb_tick),
+                    {keep_state, StateData#bomb_state{internal_timer = NewTimer}}
+            end
+    end;
 
 armed(_Type, _Message, StateData = #bomb_state{}) ->
     log_unexpected_message(armed, _Type, _Message),
@@ -355,7 +387,10 @@ remote_idle(cast, damage_taken, StateData = #bomb_state{}) ->
 remote_idle(cast, ignite, StateData = #bomb_state{}) ->
     if
         StateData#bomb_state.status == frozen -> % bomb is frozen and armed,
-            UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
+            UpdatedData = StateData#bomb_state{
+                ignited = {true, erlang:system_time(millisecond)},
+                internal_timer = ?FREEZE_DELAY
+            },
             {next_state, remote_armed, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]};
         true ->
             {stop, exploded, StateData}
@@ -365,6 +400,32 @@ remote_idle(_Type, _Message, StateData = #bomb_state{}) ->
     log_unexpected_message(remote_idle, _Type, _Message),
     {keep_state, StateData}.
 %% ~~~~~~~~~ State = remote_idle ~~~~~~~~~
+remote_armed(enter, _OldState, StateData = #bomb_state{}) ->
+    %% Just keep the current state when entering remote_armed state
+    %% send a self-message "bomb tick" after 1000 ms
+    erlang:send_after(1000, self(), bomb_tick),
+    {keep_state, StateData};
+
+remote_armed(info, bomb_tick, StateData = #bomb_state{}) ->
+    %% internal tick message - decrease internal timer by 1000 ms
+    case StateData#bomb_state.internal_timer of
+        none -> % should not happen - remote bomb not ignited - log this and ignore
+            io:format("Bomb @ remote_armed: received bomb_tick for a bomb not ignited - ignoring~n"),
+            {keep_state_and_data};
+        Timer when is_integer(Timer) ->
+            NewTimer = Timer - 1000,
+            if
+                NewTimer =< 0 -> % time to explode
+                    %% trigger explosion immediately
+                    %% cancel state_timeout and move to exploded state
+                    {stop, exploded, StateData};
+                true -> % update timer and set new state_timeout
+                    %% let GN know about the new timer value
+                    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {update_timer, self(), NewTimer}}),
+                    erlang:send_after(1000, self(), bomb_tick),
+                    {keep_state, StateData#bomb_state{internal_timer = NewTimer}}
+            end
+    end;
 
 remote_armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
@@ -497,7 +558,10 @@ remote_idle_movement(cast, ignite, StateData = #bomb_state{}) ->
         normal -> % not frozen, explode immediately
             {stop, exploded, StateData};
         frozen -> % frozen, update record, start timer, switch states
-            UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
+            UpdatedData = StateData#bomb_state{
+                ignited = {true, erlang:system_time(millisecond)},
+                internal_timer = ?FREEZE_DELAY
+            },
             {next_state, remote_armed_frozen_movement, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]}
     end;
 

@@ -305,6 +305,15 @@ handle_cast({tile_update, Message, Position}, State = #gn_state{}) ->
     end,
     {noreply, State};
 
+%% * A bomb sent a message (Currently supporting timer update)
+handle_cast({bomb_message, Message}, State = #gn_state{}) ->
+    case Message of
+        {update_timer, BombPid, NewTime} ->
+            bomb_helper_functions:update_bomb_timer(BombPid, NewTime, State#gn_state.bombs_table_name),
+            io:format("GN DEBUG: Updated bomb timer for ~p to ~p~n", [BombPid, NewTime])
+    end,
+    {noreply, State};
+
 %% * this is a catch-all&ignore clause
 handle_cast(_Request, State = #gn_state{}) -> 
     {noreply, State}.

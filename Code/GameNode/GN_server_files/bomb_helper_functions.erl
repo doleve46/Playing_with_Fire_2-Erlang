@@ -1,10 +1,8 @@
 -module(bomb_helper_functions).
-
--export([place_bomb/3, find_remote_bombs_for_player/1]).
-
 -include("../../common_parameters.hrl").
 -include("../mnesia_records.hrl").
 -include_lib("stdlib/include/qlc.hrl").
+-export([place_bomb/3, find_remote_bombs_for_player/1, update_bomb_timer/3]).
 
 %% @doc Places a bomb for a player at their current position
 %% @param PlayerNum - The player number/ID placing the bomb
@@ -117,3 +115,21 @@ find_remote_bombs_for_player(PlayerNum) ->
         R -> R
     end,
     RemoteBombs.
+
+update_bomb_timer(BombPid, NewTime, BombsTableName) ->
+    Fun = fun() ->
+        %% Find bomb by pid
+        Query = qlc:q([Bomb || Bomb <- mnesia:table(BombsTableName), Bomb#mnesia_bombs.pid =:= BombPid]),
+        case qlc:e(Query) of
+            [BombRecord] ->
+                %% Update internal_timer field
+                UpdatedRecord = BombRecord#mnesia_bombs{
+                    internal_timer = NewTime
+                },
+                mnesia:write(BombsTableName, UpdatedRecord, write),
+                ok;
+            [] -> {error, bomb_not_found};
+            _Multiple -> {error, multiple_bombs_found}
+        end
+    end,
+    mnesia:activity(transaction, Fun).
