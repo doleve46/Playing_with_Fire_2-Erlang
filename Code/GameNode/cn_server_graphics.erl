@@ -62,25 +62,36 @@ show_explosion(Coordinates) ->
 %% Extract player number from PID by checking its registered name
 -spec get_player_number_from_pid(pid()) -> integer().
 get_player_number_from_pid(Pid) when is_pid(Pid) ->
+    io:format("🔍 Converting PID ~p to player number~n", [Pid]),
     case global:registered_names() of
         Names ->
+            io:format("🔍 Found ~p global names~n", [length(Names)]),
             case lists:find(fun(Name) ->
                 case global:whereis_name(Name) of
                     Pid -> true;
                     _ -> false
                 end
             end, Names) of
-                false -> 1; % Default fallback
+                false -> 
+                    io:format("🔍 PID ~p not found in global names, using fallback~n", [Pid]),
+                    1; % Default fallback
                 Name ->
+                    io:format("🔍 Found PID ~p registered as ~p~n", [Pid, Name]),
                     % Extract number from "player_N" format
                     NameStr = atom_to_list(Name),
                     case string:prefix(NameStr, "player_") of
-                        nomatch -> 1; % Default fallback
-                        NumberStr -> list_to_integer(NumberStr)
+                        nomatch -> 
+                            io:format("🔍 Name ~p doesn't match player_N format, using fallback~n", [Name]),
+                            1; % Default fallback
+                        NumberStr -> 
+                            PlayerNum = list_to_integer(NumberStr),
+                            io:format("🔍 Converted ~p to player number ~p~n", [Name, PlayerNum]),
+                            PlayerNum
                     end
             end
     end;
-get_player_number_from_pid(_) ->
+get_player_number_from_pid(NotPid) ->
+    io:format("🔍 Not a PID: ~p, using fallback~n", [NotPid]),
     1. % Default fallback for non-PID values
 
 %%%===================================================================
@@ -646,10 +657,24 @@ convert_bomb_safely(none) ->
     <<"none">>;
 convert_bomb_safely({Type, Ignited, Status, Radius, Owner, Movement, Direction}) ->
     % Extract player number from PID for JSON serialization
-    OwnerNumber = if
-        is_pid(Owner) -> get_player_number_from_pid(Owner);
-        is_integer(Owner) -> Owner;  % Fallback for old format
-        true -> 1  % Default fallback
+    OwnerNumber = try
+        if
+            is_pid(Owner) -> 
+                io:format("🧨 Converting bomb owner PID ~p~n", [Owner]),
+                Result = get_player_number_from_pid(Owner),
+                io:format("🧨 Converted to player number ~p~n", [Result]),
+                Result;
+            is_integer(Owner) -> 
+                io:format("🧨 Owner is already integer: ~p~n", [Owner]),
+                Owner;  % Fallback for old format
+            true -> 
+                io:format("🧨 Owner is unknown format: ~p, using fallback~n", [Owner]),
+                1  % Default fallback
+        end
+    catch
+        Error:Reason ->
+            io:format("❌ Error converting bomb owner ~p - Error: ~p, Reason: ~p~n", [Owner, Error, Reason]),
+            1  % Safe fallback
     end,
     [
         safe_atom_to_binary(Type),

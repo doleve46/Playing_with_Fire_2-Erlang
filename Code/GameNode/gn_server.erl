@@ -44,7 +44,6 @@ start_link({GN_number, IsBot}) ->
 cast_message(GN_Name, Message) ->
     case global:whereis_name(GN_Name) of
         Pid when is_pid(Pid) ->
-            io:format("📤 CAST_MESSAGE: Sending message to ~p (PID: ~p): ~p~n", [GN_Name, Pid, Message]),
             gen_server:cast(Pid, Message);
         _ ->
             io:format("**##** GN ~p: Not found**##**~n", [GN_Name])
