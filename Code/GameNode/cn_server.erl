@@ -328,63 +328,48 @@ trace_ray([X, Y], {PlusX, PlusY}=Direction, StepsLeft, Accums) ->
 
 %% Handler for letting all objects be affected by the explosion in the affected coordinates list
 notify_affected_objects(ResultList) ->
-    lists:foreach(fun(Coord) -> 
-        spawn(fun() -> 
-            _ = process_affected_objects(Coord),
-            ok
-        end) 
-    end, ResultList).
+    spawn(fun() -> process_affected_objects(lists:nth(1, ResultList), gn1_tiles, gn1_bombs, gn1_players) end),
+    spawn(fun() -> process_affected_objects(lists:nth(2, ResultList), gn2_tiles, gn2_bombs, gn2_players) end),
+    spawn(fun() -> process_affected_objects(lists:nth(3, ResultList), gn3_tiles, gn3_bombs, gn3_players) end),
+    spawn(fun() -> process_affected_objects(lists:nth(4, ResultList), gn4_tiles, gn4_bombs, gn4_players) end).
 
-process_affected_objects(Coord) ->
-    Fun = fun() -> 
-        process_single_coord(Coord),
-        ok
-    end,
-    MnesiaResult = mnesia:activity(read_only, Fun),
-    io:format("DEBUG: Mnesia activity return value for coord ~p: ~p~n", [Coord, MnesiaResult]),
+process_affected_objects(ListOfCoords, Tiles_table, Bombs_table, Players_table) ->
+    Fun = fun() -> lists:foreach(
+        fun(Coord) -> process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) end, ListOfCoords
+    ) end,
+    MnesiaResult = mnesia:activity(transaction, Fun),
+    io:format("DEBUG: Mnesia return value is ~p~n", [MnesiaResult]),
     case MnesiaResult of
         {atomic, Result} -> 
-            {TilesPids, BombsPids, PlayersPids} = Result,
-            %% Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
-            %% io print of the affected objects
-            io:format("💥 EXPLOSION at ~p affects ~p tiles, ~p bombs, and ~p players.~n",
-                    [Coord, length(TilesPids), length(BombsPids), length(PlayersPids)]),
-            inflict_damage_handler(TilesPids, tile, damage_taken),
-            inflict_damage_handler(BombsPids, bomb_as_fsm, damage_taken),
-            inflict_damage_handler(PlayersPids, player_fsm, inflict_damage),
-            ok;
+            Result;
         {aborted, Reason} -> 
-            io:format("❌ Mnesia transaction aborted for coord ~p: ~p~n", [Coord, Reason]),
+            io:format("❌ Mnesia transaction aborted for coord ~p: ~p~n", [ListOfCoords, Reason]),
             ok;
         Other -> 
-            io:format("❌ Unexpected result from mnesia activity for coord ~p: ~p~n", [Coord, Other]),
+            io:format("❌ Unexpected result from mnesia activity for coord ~p: ~p~n", [ListOfCoords, Other]),
             ok
     end.
 
-process_single_coord(Coord) ->
-    %% using QLC queries to make this faster
-    TilesPids = qlc:e(
-        qlc:append([
-            qlc:q([T#mnesia_tiles.pid || T <- mnesia:table(gn1_tiles), T#mnesia_tiles.position == Coord]),
-            qlc:q([T#mnesia_tiles.pid || T <- mnesia:table(gn2_tiles), T#mnesia_tiles.position == Coord]),
-            qlc:q([T#mnesia_tiles.pid || T <- mnesia:table(gn3_tiles), T#mnesia_tiles.position == Coord]),
-            qlc:q([T#mnesia_tiles.pid || T <- mnesia:table(gn4_tiles), T#mnesia_tiles.position == Coord])
-        ])),
-    BombsPids = qlc:e(
-        qlc:append([
-            qlc:q([B#mnesia_bombs.pid || B <- mnesia:table(gn1_bombs), B#mnesia_bombs.position == Coord]),
-            qlc:q([B#mnesia_bombs.pid || B <- mnesia:table(gn2_bombs), B#mnesia_bombs.position == Coord]),
-            qlc:q([B#mnesia_bombs.pid || B <- mnesia:table(gn3_bombs), B#mnesia_bombs.position == Coord]),
-            qlc:q([B#mnesia_bombs.pid || B <- mnesia:table(gn4_bombs), B#mnesia_bombs.position == Coord])
-        ])),
-    PlayersPids = qlc:e(
-        qlc:append([
-            qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn1_players), P#mnesia_players.position == Coord]),
-            qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn2_players), P#mnesia_players.position == Coord]),
-            qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn3_players), P#mnesia_players.position == Coord]),
-            qlc:q([P#mnesia_players.pid || P <- mnesia:table(gn4_players), P#mnesia_players.position == Coord])
-        ])),
-    {TilesPids, BombsPids, PlayersPids}.
+process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) ->
+    %% using QLC querries to make this faster
+    TilesPids = qlc:e(qlc:q(
+        [T#mnesia_tiles.pid || T <- mnesia:table(Tiles_table), T#mnesia_tiles.position == Coord]
+    )),
+    BombsPids = qlc:e(qlc:q(
+        [B#mnesia_bombs.pid || B <- mnesia:table(Bombs_table), B#mnesia_bombs.position == Coord]
+    )),
+    PlayersPids = qlc:e(qlc:q(
+        [P#mnesia_players.pid || P <- mnesia:table(Players_table), P#mnesia_players.position == Coord]
+    )),
+    %% Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
+    %% io print of the affected objects
+    io:format("💥 EXPLOSION at ~p affects ~p tiles, ~p bombs, and ~p players.~n",
+        [Coord, length(TilesPids), length(BombsPids), length(PlayersPids)]),
+    io:format("DEBUG: Explosion at coord ~p: Affected objects: ~p~n", [Coord, {TilesPids, BombsPids, PlayersPids}]),
+    inflict_damage_handler(TilesPids, tile, damage_taken),
+    inflict_damage_handler(BombsPids, bomb_as_fsm, damage_taken),
+    inflict_damage_handler(PlayersPids, player_fsm, inflict_damage),
+    ok.
 
 
 inflict_damage_handler(PidsList, Module, Function) ->
