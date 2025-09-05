@@ -63,32 +63,14 @@ show_explosion(Coordinates) ->
 -spec get_player_number_from_pid(pid()) -> integer().
 get_player_number_from_pid(Pid) when is_pid(Pid) ->
     io:format("🔍 Converting PID ~p to player number~n", [Pid]),
-    case global:registered_names() of
-        Names ->
-            io:format("🔍 Found ~p global names~n", [length(Names)]),
-            case lists:find(fun(Name) ->
-                case global:whereis_name(Name) of
-                    Pid -> true;
-                    _ -> false
-                end
-            end, Names) of
-                false -> 
-                    io:format("🔍 PID ~p not found in global names, using fallback~n", [Pid]),
-                    1; % Default fallback
-                Name ->
-                    io:format("🔍 Found PID ~p registered as ~p~n", [Pid, Name]),
-                    % Extract number from "player_N" format
-                    NameStr = atom_to_list(Name),
-                    case list_to_integer([lists:last(NameStr)]) of
-                        PlayerNum when is_integer(PlayerNum) ->
-                                io:format("🔍 Converted ~p to player number ~p~n", [Name, PlayerNum]),
-                                PlayerNum;
-                        _Anythingelse -> 
-                            io:format("🔍 Failed to extract number from the name~n", [Name]),
-                            1 % Default fallback
-                    end
-            end
-    end;
+    [Name] = lists:filter(
+      fun(Name) ->
+          global:whereis_name(Name) =:= Pid
+      end,
+      global:registered_names()),
+      io:format("Found name ~p for PID ~p~n", [Name, Pid]),
+      Name.
+
 get_player_number_from_pid(NotPid) ->
     io:format("🔍 Not a PID: ~p, using fallback~n", [NotPid]),
     1. % Default fallback for non-PID values
