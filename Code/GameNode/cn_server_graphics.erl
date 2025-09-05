@@ -79,14 +79,13 @@ get_player_number_from_pid(Pid) when is_pid(Pid) ->
                     io:format("🔍 Found PID ~p registered as ~p~n", [Pid, Name]),
                     % Extract number from "player_N" format
                     NameStr = atom_to_list(Name),
-                    case string:prefix(NameStr, "player_") of
-                        nomatch -> 
-                            io:format("🔍 Name ~p doesn't match player_N format, using fallback~n", [Name]),
-                            1; % Default fallback
-                        NumberStr -> 
-                            PlayerNum = list_to_integer(NumberStr),
-                            io:format("🔍 Converted ~p to player number ~p~n", [Name, PlayerNum]),
-                            PlayerNum
+                    case list_to_integer([lists:last(NameStr)]) of
+                        PlayerNum when is_integer(PlayerNum) ->
+                                io:format("🔍 Converted ~p to player number ~p~n", [Name, PlayerNum]),
+                                PlayerNum;
+                        _Anythingelse -> 
+                            io:format("🔍 Failed to extract number from the name~n", [Name]),
+                            1 % Default fallback
                     end
             end
     end;
