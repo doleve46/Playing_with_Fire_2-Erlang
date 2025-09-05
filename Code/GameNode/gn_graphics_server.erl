@@ -39,6 +39,34 @@
 start_link(CNNode) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [CNNode], []).
 
+%% Extract player number from PID by checking its registered name
+-spec get_player_number_from_pid(pid()) -> integer().
+get_player_number_from_pid(Pid) when is_pid(Pid) ->
+    case global:registered_names() of
+        Names ->
+            case lists:find(fun(Name) ->
+                case global:whereis_name(Name) of
+                    Pid -> true;
+                    _ -> false
+                end
+            end, Names) of
+                false -> 1; % Default fallback
+                Name ->
+                    % Extract number from "player_N" format
+                    NameStr = atom_to_list(Name),
+                    case string:prefix(NameStr, "player_") of
+                        nomatch -> 1; % Default fallback
+                        NumberStr ->
+                            case string:to_integer(NumberStr) of
+                                {Number, ""} when is_integer(Number) -> Number;
+                                _ -> 1 % Default fallback
+                            end
+                    end
+            end
+    end;
+get_player_number_from_pid(_) ->
+    1. % Default fallback for non-PID values
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -759,12 +787,18 @@ safe_atom_to_binary_gn(_) ->
 convert_bomb_safely_gn(none) ->
     <<"none">>;
 convert_bomb_safely_gn({Type, Ignited, Status, Radius, Owner, Movement, Direction}) ->
+    % Extract player number from PID for JSON serialization
+    OwnerNumber = if
+        is_pid(Owner) -> get_player_number_from_pid(Owner);
+        is_integer(Owner) -> Owner;  % Fallback for old format
+        true -> 1  % Default fallback
+    end,
     [
         safe_atom_to_binary_gn(Type),
         Ignited,
         safe_atom_to_binary_gn(Status),
         Radius,
-        Owner,
+        OwnerNumber,
         Movement,
         safe_atom_to_binary_gn(Direction)
     ];

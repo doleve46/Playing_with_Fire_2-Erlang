@@ -2421,8 +2421,9 @@ class EnhancedSocketGameVisualizer:
 
     def draw_coordinate_explosion(self, surface, explosion, progress):
         """Draw explosion at specific coordinates from explosion event"""
+        # Apply coordinate transformation like bombs and players
         center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = explosion['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
         explosion_type = explosion.get('explosion_type', 'standard')
         
         # Pulsing explosion with type-specific effects
@@ -2445,8 +2446,9 @@ class EnhancedSocketGameVisualizer:
 
     def draw_standard_explosion(self, surface, explosion, progress):
         """Draw standard explosion effect"""
+        # Apply coordinate transformation like bombs and players
         center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = explosion['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
         intensity = explosion.get('intensity', 1.0)
 
         explosion_size = int(25 * intensity * (1 - progress))
