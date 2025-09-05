@@ -3091,8 +3091,11 @@ class EnhancedSocketGameVisualizer:
             map_mouse_x = virtual_x - MAP_OFFSET_X
             map_mouse_y = virtual_y - MAP_OFFSET_Y
 
-            tile_x = int(map_mouse_y // TILE_SIZE)
+            # Convert screen coordinates to game coordinates
+            # pixel_x = y * TILE_SIZE, so y = pixel_x // TILE_SIZE
+            # pixel_y = (MAP_SIZE - 1 - x) * TILE_SIZE, so x = MAP_SIZE - 1 - (pixel_y // TILE_SIZE)
             tile_y = int(map_mouse_x // TILE_SIZE)
+            tile_x = MAP_SIZE - 1 - int(map_mouse_y // TILE_SIZE)
 
             if 0 <= tile_x < MAP_SIZE and 0 <= tile_y < MAP_SIZE:
                 self.selected_tile = (tile_x, tile_y)
