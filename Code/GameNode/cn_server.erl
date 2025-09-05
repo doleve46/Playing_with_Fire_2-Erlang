@@ -114,7 +114,6 @@ handle_cast({query_request, AskingGN, Request}, State) ->
         {handle_bomb_explosion, Coord, Radius} ->
             %% handled in a side function
             %% Calculates affected coordinates, then sends damage_taken messages to all objects impacted
-            io:format("💣 CN SERVER: Processing bomb explosion at ~p with radius ~p~n", [Coord, Radius]),
             bomb_explosion_handler(Coord, Radius),
             {noreply, State};
 
@@ -263,15 +262,15 @@ bomb_explosion_handler(Coord, Radius) ->
             io:format("💥 EXPLOSION_HANDLER: Got atomic result with ~p coordinates~n", [length(lists:flatten(Result))]),
             Result;
         Result when is_list(Result) -> 
-            io:format("💥 EXPLOSION_HANDLER: Got list result with ~p coordinates~nFull list is:~p~n", [length(Result), Result]),
+            io:format("💥 EXPLOSION_HANDLER: Got list result with coordinates:~p~n", [Result]),
             Result;
         Other -> 
             io:format("ERROR: Unexpected result from calculate_explosion_reach: ~p~n", [Other]),
             throw({unexpected_explosion_result, Other})
     end,
-    %% * ResultList looks like [ [X,Y], [X,Y], [X,Y] ] with duplicates on origin coordinate
+    %% * ResultList looks like [ Coordinates from GN1, Coordinates From GN2, .. Gn3, GN4 ] where each one is [X,Y], [X,Y], [X,Y] with duplicates on origin coordinate
     %% ResultList can be passed to the graphics server so it knows where to show an explosion
-    FlattenedCoords = lists:usort(ResultList),
+    FlattenedCoords = [X || X <- lists:usort(ResultList), X =/= []],
     io:format("💥 EXPLOSION_HANDLER: Sending ~p coordinates to graphics: ~p~n", [length(FlattenedCoords), FlattenedCoords]),
     cn_server_graphics:show_explosion(FlattenedCoords),
     %% Sends inflict_damage messages to all objects affected by the explosion
@@ -340,8 +339,8 @@ process_affected_objects(ListOfCoords, Tiles_table, Bombs_table, Players_table) 
     MnesiaResult = mnesia:activity(transaction, Fun),
     io:format("DEBUG: Mnesia return value is ~p~n", [MnesiaResult]),
     case MnesiaResult of
-        {atomic, Result} -> 
-            Result;
+        ok -> ok;
+        {atomic, Result} -> Result;
         {aborted, Reason} -> 
             io:format("❌ Mnesia transaction aborted for coord ~p: ~p~n", [ListOfCoords, Reason]),
             ok;

@@ -54,21 +54,17 @@ get_current_map() ->
 %% Direct function to show explosions
 -spec show_explosion(list()) -> ok.
 show_explosion(Coordinates) ->
-    io:format("💥 Direct explosion call: ~w coordinates will display for ~wms~n", 
-              [length(Coordinates), ?EXPLOSION_DISPLAY_TIME]),
     gen_server:cast(?MODULE, {add_explosions_direct, Coordinates}),
     ok.
 
 %% Extract player number from PID by checking its registered name
 -spec get_player_number_from_pid(pid()) -> integer().
 get_player_number_from_pid(Pid) when is_pid(Pid) ->
-    io:format("🔍 Converting PID ~p to player number~n", [Pid]),
     [Name] = lists:filter(
       fun(Name) ->
           global:whereis_name(Name) =:= Pid
       end,
       global:registered_names()),
-      io:format("Found name ~p for PID ~p~n", [Name, Pid]),
       list_to_integer([lists:last(atom_to_list(Name))]).
 
 %%%===================================================================
@@ -642,7 +638,6 @@ convert_bomb_safely({Type, Ignited, Status, Radius, Owner, Movement, Direction})
                 io:format("🧨 Converted to player number ~p~n", [Result]),
                 Result;
             is_integer(Owner) -> 
-                io:format("🧨 Owner is already integer: ~p~n", [Owner]),
                 Owner;  % Fallback for old format
             true -> 
                 io:format("🧨 Owner is unknown format: ~p, using fallback~n", [Owner]),
