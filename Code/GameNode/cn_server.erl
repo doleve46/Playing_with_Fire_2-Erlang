@@ -113,7 +113,7 @@ handle_cast({query_request, AskingGN, Request}, State) ->
             {noreply, State};
 
         {ignite_bomb_request, PlayerNum} ->
-            RemoteBombs = bomb_helper_functions:find_remote_bombs_for_player(PlayerNum),
+            RemoteBombs = bomb_helper_functions:find_remote_bombs_for_player(player_fsm:get_player_pid(PlayerNum)),
             lists:foreach(fun(BombRecord) ->
                 % Send ignite message to each remote bomb
                 case BombRecord#mnesia_bombs.pid of
@@ -350,30 +350,30 @@ inflict_damage_handler(PidsList, Module, Function) ->
     ok.
 
 
-update_player_active_bombs(PlayerPid) ->
+update_player_active_bombs(PlayerNumber) ->
     Tables = [gn1_players, gn2_players, gn3_players, gn4_players],
-    Fun = fun() -> find_in_player_tables(PlayerPid, Tables) end,
+    Fun = fun() -> find_in_player_tables_by_number(PlayerNumber, Tables) end,
     Result = case mnesia:activity(transaction, Fun) of
         {atomic, R} -> R;
         R -> R
     end,
     case Result of
         not_found ->
-            erlang:error(player_not_found, [PlayerPid]);
+            erlang:error(player_not_found, [PlayerNumber]);
         {table_updated, Player_record} ->
             %% Notify player_fsm of this change directly
             player_fsm:bomb_exploded(Player_record#mnesia_players.pid)
     end.
 
 
-find_in_player_tables(_Pid, []) -> not_found;
-find_in_player_tables(Pid, [Table| T]) ->
-    case mnesia:index_read(Table, Pid, pid) of
+find_in_player_tables_by_number(_PlayerNumber, []) -> not_found;
+find_in_player_tables_by_number(PlayerNumber, [Table| T]) ->
+    case mnesia:index_read(Table, PlayerNumber, player_number) of
         [Record] ->  % update active bombs in mnesia table
             UpdatedRecord = Record#mnesia_players{bombs_placed = Record#mnesia_players.bombs_placed - 1},
             mnesia:write(Table, UpdatedRecord, write),
             {table_updated, Record};
-        [] -> find_in_player_tables(Pid, T)
+        [] -> find_in_player_tables_by_number(PlayerNumber, T)
     end.
 
 

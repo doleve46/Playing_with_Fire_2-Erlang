@@ -44,7 +44,7 @@ place_bomb(PlayerNum, PlayersTableName, BombsTableName) ->
                         position = [X,Y],
                         type = BombType,
                         radius = BombRadius,
-                        owner = PlayerRecord#mnesia_players.player_number,
+                        owner = PlayerRecord#mnesia_players.pid,
                         gn_pid = PlayerRecord#mnesia_players.target_gn,
                         pid = BombPid},
                     io:format("DEBUG: Created bomb record and adding to table: ~p~n", [BombsTableName]),
@@ -95,14 +95,14 @@ add_bomb_to_table(Record, BombsTableName) ->
 
 %% @doc Searches all 4 bomb tables for not-ignited remote bombs owned by PlayerNum
 %% @returns List of remote bomb records owned by the player
-find_remote_bombs_for_player(PlayerNum) ->
+find_remote_bombs_for_player(PlayerPid) ->
     BombTables = [gn1_bombs, gn2_bombs, gn3_bombs, gn4_bombs],
     Fun = fun() ->
         lists:foldl(
             fun(TableName, Acc) ->
                 Query = qlc:q([
                     Bomb || Bomb <- mnesia:table(TableName),
-                    Bomb#mnesia_bombs.owner =:= PlayerNum,
+                    Bomb#mnesia_bombs.owner =:= PlayerPid,
                     Bomb#mnesia_bombs.type =:= ?REMOTE_BOMB,
                     Bomb#mnesia_bombs.ignited =:= false
                 ]),
