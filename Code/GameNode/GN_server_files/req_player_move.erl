@@ -278,13 +278,13 @@ read_and_remove_bomb(BombPid, Bombs_table) ->
                 {error, bomb_not_found};
             [Record] ->
                 io:format("BOMB DEBUG: Found bomb record, removing: ~p~n", [Record]),
-                mnesia:delete_object(Record),
+                mnesia:delete_object(Bombs_table, Record, write),
                 io:format("BOMB DEBUG: Bomb record removed successfully~n"),
                 Record;
             Multiple ->
                 io:format("BOMB WARNING: Multiple bombs found for PID ~p removing head of list: ~p~n", [BombPid, Multiple]),
                 Record = hd(Multiple),
-                mnesia:delete_object(Record),
+                mnesia:delete_object(Bombs_table, Record, write),
                 Record
         end
     end,

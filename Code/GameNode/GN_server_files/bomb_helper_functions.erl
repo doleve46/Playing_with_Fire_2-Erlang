@@ -1,4 +1,5 @@
 -module(bomb_helper_functions).
+
 -include("../../common_parameters.hrl").
 -include("../mnesia_records.hrl").
 -include_lib("stdlib/include/qlc.hrl").
