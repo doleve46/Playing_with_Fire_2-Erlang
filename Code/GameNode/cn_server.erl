@@ -91,17 +91,21 @@ handle_cast({query_request, AskingGN, Request}, State) ->
         %% * pass the appropriate GN the message:
         %% * {forwarded, {move_request_out_of_bounds, player, {playerNum, Destination_coord, Direction, [relevant buffs], AskingGN}
             TargetGN = req_player_move:get_managing_node_by_coord(X, Y),
-            TargetGNIndex = req_player_move:node_name_to_number(TargetGN),
-            TargetGNData = lists:nth(TargetGNIndex, State),
-            Players_table = TargetGNData#gn_data.players,
+            
+            %% Get the asking GN's data to read the player record (player belongs to asking GN, not target GN)
+            AskingGNIndex = req_player_move:node_name_to_number(AskingGN),
+            AskingGNData = lists:nth(AskingGNIndex, State),
+            Players_table = AskingGNData#gn_data.players,
             Player_record = req_player_move:read_player_from_table(PlayerNum, Players_table),
             case erlang:is_record(Player_record, mnesia_players) of
                 true -> 
+                    io:format("🔄 CN SERVER: Forwarding player ~p move request from ~p to ~p at coordinates ~p~n", [PlayerNum, AskingGN, TargetGN, Destination_coord]),
                     gn_server:cast_message(TargetGN,
                         {move_request_out_of_bounds, player,
                             {PlayerNum, Destination_coord, Direction, Player_record#mnesia_players.special_abilities, AskingGN}
                     });   
                 false ->
+                    io:format("❌ CN SERVER: Player ~p not found in asking GN ~p table, Player_record: ~p~n", [PlayerNum, AskingGN, Player_record]),
                     erlang:error(record_not_found, [node(), Player_record])
             end,
             {noreply, State};
