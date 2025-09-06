@@ -80,7 +80,7 @@ handle_cast({forward_request, Destination, Request}, State) ->
     %% * forward requests look like {forward_request, Destination_GN_name, Request={..} }
     %% * Sends the new message as {forwarded, Request={..}}
     io:format("🔄 CN SERVER: Forwarding request to ~p: ~p~n", [Destination, Request]),
-    gen_server:cast(Destination, {forwarded, Request}),
+    gn_server:cast_message(Destination, {forwarded, Request}),
     {noreply, State};
 
 %% @doc Handling checks to switch GNs
