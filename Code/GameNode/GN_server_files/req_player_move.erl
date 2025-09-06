@@ -351,7 +351,13 @@ handle_player_movement_clearance(PlayerNum, Answer, Direction, Table_name) ->
             %% Player FSM is on another machine, forward through CN->local GN
             %% Convert PID to registered name for CN forwarding system
             LocalGNName = case is_pid(Player_record#mnesia_players.local_gn) of
-                true -> gn_server:get_registered_name(Player_record#mnesia_players.local_gn);
+                true -> 
+                    case gn_server:get_registered_name(Player_record#mnesia_players.local_gn) of
+                        undefined -> 
+                            io:format("ERROR: Could not find registered name for PID ~p~n", [Player_record#mnesia_players.local_gn]),
+                            erlang:error(pid_to_name_conversion_failed, [Player_record#mnesia_players.local_gn]);
+                        Name -> Name
+                    end;
                 false -> Player_record#mnesia_players.local_gn  % Already a name
             end,
             gn_server:cast_message(cn_server,
@@ -388,7 +394,13 @@ handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
             %% Player FSM is on another machine, forward through CN->local GN
             %% Convert PID to registered name for CN forwarding system
             LocalGNName = case is_pid(Player_record#mnesia_players.local_gn) of
-                true -> gn_server:get_registered_name(Player_record#mnesia_players.local_gn);
+                true -> 
+                    case gn_server:get_registered_name(Player_record#mnesia_players.local_gn) of
+                        undefined -> 
+                            io:format("ERROR: Could not find registered name for PID ~p~n", [Player_record#mnesia_players.local_gn]),
+                            erlang:error(pid_to_name_conversion_failed, [Player_record#mnesia_players.local_gn]);
+                        Name -> Name
+                    end;
                 false -> Player_record#mnesia_players.local_gn  % Already a name
             end,
             gn_server:cast_message(cn_server,
