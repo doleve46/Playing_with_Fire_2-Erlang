@@ -73,7 +73,7 @@ get_player_number_from_pid(Pid) when is_pid(Pid) ->
 
 %% Initialize the graphics server
 init([GNNodes]) ->
-    io:format("🎨 Enhanced CN Graphics Server starting with Socket communication...~n"),
+    io:format("Enhanced CN Graphics Server starting with Socket communication...~n"),
    
     % Create initial state
     State = #state{gn_nodes = GNNodes},
@@ -81,7 +81,7 @@ init([GNNodes]) ->
     % Set up mnesia subscriptions
     erlang:send(self(), setup_subscriptions),
    
-    % Monitoring of gn graphics servers - CHANGED TO 4X THE TICK_DELAY (=200MS NOW)
+    % Monitoring of gn graphics servers
     erlang:send_after(4*?TICK_DELAY, self(), monitor_gn_graphics_servers),
    
     % Start socket server
@@ -89,6 +89,9 @@ init([GNNodes]) ->
    
     % Start periodic updates
     erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
+   
+    % Start periodic timer updates - NEW
+    erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
    
     % Clean up dead players and explosions periodically
     erlang:send_after(5000, self(), cleanup_expired_elements),
@@ -98,8 +101,13 @@ init([GNNodes]) ->
     % Start Python visualizer
     start_python_visualizer(),
     
-    io:format("✅ Enhanced CN Graphics Server initialized with Socket communication~n"),
+    io:format("Enhanced CN Graphics Server initialized with Socket communication~n"),
     {ok, State}.
+
+% ADDED
+start_periodic_timer_updates(State) ->
+    erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
+    State.
 
 %%%===================================================================
 %%% Python Visualizer Startup
@@ -366,6 +374,39 @@ handle_info({'DOWN', _MonitorRef, process, _RemotePid, noconnection}, State) ->
 handle_info(Info, State) ->
     io:format("ℹ️ Unexpected message: ~p~n", [Info]),
     {noreply, State}.
+
+handle_info(send_periodic_timer_updates, State) ->
+    % Send timer updates for all players with active timers
+    lists:foreach(fun({PlayerID, PlayerRecord}) ->
+        #mnesia_players{
+            movement_timer = MovementTimer,
+            immunity_timer = ImmunityTimer,
+            request_timer = RequestTimer,
+            position = Position,
+            speed = Speed
+        } = PlayerRecord,
+        
+        % Only send if any timer is active
+        if MovementTimer > 0 orelse ImmunityTimer > 0 orelse RequestTimer > 0 ->
+            TimerData = #{
+                entity_type => player,
+                entity_data => #{
+                    player_id => PlayerID,
+                    movement_timer => MovementTimer,
+                    immunity_timer => ImmunityTimer,
+                    request_timer => RequestTimer,
+                    position => Position,
+                    speed => Speed
+                }
+            },
+            send_timer_update_to_socket(State, player, TimerData);
+        true -> ok
+        end
+    end, maps:to_list(State#state.last_known_players)),
+    
+    % Schedule next update
+    erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
+    {noreply, State};
 
 %% Cleanup on termination
 terminate(Reason, State) ->
@@ -938,17 +979,19 @@ detect_movement_start(PreviousRecord, NewRecord) ->
         request_timer = RequestTimer
     } = NewRecord,
     
-    % Get previous movement timer (0 if no previous record)
-    PreviousMovementTimer = case PreviousRecord of
-        undefined -> 0;
-        #mnesia_players{movement_timer = PrevMovementTimer} -> PrevMovementTimer
+    % Get previous values
+    {PreviousMovementTimer, PreviousMovement} = case PreviousRecord of
+        undefined -> {0, false};
+        #mnesia_players{movement_timer = PrevTimer, movement = PrevMovement} -> 
+            {PrevTimer, PrevMovement}
     end,
     
-    % Detect movement start: timer goes from 0 to positive value
+    % Detect movement start: movement goes from false to true with timer > 0
     if
-        PreviousMovementTimer =:= 0, MovementTimer > 0, Movement =:= true, Direction =/= none ->
-            % Movement just started! Use the timer value as total duration
-            TotalDuration = MovementTimer,  % This IS the total duration
+        % Movement just started - this is what we want to catch immediately
+        (not PreviousMovement) andalso Movement andalso Direction =/= none andalso MovementTimer > 0 ->
+            % Calculate total duration from speed
+            TotalDuration = ?TILE_MOVE - (Speed - 1) * ?MS_REDUCTION,
             Destination = calculate_destination([X, Y], Direction),
             
             PlayerData = #{
@@ -963,10 +1006,25 @@ detect_movement_start(PreviousRecord, NewRecord) ->
                 request_timer => RequestTimer,
                 movement_confirmed => true
             },
+            
+            io:format("Movement START detected for player ~w: timer=~w/~w~n", 
+                     [PlayerNum, MovementTimer, TotalDuration]),
             {movement_started, PlayerData};
         
-        PreviousMovementTimer > 0, MovementTimer > 0 ->
-            % Movement ongoing - send timer update
+        % Movement ongoing - send timer updates for synchronization
+        Movement andalso MovementTimer > 0 ->
+            TimerData = #{
+                player_id => PlayerNum,
+                movement_timer => MovementTimer,
+                immunity_timer => ImmunityTimer,
+                request_timer => RequestTimer,
+                position => [X, Y],
+                speed => Speed
+            },
+            {timer_update, TimerData};
+        
+        % Send timer updates for other timers too
+        ImmunityTimer > 0 orelse RequestTimer > 0 ->
             TimerData = #{
                 player_id => PlayerNum,
                 movement_timer => MovementTimer,
@@ -980,7 +1038,6 @@ detect_movement_start(PreviousRecord, NewRecord) ->
         true ->
             no_movement_change
     end.
-
 % detect_enhanced_player_movement_change(NewRecord, _CurrentMapState) ->
 %     #mnesia_players{
 %         player_number = PlayerNum,
