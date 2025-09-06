@@ -1500,11 +1500,11 @@ class GNGameVisualizer:
     
     # ADDED: draw power ups not in tile
     def draw_standalone_powerup(self, surface, x, y, powerup_type):
-        """Draw standalone powerup with proper drawn icons"""
+        """Draw standalone powerup with professional polished icons"""
         center_x = x + TILE_SIZE // 2
         center_y = y + TILE_SIZE // 2
         
-        # Powerup colors
+        # Powerup colors based on type
         powerup_colors = {
             'move_speed': safe_get_color('TEXT_CYAN', 'speed_powerup'),
             'remote_ignition': safe_get_color('TEXT_ORANGE', 'remote_powerup'),
@@ -1519,185 +1519,327 @@ class GNGameVisualizer:
         
         color = powerup_colors.get(powerup_type, safe_get_color('POWERUP_CORE', 'default_powerup'))
         
-        # Animated pulsing
-        pulse = 0.8 + 0.2 * math.sin(self.time * 5)
+        # Professional background with gradient and shadow
+        self.draw_powerup_background(surface, center_x, center_y, color)
         
-        # Background glow
-        glow_size = int(18 * pulse)
-        if glow_size > 0:
-            glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
-            glow_alpha = int(100 * pulse)
-            glow_rgba = create_rgba_color(color, glow_alpha, 'powerup_glow')
-            safe_pygame_draw_circle(glow_surf, glow_rgba, (glow_size, glow_size), glow_size, context="powerup_glow")
-            surface.blit(glow_surf, (center_x - glow_size, center_y - glow_size))
-        
-        # White background circle
-        bg_size = 12
-        safe_pygame_draw_circle(surface, (255, 255, 255), (center_x, center_y), bg_size, context="powerup_bg")
-        safe_pygame_draw_circle(surface, color, (center_x, center_y), bg_size, 2, context="powerup_border")
-        
-        # Draw specific powerup icons
+        # Draw specific high-quality icon for each powerup type
         if powerup_type == 'move_speed':
-            self.draw_speed_icon(surface, center_x, center_y, color)
+            self.draw_speed_icon_hq(surface, center_x, center_y, color)
         elif powerup_type == 'remote_ignition':
-            self.draw_remote_icon(surface, center_x, center_y, color)
+            self.draw_remote_icon_hq(surface, center_x, center_y, color)
         elif powerup_type == 'repeat_bombs':
-            self.draw_repeat_icon(surface, center_x, center_y, color)
+            self.draw_repeat_icon_hq(surface, center_x, center_y, color)
         elif powerup_type == 'kick_bomb':
-            self.draw_kick_icon(surface, center_x, center_y, color)
+            self.draw_kick_icon_hq(surface, center_x, center_y, color)
         elif powerup_type == 'phased':
-            self.draw_ghost_icon(surface, center_x, center_y, color)
+            self.draw_phased_icon_hq(surface, center_x, center_y, color)
         elif powerup_type == 'plus_bombs':
-            self.draw_plus_bomb_icon(surface, center_x, center_y, color)
+            self.draw_plus_bombs_icon_hq(surface, center_x, center_y, color)
         elif powerup_type == 'bigger_explosion':
-            self.draw_explosion_icon(surface, center_x, center_y, color)
+            self.draw_explosion_icon_hq(surface, center_x, center_y, color)
         elif powerup_type == 'plus_life':
-            self.draw_heart_icon(surface, center_x, center_y, color)
+            self.draw_heart_icon_hq(surface, center_x, center_y, color)
         elif powerup_type == 'freeze_bomb':
-            self.draw_freeze_icon(surface, center_x, center_y, color)
+            self.draw_freeze_icon_hq(surface, center_x, center_y, color)
+        else:
+            # Default icon
+            self.draw_default_icon_hq(surface, center_x, center_y, color)
     
-    def draw_speed_icon(self, surface, center_x, center_y, color):
-        """Draw lightning bolt for speed"""
-        # Lightning bolt shape
-        lightning_points = [
-            (center_x - 3, center_y - 6),
-            (center_x + 1, center_y - 6),
-            (center_x - 2, center_y - 1),
-            (center_x + 2, center_y - 1),
-            (center_x - 1, center_y + 6),
-            (center_x - 5, center_y + 6),
-            (center_x, center_y + 1),
-            (center_x - 4, center_y + 1)
-        ]
-        safe_pygame_draw_polygon(surface, color, lightning_points, context="lightning_bolt")
-    
-    def draw_remote_icon(self, surface, center_x, center_y, color):
-        """Draw remote control device"""
-        # Remote body
-        safe_pygame_draw_rect(surface, color, (center_x - 4, center_y - 3, 8, 6), context="remote_body")
-        # Antenna
-        safe_pygame_draw_line(surface, color, (center_x - 2, center_y - 3), (center_x - 2, center_y - 6), 2, context="remote_antenna")
-        safe_pygame_draw_circle(surface, color, (center_x - 2, center_y - 6), 1, context="remote_antenna_tip")
-        # Buttons
-        safe_pygame_draw_circle(surface, (255, 255, 255), (center_x - 1, center_y - 1), 1, context="remote_button1")
-        safe_pygame_draw_circle(surface, (255, 255, 255), (center_x + 2, center_y - 1), 1, context="remote_button2")
-    
-    def draw_repeat_icon(self, surface, center_x, center_y, color):
-        """Draw circular arrows for repeat"""
-        # Draw curved arrows manually
-        # Top arc
-        for angle in range(0, 180, 10):
-            x1 = center_x + int(4 * math.cos(math.radians(angle)))
-            y1 = center_y - 2 + int(2 * math.sin(math.radians(angle)))
-            x2 = center_x + int(4 * math.cos(math.radians(angle + 10)))
-            y2 = center_y - 2 + int(2 * math.sin(math.radians(angle + 10)))
-            safe_pygame_draw_line(surface, color, (x1, y1), (x2, y2), 2, context="repeat_arc_top")
+    def draw_powerup_background(self, surface, center_x, center_y, color):
+        """Draw professional background with shadow and gradient"""
+        # Drop shadow
+        shadow_size = 18
+        shadow_surf = pygame.Surface((shadow_size * 2, shadow_size * 2), pygame.SRCALPHA)
+        shadow_rgba = create_rgba_color((0, 0, 0), 60, 'powerup_shadow')
+        safe_pygame_draw_circle(shadow_surf, shadow_rgba, (shadow_size, shadow_size), shadow_size, context="powerup_shadow")
+        surface.blit(shadow_surf, (center_x - shadow_size, center_y - shadow_size + 2))
         
-        # Bottom arc
-        for angle in range(180, 360, 10):
-            x1 = center_x + int(4 * math.cos(math.radians(angle)))
-            y1 = center_y + 2 + int(2 * math.sin(math.radians(angle)))
-            x2 = center_x + int(4 * math.cos(math.radians(angle + 10)))
-            y2 = center_y + 2 + int(2 * math.sin(math.radians(angle + 10)))
-            safe_pygame_draw_line(surface, color, (x1, y1), (x2, y2), 2, context="repeat_arc_bottom")
+        # Outer glow
+        glow_size = 16
+        glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
+        glow_rgba = create_rgba_color(color, 40, 'powerup_glow')
+        safe_pygame_draw_circle(glow_surf, glow_rgba, (glow_size, glow_size), glow_size, context="powerup_glow")
+        surface.blit(glow_surf, (center_x - glow_size, center_y - glow_size))
         
-        # Arrow heads
-        arrow1_points = [(center_x + 4, center_y - 2), (center_x + 6, center_y - 3), (center_x + 6, center_y - 1)]
-        arrow2_points = [(center_x - 4, center_y + 2), (center_x - 6, center_y + 3), (center_x - 6, center_y + 1)]
-        safe_pygame_draw_polygon(surface, color, arrow1_points, context="repeat_arrow1")
-        safe_pygame_draw_polygon(surface, color, arrow2_points, context="repeat_arrow2")
-    
-    def draw_kick_icon(self, surface, center_x, center_y, color):
-        """Draw boot/shoe for kick"""
-        # Boot shape
-        boot_points = [
-            (center_x - 5, center_y + 1),
-            (center_x - 3, center_y - 3),
-            (center_x + 1, center_y - 4),
-            (center_x + 4, center_y - 2),
-            (center_x + 5, center_y + 1),
-            (center_x + 3, center_y + 3),
-            (center_x - 4, center_y + 3)
-        ]
-        safe_pygame_draw_polygon(surface, color, boot_points, context="kick_boot")
-        # Boot sole
-        safe_pygame_draw_line(surface, (0, 0, 0), (center_x - 4, center_y + 3), (center_x + 3, center_y + 3), 2, context="boot_sole")
-    
-    def draw_ghost_icon(self, surface, center_x, center_y, color):
-        """Draw ghost for phased ability"""
-        # Ghost head (circle)
-        safe_pygame_draw_circle(surface, color, (center_x, center_y - 2), 4, context="ghost_head")
-        # Ghost body
-        body_points = [
-            (center_x - 4, center_y + 2),
-            (center_x - 4, center_y + 6),
-            (center_x - 2, center_y + 4),
-            (center_x, center_y + 6),
-            (center_x + 2, center_y + 4),
-            (center_x + 4, center_y + 6),
-            (center_x + 4, center_y + 2)
-        ]
-        safe_pygame_draw_polygon(surface, color, body_points, context="ghost_body")
-        # Eyes
-        safe_pygame_draw_circle(surface, (255, 255, 255), (center_x - 1, center_y - 3), 1, context="ghost_eye1")
-        safe_pygame_draw_circle(surface, (255, 255, 255), (center_x + 1, center_y - 3), 1, context="ghost_eye2")
-    
-    def draw_plus_bomb_icon(self, surface, center_x, center_y, color):
-        """Draw plus sign for more bombs"""
-        # Thick plus sign
-        safe_pygame_draw_rect(surface, color, (center_x - 1, center_y - 5, 3, 11), context="plus_vertical")
-        safe_pygame_draw_rect(surface, color, (center_x - 5, center_y - 1, 11, 3), context="plus_horizontal")
-    
-    def draw_explosion_icon(self, surface, center_x, center_y, color):
-        """Draw star burst for bigger explosion"""
-        # Star points
-        star_points = []
-        for i in range(8):
-            angle = i * 45
-            if i % 2 == 0:
-                # Outer points
-                x = center_x + int(5 * math.cos(math.radians(angle)))
-                y = center_y + int(5 * math.sin(math.radians(angle)))
-            else:
-                # Inner points
-                x = center_x + int(2 * math.cos(math.radians(angle)))
-                y = center_y + int(2 * math.sin(math.radians(angle)))
-            star_points.append((x, y))
+        # Main background circle with gradient
+        bg_size = 14
+        # Dark background
+        dark_bg = tuple(max(0, c - 100) for c in color)
+        dark_bg = validate_color(dark_bg, 'powerup_dark_bg')
+        safe_pygame_draw_circle(surface, dark_bg, (center_x, center_y), bg_size, context="powerup_dark_bg")
         
-        safe_pygame_draw_polygon(surface, color, star_points, context="explosion_star")
+        # Gradient overlay
+        for r in range(bg_size, 0, -1):
+            alpha = int(200 * (bg_size - r) / bg_size)
+            if alpha > 0:
+                grad_surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+                grad_rgba = create_rgba_color((255, 255, 255), alpha, 'powerup_gradient')
+                safe_pygame_draw_circle(grad_surf, grad_rgba, (r, r), r, context="powerup_gradient")
+                surface.blit(grad_surf, (center_x - r, center_y - r))
+        
+        # Border
+        border_color = validate_color((255, 255, 255), 'powerup_border')
+        safe_pygame_draw_circle(surface, border_color, (center_x, center_y), bg_size, 2, context="powerup_border")
     
-    def draw_heart_icon(self, surface, center_x, center_y, color):
-        """Draw heart for extra life"""
-        # Heart shape using circles and triangle
-        safe_pygame_draw_circle(surface, color, (center_x - 2, center_y - 1), 3, context="heart_left_circle")
-        safe_pygame_draw_circle(surface, color, (center_x + 2, center_y - 1), 3, context="heart_right_circle")
-        # Heart bottom point
-        heart_bottom = [
+    def draw_speed_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality speed icon - stylized lightning bolt"""
+        # Lightning bolt with gradient and multiple layers
+        points = [
+            (center_x - 3, center_y - 7),
+            (center_x + 4, center_y - 1),
+            (center_x + 1, center_y - 1),
+            (center_x + 3, center_y + 7),
             (center_x - 4, center_y + 1),
-            (center_x, center_y + 5),
-            (center_x + 4, center_y + 1)
+            (center_x - 1, center_y + 1)
         ]
-        safe_pygame_draw_polygon(surface, color, heart_bottom, context="heart_bottom")
-    
-    def draw_freeze_icon(self, surface, center_x, center_y, color):
-        """Draw snowflake for freeze bomb"""
-        # Six-pointed snowflake
-        # Main lines
-        safe_pygame_draw_line(surface, color, (center_x, center_y - 5), (center_x, center_y + 5), 2, context="snowflake_vertical")
-        safe_pygame_draw_line(surface, color, (center_x - 4, center_y - 2), (center_x + 4, center_y + 2), 2, context="snowflake_diagonal1")
-        safe_pygame_draw_line(surface, color, (center_x - 4, center_y + 2), (center_x + 4, center_y - 2), 2, context="snowflake_diagonal2")
         
-        # Small decorative branches
-        for angle in [0, 60, 120, 180, 240, 300]:
-            branch_x = center_x + int(3 * math.cos(math.radians(angle)))
-            branch_y = center_y + int(3 * math.sin(math.radians(angle)))
-            # Small branches
-            b1_x = branch_x + int(1 * math.cos(math.radians(angle + 30)))
-            b1_y = branch_y + int(1 * math.sin(math.radians(angle + 30)))
-            b2_x = branch_x + int(1 * math.cos(math.radians(angle - 30)))
-            b2_y = branch_y + int(1 * math.sin(math.radians(angle - 30)))
-            safe_pygame_draw_line(surface, color, (branch_x, branch_y), (b1_x, b1_y), 1, context=f"snowflake_branch_{angle}_1")
-            safe_pygame_draw_line(surface, color, (branch_x, branch_y), (b2_x, b2_y), 1, context=f"snowflake_branch_{angle}_2")
+        # Shadow layer
+        shadow_points = [(x + 1, y + 1) for x, y in points]
+        if len(shadow_points) >= 3:
+            shadow_rgba = create_rgba_color((0, 0, 0), 80, 'speed_shadow')
+            shadow_surf = pygame.Surface((16, 16), pygame.SRCALPHA)
+            safe_pygame_draw_polygon(shadow_surf, shadow_rgba, 
+                             [(x - center_x + 8, y - center_y + 8) for x, y in shadow_points], context="speed_shadow")
+            surface.blit(shadow_surf, (center_x - 8, center_y - 8))
+        
+        # Main lightning bolt
+        if len(points) >= 3:
+            safe_pygame_draw_polygon(surface, color, points, context="speed_main")
+            
+            # Highlight edge
+            highlight_color = validate_color((255, 255, 255), 'speed_highlight')
+            safe_pygame_draw_polygon(surface, highlight_color, points, 1, context="speed_highlight")
+    
+    def draw_remote_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality remote icon - detailed antenna with signal waves"""
+        # Antenna base (rectangular with gradient)
+        base_rect = pygame.Rect(center_x - 4, center_y + 3, 8, 4)
+        base_dark = tuple(max(0, c - 80) for c in color)
+        base_dark = validate_color(base_dark, 'remote_base_dark')
+        safe_pygame_draw_rect(surface, base_dark, base_rect, context="remote_base")
+        safe_pygame_draw_rect(surface, color, base_rect, 1, context="remote_base_border")
+        
+        # Antenna mast (tapered)
+        for i in range(7):
+            width = max(1, 3 - i // 3)
+            mast_y = center_y + 3 - i
+            mast_rect = pygame.Rect(center_x - width // 2, mast_y, width, 1)
+            safe_pygame_draw_rect(surface, color, mast_rect, context=f"remote_mast_{i}")
+        
+        # Signal waves (concentric arcs with varying opacity)
+        for i, radius in enumerate([8, 6, 4]):
+            alpha = int(150 - i * 40)
+            if alpha > 0:
+                wave_surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+                wave_rgba = create_rgba_color(color, alpha, f'remote_wave_{i}')
+                # Draw multiple small arcs to simulate a curved line
+                for angle in range(-60, 61, 10):
+                    start_angle = math.radians(angle)
+                    end_angle = math.radians(angle + 8)
+                    start_x = radius + int((radius - 1) * math.cos(start_angle))
+                    start_y = radius + int((radius - 1) * math.sin(start_angle))
+                    end_x = radius + int((radius - 1) * math.cos(end_angle))
+                    end_y = radius + int((radius - 1) * math.sin(end_angle))
+                    safe_pygame_draw_line(wave_surf, wave_rgba, (start_x, start_y), (end_x, end_y), 1, context=f"remote_wave_seg_{i}_{angle}")
+                surface.blit(wave_surf, (center_x - radius, center_y - radius - 3))
+    
+    def draw_heart_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality heart icon with gradient and shine"""
+        # Heart shape using multiple circles and triangle for smoothness
+        heart_points = []
+        
+        # Create smooth heart shape using mathematical curve
+        for t in range(0, 360, 10):
+            angle = math.radians(t)
+            # Heart equation: x = 16*sin^3(t), y = 13*cos(t) - 5*cos(2t) - 2*cos(3t) - cos(4t)
+            scale = 0.3
+            x = center_x + scale * 16 * (math.sin(angle) ** 3)
+            y = center_y - scale * (13 * math.cos(angle) - 5 * math.cos(2 * angle) - 2 * math.cos(3 * angle) - math.cos(4 * angle))
+            heart_points.append((int(x), int(y)))
+        
+        if len(heart_points) >= 3:
+            # Shadow
+            shadow_points = [(x + 1, y + 1) for x, y in heart_points]
+            shadow_surf = pygame.Surface((24, 24), pygame.SRCALPHA)
+            shadow_rgba = create_rgba_color((0, 0, 0), 60, 'heart_shadow')
+            safe_pygame_draw_polygon(shadow_surf, shadow_rgba, 
+                             [(x - center_x + 12, y - center_y + 12) for x, y in shadow_points], context="heart_shadow")
+            surface.blit(shadow_surf, (center_x - 12, center_y - 12))
+            
+            # Main heart
+            safe_pygame_draw_polygon(surface, color, heart_points, context="heart_main")
+            
+            # Highlight
+            highlight_color = validate_color((255, 255, 255), 'heart_highlight')
+            safe_pygame_draw_polygon(surface, highlight_color, heart_points, 1, context="heart_highlight")
+            
+            # Shine effect
+            shine_points = [(center_x - 2, center_y - 3), (center_x + 1, center_y - 3), (center_x, center_y)]
+            if len(shine_points) >= 3:
+                shine_rgba = create_rgba_color((255, 255, 255), 120, 'heart_shine')
+                shine_surf = pygame.Surface((6, 6), pygame.SRCALPHA)
+                safe_pygame_draw_polygon(shine_surf, shine_rgba, 
+                                 [(x - center_x + 3, y - center_y + 3) for x, y in shine_points], context="heart_shine")
+                surface.blit(shine_surf, (center_x - 3, center_y - 3))
+    
+    def draw_explosion_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality explosion icon with layered burst effect"""
+        # Multiple explosion layers for depth
+        layers = [
+            (8, 255),  # Outer layer
+            (6, 200),  # Middle layer  
+            (4, 150),  # Inner layer
+            (2, 100)   # Core
+        ]
+        
+        for radius, alpha in layers:
+            # Create starburst pattern
+            burst_surf = pygame.Surface((radius * 3, radius * 3), pygame.SRCALPHA)
+            burst_rgba = create_rgba_color(color, alpha, f'explosion_layer_{radius}')
+            
+            # Draw radiating lines
+            for angle in range(0, 360, 22):  # 16 rays
+                end_x = int(radius * 1.5 * math.cos(math.radians(angle)))
+                end_y = int(radius * 1.5 * math.sin(math.radians(angle)))
+                safe_pygame_draw_line(burst_surf, burst_rgba, 
+                               (radius * 1.5, radius * 1.5), 
+                               (radius * 1.5 + end_x, radius * 1.5 + end_y), 
+                               max(1, radius // 2), context=f"explosion_ray_{angle}_{radius}")
+            
+            surface.blit(burst_surf, (center_x - radius * 1.5, center_y - radius * 1.5))
+        
+        # Bright center
+        center_color = validate_color((255, 255, 255), 'explosion_center')
+        safe_pygame_draw_circle(surface, center_color, (center_x, center_y), 2, context="explosion_center")
+    
+    def draw_freeze_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality freeze icon - detailed snowflake"""
+        # Main cross arms
+        arm_length = 6
+        arm_width = 2
+        
+        # Draw main arms with thickness
+        safe_pygame_draw_line(surface, color, 
+                       (center_x - arm_length, center_y), 
+                       (center_x + arm_length, center_y), arm_width, context="freeze_horizontal")
+        safe_pygame_draw_line(surface, color, 
+                       (center_x, center_y - arm_length), 
+                       (center_x, center_y + arm_length), arm_width, context="freeze_vertical")
+        
+        # Diagonal arms
+        diag_length = int(arm_length * 0.7)
+        safe_pygame_draw_line(surface, color,
+                       (center_x - diag_length, center_y - diag_length),
+                       (center_x + diag_length, center_y + diag_length), arm_width, context="freeze_diagonal1")
+        safe_pygame_draw_line(surface, color,
+                       (center_x - diag_length, center_y + diag_length),
+                       (center_x + diag_length, center_y - diag_length), arm_width, context="freeze_diagonal2")
+        
+        # Decorative branches on each arm
+        branch_positions = [
+            (center_x - 3, center_y), (center_x + 3, center_y),  # Horizontal arms
+            (center_x, center_y - 3), (center_x, center_y + 3)   # Vertical arms
+        ]
+        
+        for bx, by in branch_positions:
+            # Small decorative branches
+            for angle in [30, -30]:
+                branch_x = bx + int(2 * math.cos(math.radians(angle)))
+                branch_y = by + int(2 * math.sin(math.radians(angle)))
+                safe_pygame_draw_line(surface, color, (bx, by), (branch_x, branch_y), 1, context=f"freeze_branch_{angle}")
+        
+        # Center crystal
+        crystal_color = validate_color((255, 255, 255), 'freeze_crystal')
+        safe_pygame_draw_circle(surface, crystal_color, (center_x, center_y), 2, context="freeze_crystal")
+    
+    def draw_plus_bombs_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality plus bombs icon"""
+        # Bomb circle with gradient
+        bomb_radius = 5
+        bomb_dark = tuple(max(0, c - 100) for c in color)
+        bomb_dark = validate_color(bomb_dark, 'bomb_dark')
+        
+        safe_pygame_draw_circle(surface, bomb_dark, (center_x, center_y), bomb_radius, context="plus_bomb_dark")
+        safe_pygame_draw_circle(surface, color, (center_x, center_y), bomb_radius, 1, context="plus_bomb_border")
+        
+        # Plus sign with depth
+        plus_color = validate_color((255, 255, 255), 'plus_sign')
+        # Horizontal bar
+        safe_pygame_draw_rect(surface, plus_color, 
+                       (center_x - 4, center_y - 1, 8, 2), context="plus_horizontal")
+        # Vertical bar  
+        safe_pygame_draw_rect(surface, plus_color, 
+                       (center_x - 1, center_y - 4, 2, 8), context="plus_vertical")
+    
+    def draw_kick_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality kick icon - stylized boot"""
+        # Boot sole (elongated)
+        sole_rect = pygame.Rect(center_x - 1, center_y + 2, 9, 3)
+        sole_dark = tuple(max(0, c - 80) for c in color)
+        sole_dark = validate_color(sole_dark, 'kick_sole_dark')
+        safe_pygame_draw_rect(surface, sole_dark, sole_rect, context="kick_sole")
+        safe_pygame_draw_rect(surface, color, sole_rect, 1, context="kick_sole_border")
+        
+        # Boot upper
+        upper_rect = pygame.Rect(center_x - 2, center_y - 3, 5, 6)
+        safe_pygame_draw_rect(surface, color, upper_rect, context="kick_upper")
+        
+        # Motion lines with varying opacity
+        for i in range(3):
+            alpha = int(150 - i * 30)
+            if alpha > 0:
+                motion_surf = pygame.Surface((4, 1), pygame.SRCALPHA)
+                motion_rgba = create_rgba_color(color, alpha, f'kick_motion_{i}')
+                safe_pygame_draw_rect(motion_surf, motion_rgba, (0, 0, 4, 1), context=f"kick_motion_{i}")
+                surface.blit(motion_surf, (center_x + 8, center_y - 1 + i))
+    
+    def draw_phased_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality phased icon - ethereal ring"""
+        # Multiple concentric rings with varying opacity to show "phasing"
+        for i, (radius, alpha) in enumerate([(7, 80), (5, 120), (3, 160)]):
+            if alpha > 0:
+                ring_surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+                ring_rgba = create_rgba_color(color, alpha, f'phased_ring_{i}')
+                safe_pygame_draw_circle(ring_surf, ring_rgba, (radius, radius), radius, 1, context=f"phased_ring_{i}")
+                surface.blit(ring_surf, (center_x - radius, center_y - radius))
+    
+    def draw_repeat_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality repeat icon - circular arrows"""
+        # Draw smooth circular arrow using multiple arc segments
+        radius = 6
+        arrow_width = 2
+        
+        # Main circular path
+        for angle in range(30, 330, 15):  # Skip some angles to create arrow gap
+            start_angle = math.radians(angle)
+            end_angle = math.radians(angle + 10)
+            
+            start_x = center_x + int(radius * math.cos(start_angle))
+            start_y = center_y + int(radius * math.sin(start_angle))
+            end_x = center_x + int(radius * math.cos(end_angle))
+            end_y = center_y + int(radius * math.sin(end_angle))
+            
+            safe_pygame_draw_line(surface, color, (start_x, start_y), (end_x, end_y), arrow_width, context=f"repeat_arc_{angle}")
+        
+        # Arrow head
+        arrow_angle = math.radians(30)
+        arrow_x = center_x + int(radius * math.cos(arrow_angle))
+        arrow_y = center_y + int(radius * math.sin(arrow_angle))
+        
+        arrow_points = [
+            (arrow_x, arrow_y),
+            (arrow_x - 3, arrow_y - 2),
+            (arrow_x - 3, arrow_y + 2)
+        ]
+        if len(arrow_points) >= 3:
+            safe_pygame_draw_polygon(surface, color, arrow_points, context="repeat_arrow")
+    
+    def draw_default_icon_hq(self, surface, center_x, center_y, color):
+        """High-quality default icon"""
+        if hasattr(self, 'font'):
+            text_surface = self.font.render('?', True, color)
+            text_rect = text_surface.get_rect(center=(center_x, center_y))
+            surface.blit(text_surface, text_rect)
 
     def draw_enhanced_selection_highlight(self, surface, x, y):
         """Draw enhanced selection highlight with animation"""
