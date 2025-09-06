@@ -758,7 +758,7 @@ class GNGameVisualizer:
         self.movement_timers[player_id] = movement_timer
         self.immunity_timers[player_id] = immunity_timer
         self.request_timers[player_id] = request_timer
-
+    
     def handle_bomb_movement_confirmation(self, bomb_data: dict):
         """Handle bomb movement with FSM state information"""
         bomb_id = tuple(bomb_data.get('bomb_id', [0, 0]))
@@ -859,6 +859,7 @@ class GNGameVisualizer:
         self.current_game_state.dead_players[player_id] = death_info
 
     # [Include simplified versions of all the parsing and animation methods from map_live_port.py]
+    
     def parse_game_state(self, json_grid: List) -> bool:
         """Parse complete game state from JSON grid data"""
         if not json_grid or not isinstance(json_grid, list):
@@ -1052,6 +1053,22 @@ class GNGameVisualizer:
                         new_player.direction, new_player.speed, new_player.timers
                     )
 
+    def create_bomb_placement_animation(self, x: int, y: int, bomb_data: BombState):
+    """Create bomb placement animation"""
+    self.bomb_animations[(x, y)] = {
+        'type': 'placement',
+        'timer': bomb_data.timer,
+        'max_timer': bomb_data.timer,
+        'owner': bomb_data.owner,
+        'radius': bomb_data.radius,
+        'bomb_type': bomb_data.bomb_type,
+        'status': bomb_data.status,
+        'ignited': bomb_data.ignited,
+        'start_time': self.time,
+        'pulse_phase': 0,
+        'active': True
+    }
+    
     def create_walking_animation(self, player_id: int, old_pos: tuple, new_pos: tuple, 
                                direction: str, speed: int, timers: PlayerTimers):
         """Create walking animation immediately when movement detected"""
@@ -1161,6 +1178,13 @@ class GNGameVisualizer:
             self.camera_shake -= 2.0 / FPS
             if self.camera_shake < 0:
                 self.camera_shake = 0
+
+         # Update bomb animations - clean up inactive ones
+        if hasattr(self, 'bomb_animations'):
+            self.bomb_animations = {
+                bomb_id: anim for bomb_id, anim in self.bomb_animations.items()
+                if anim.get('active', False) and current_time - anim['start_time'] < anim.get('duration', 1.0)
+            }
 
     # ENHANCED DRAWING METHODS WITH SAFE COLOR HANDLING
     def draw_enhanced_map(self):
@@ -1643,27 +1667,30 @@ class GNGameVisualizer:
         """Draw enhanced bomb with FSM state visualization"""
         bomb_id = (bomb_data.x, bomb_data.y)
         actual_x, actual_y = x, y
-
-        # Check for movement animation
-        if bomb_id in self.bomb_animations:
+    
+        # Check for movement animation - but only if bomb_animations exists and has entries
+        if (hasattr(self, 'bomb_animations') and 
+            bomb_id in self.bomb_animations and 
+            self.bomb_animations[bomb_id].get('active', False)):
+            
             anim = self.bomb_animations[bomb_id]
             if anim.get('confirmed', False) and anim.get('type') == 'moving':
                 elapsed = self.time - anim['start_time']
                 progress = min(elapsed / anim['duration'], 1.0)
-
+    
                 start_x, start_y = anim['start_pos']
                 end_x, end_y = anim['end_pos']
                 
                 eased_progress = self.ease_out_quad(progress)
                 current_x = start_x + (end_x - start_x) * eased_progress
                 current_y = start_y + (end_y - start_y) * eased_progress
-
+    
                 actual_x = current_y * TILE_SIZE
                 actual_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
-
+    
         center_x = actual_x + TILE_SIZE // 2
         center_y = actual_y + TILE_SIZE // 2
-
+    
         # FSM state-based visual effects
         if bomb_data.status == 'frozen':
             self.draw_frozen_bomb(surface, center_x, center_y, bomb_data)
