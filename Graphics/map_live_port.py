@@ -34,7 +34,7 @@ RECONNECT_DELAY = 2.0
 MAX_RECONNECT_ATTEMPTS = 10
 
 # Backend Constants (from common_parameters.hrl)
-TILE_MOVE_BASE = 1200  # Base movement time in milliseconds
+TILE_MOVE_BASE = 800  # Base movement time in milliseconds (800 instead of 1200)
 MS_REDUCTION = 200     # Speed reduction per speed level
 IMMUNITY_TIME = 3000   # Immunity duration in milliseconds
 REQUEST_COOLDOWN = 1000 # Request cooldown in milliseconds
@@ -1100,7 +1100,7 @@ class EnhancedSocketGameVisualizer:
                 x, y = coord[0], coord[1]
                 self.explosion_animations.append({
                     'type': 'coordinate_explosion',
-                    'x': x, 'y': y,
+                    'x': y, 'y': x,    # changed from 'x': x, 'y': y
                     'explosion_type': explosion_type,
                     'timestamp': timestamp,
                     'display_time': display_time,
