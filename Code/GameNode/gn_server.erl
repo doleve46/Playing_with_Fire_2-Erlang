@@ -195,7 +195,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             case req_player_move:handle_player_movement(PlayerNum, Direction, State) of
                 can_move -> 
                     %% move is possible. Update data, open halfway timer, respond to player FSM
-                    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
+                    req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name, Direction),
                     %% respond to the player FSM via CN->hosting GN
                     %% local_gn now contains the registered name, no conversion needed
                     gn_server:cast_message(cn_server,
