@@ -1356,24 +1356,35 @@ update_cell_powerup({Tile, _, Bomb, Player, Explosion, Special}, PowerupType) ->
 
 add_enhanced_players_to_map(Map) ->
     PlayerTables = [gn1_players, gn2_players, gn3_players, gn4_players],
-    lists:foldl(fun(Table, AccMap) ->
-        add_enhanced_players_from_table(Table, AccMap)
-    end, Map, PlayerTables).
+    % Collect all player records from all GN tables
+    AllPlayerRecords = lists:flatmap(fun(Table) ->
+        Fun = fun() ->
+            mnesia:select(Table, [{#mnesia_players{_ = '_'}, [], ['$_']}])
+        end,
+        case mnesia:activity(sync_dirty, Fun) of
+            PlayerRecords when is_list(PlayerRecords) -> PlayerRecords;
+            _ -> []
+        end
+    end, PlayerTables),
+    % Place all players on the map at their current position
+    lists:foldl(fun(PlayerRecord, AccMap) ->
+        update_map_with_enhanced_player(AccMap, PlayerRecord)
+    end, Map, AllPlayerRecords).
 
-add_enhanced_players_from_table(Table, Map) ->
-    Fun = fun() ->
-        mnesia:select(Table, [{#mnesia_players{_ = '_'}, [], ['$_']}])
-    end,
-   
-    case mnesia:activity(sync_dirty, Fun) of
-        PlayerRecords when is_list(PlayerRecords) ->
-            lists:foldl(fun(PlayerRecord, AccMap) ->
-                update_map_with_enhanced_player(AccMap, PlayerRecord)
-            end, Map, PlayerRecords);
-        Error ->
-            io:format("❌ Error reading player table ~w: ~p~n", [Table, Error]),
-            Map
-    end.
+%add_enhanced_players_from_table(Table, Map) ->
+%    Fun = fun() ->
+%        mnesia:select(Table, [{#mnesia_players{_ = '_'}, [], ['$_']}])
+%    end,
+%   
+%    case mnesia:activity(sync_dirty, Fun) of
+%        PlayerRecords when is_list(PlayerRecords) ->
+%            lists:foldl(fun(PlayerRecord, AccMap) ->
+%                update_map_with_enhanced_player(AccMap, PlayerRecord)
+%            end, Map, PlayerRecords);
+%        Error ->
+%            io:format("❌ Error reading player table ~w: ~p~n", [Table, Error]),
+%            Map
+%    end.
 
 update_map_with_enhanced_player(Map, PlayerRecord) ->
     #mnesia_players{
