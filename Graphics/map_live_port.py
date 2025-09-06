@@ -1059,13 +1059,12 @@ class EnhancedSocketGameVisualizer:
         if player_id in self.player_animations:
             return
     
-        base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
-        ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
-        total_duration = base_duration - (speed - 1) * ms_reduction
-        actual_duration = total_duration / 1000.0
+        # Use the actual movement timer value as the total duration
+        total_duration_ms = timers.movement_timer  # This should be 1200ms by default
+        actual_duration = total_duration_ms / 1000.0  # Convert to seconds for time-based fallback
         
         # Debug output to verify animation creation
-        print(f"Creating walking animation for player {player_id}: {start_pos} → {end_pos} (direction: {direction}, speed: {speed}, timer: {timers.movement_timer}ms)")
+        print(f"Creating walking animation for player {player_id}: {start_pos} -> {end_pos} (direction: {direction}, total_duration: {total_duration_ms}ms)")
     
         self.player_animations[player_id] = {
             'type': 'walking',
@@ -1075,9 +1074,9 @@ class EnhancedSocketGameVisualizer:
             'start_time': self.time,
             'duration': actual_duration,
             'speed': speed,
-            'movement_timer': timers.movement_timer,
-            'total_duration': total_duration,
-            'confirmed': True,  # Mark as confirmed since we're creating it based on movement timer
+            'initial_timer': total_duration_ms,  # Store initial timer value
+            'total_duration': total_duration_ms,
+            'confirmed': True,
             'active': True
         }
     
@@ -1398,35 +1397,34 @@ class EnhancedSocketGameVisualizer:
                     # Get current server timer
                     server_timer = self.movement_timers.get(player_id, 0)
                     
-                    if anim.get('total_duration', 0) > 0 and server_timer >= 0:
-                        # Calculate progress from server timer
-                        elapsed_ms = anim['total_duration'] - server_timer
-                        total_duration = anim['total_duration']
-                        if total_duration > 0:
-                            progress = elapsed_ms / total_duration
-                            anim['progress'] = max(0.0, min(1.0, progress))
-                            
-                            # Debug output for animation progress
-                            if player_id == 1:  # Only show for player 1 to avoid spam
-                                print(f"Player {player_id} animation progress: {progress:.2f}, server_timer: {server_timer}")
-                        else:
-                            anim['progress'] = 1.0  # Complete immediately if duration is 0
+                    if anim.get('initial_timer', 0) > 0 and server_timer >= 0:
+                        # Calculate progress from server timer: progress = (initial - current) / initial
+                        initial_timer = anim['initial_timer']
+                        elapsed_ms = initial_timer - server_timer
+                        progress = elapsed_ms / initial_timer
+                        anim['progress'] = max(0.0, min(1.0, progress))
                         
-                        # End when server timer reaches 0
-                        if server_timer <= 0:
-                            anim['progress'] = 1.0
-                            print(f"Player {player_id} animation completed (server timer reached 0)")
-                    else:
-                        # Fallback to time-based
-                        elapsed = current_time - anim['start_time']
-                        duration = anim.get('duration', 1.0)  # Default to 1 second if not set
-                        if duration > 0:
-                            anim['progress'] = min(1.0, elapsed / duration)
-                        else:
-                            anim['progress'] = 1.0  # Complete immediately if duration is 0
-                        
+                        # Debug output for animation progress
                         if player_id == 1:  # Only show for player 1 to avoid spam
-                            print(f"Player {player_id} time-based animation progress: {anim['progress']:.2f}")
+                            print(f"Player {player_id} animation progress: {progress:.3f} (elapsed: {elapsed_ms}ms / total: {initial_timer}ms, server_timer: {server_timer}ms)")
+                    else:
+                        anim['progress'] = 1.0  # Complete immediately if no valid timer data
+                    
+                    # End when server timer reaches 0
+                    if server_timer <= 0:
+                        anim['progress'] = 1.0
+                        print(f"Player {player_id} animation completed (server timer reached 0)")
+                else:
+                    # Fallback to time-based
+                    elapsed = current_time - anim['start_time']
+                    duration = anim.get('duration', 1.0)  # Default to 1 second if not set
+                    if duration > 0:
+                        anim['progress'] = min(1.0, elapsed / duration)
+                    else:
+                        anim['progress'] = 1.0  # Complete immediately if duration is 0
+                    
+                    if player_id == 1:  # Only show for player 1 to avoid spam
+                        print(f"Player {player_id} time-based animation progress: {anim['progress']:.2f}")
                     
                     if anim['progress'] >= 1.0:
                         print(f"Removing completed animation for player {player_id}")
@@ -2111,13 +2109,16 @@ class EnhancedSocketGameVisualizer:
             anim = self.player_animations[player_id]
             progress = anim.get('progress', 0.0)
 
-            # Enhanced easing
-            eased_progress = self.ease_out_quad(progress)
+            # Debug output for animation
+            if player_id == 1:  # Only for player 1 to avoid spam
+                print(f"ANIM DEBUG: Player {player_id} - progress: {progress:.3f}, start_pos: {anim['start_pos']}, end_pos: {anim['end_pos']}")
+
+            # Use linear interpolation (no easing for now to debug)
             start_x, start_y = anim['start_pos']
             end_x, end_y = anim['end_pos']
 
-            current_x = start_x + (end_x - start_x) * eased_progress
-            current_y = start_y + (end_y - start_y) * eased_progress
+            current_x = start_x + (end_x - start_x) * progress
+            current_y = start_y + (end_y - start_y) * progress
 
             # Convert to screen coordinates (match static map drawing)
             char_x = current_y * TILE_SIZE
@@ -2125,38 +2126,17 @@ class EnhancedSocketGameVisualizer:
             center_x = char_x + TILE_SIZE // 2
             center_y = char_y + TILE_SIZE // 2
 
-            # Enhanced walking animation with more pronounced movement
-            walk_frequency = 6 + speed * 1.5  # Slightly slower for better visibility
-            walk_bounce = math.sin(progress * math.pi * walk_frequency) * (4 + speed * 1.0)  # More bounce
-            center_y -= walk_bounce
-            
-            # Add horizontal sway for more realistic walking
-            direction = anim.get('direction', 'north')
-            if direction in ['north', 'south']:
-                walk_sway = math.sin(progress * math.pi * walk_frequency * 0.5) * 2
-                center_x += walk_sway
-            elif direction in ['east', 'west']:
-                walk_sway = math.sin(progress * math.pi * walk_frequency * 0.5) * 2
-                center_y += walk_sway
+            # Debug screen coordinates
+            if player_id == 1:
+                print(f"SCREEN DEBUG: current_pos: ({current_x:.2f}, {current_y:.2f}) -> screen: ({char_x}, {char_y})")
+
+        else:
+            # No animation - use static position from game state
+            if player_id == 1:
+                print(f"STATIC: Player {player_id} at game state position: ({player.x}, {player.y}) -> screen: ({char_x}, {char_y})")
 
         # Draw enhanced status effects
         self.draw_enhanced_status_effects(surface, center_x, center_y, player_id)
-        
-        # Draw walking animation indicator
-        if player_id in self.player_animations:
-            anim = self.player_animations[player_id]
-            progress = anim.get('progress', 0.0)
-            
-            # Draw movement trail/glow to make animation more visible
-            glow_intensity = 0.8 - (progress * 0.3)  # Fade as animation progresses
-            glow_size = int(50 * glow_intensity)
-            
-            if glow_size > 0:
-                glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
-                alpha = int(60 * glow_intensity)
-                glow_color = COLORS['SPEED_BOOST_COLOR']
-                pygame.draw.circle(glow_surf, (*glow_color, alpha), (glow_size, glow_size), glow_size)
-                surface.blit(glow_surf, (center_x - glow_size, center_y - glow_size))
 
         # Draw the player character
         self.draw_enhanced_player_character(surface, char_x, char_y, player_id, enhanced_color, skin_color, skin_shadow_color)
