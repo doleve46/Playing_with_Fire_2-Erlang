@@ -2106,29 +2106,55 @@ class EnhancedSocketGameVisualizer:
         # Handle walking animation with enhanced interpolation
         char_x, char_y = x, y
         if player_id in self.player_animations:
-            anim = self.player_animations[player_id]
-            progress = anim.get('progress', 0.0)
+            try:
+                anim = self.player_animations[player_id]
+                progress = anim.get('progress', 0.0)
 
-            # Debug output for animation
-            if player_id == 1:  # Only for player 1 to avoid spam
-                print(f"ANIM DEBUG: Player {player_id} - progress: {progress:.3f}, start_pos: {anim['start_pos']}, end_pos: {anim['end_pos']}")
+                # Debug output for animation
+                if player_id == 1:  # Only for player 1 to avoid spam
+                    print(f"ANIM DEBUG: Player {player_id} - progress: {progress:.3f}, start_pos: {anim.get('start_pos', 'None')}, end_pos: {anim.get('end_pos', 'None')}")
 
-            # Use linear interpolation (no easing for now to debug)
-            start_x, start_y = anim['start_pos']
-            end_x, end_y = anim['end_pos']
+                # Validate animation data
+                start_pos = anim.get('start_pos')
+                end_pos = anim.get('end_pos')
+                
+                if start_pos is None or end_pos is None or len(start_pos) != 2 or len(end_pos) != 2:
+                    print(f"ERROR: Invalid animation data for player {player_id}: start_pos={start_pos}, end_pos={end_pos}")
+                    # Remove invalid animation
+                    del self.player_animations[player_id]
+                    if player_id == 1:
+                        print(f"STATIC: Player {player_id} at game state position: ({player.x}, {player.y}) -> screen: ({char_x}, {char_y})")
+                else:
+                    # Use linear interpolation
+                    start_x, start_y = start_pos
+                    end_x, end_y = end_pos
 
-            current_x = start_x + (end_x - start_x) * progress
-            current_y = start_y + (end_y - start_y) * progress
+                    # Validate coordinates are numbers
+                    if not all(isinstance(coord, (int, float)) for coord in [start_x, start_y, end_x, end_y]):
+                        print(f"ERROR: Non-numeric coordinates for player {player_id}: start=({start_x}, {start_y}), end=({end_x}, {end_y})")
+                        del self.player_animations[player_id]
+                        if player_id == 1:
+                            print(f"STATIC: Player {player_id} at game state position: ({player.x}, {player.y}) -> screen: ({char_x}, {char_y})")
+                    else:
+                        current_x = start_x + (end_x - start_x) * progress
+                        current_y = start_y + (end_y - start_y) * progress
 
-            # Convert to screen coordinates (match static map drawing)
-            char_x = current_y * TILE_SIZE
-            char_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
-            center_x = char_x + TILE_SIZE // 2
-            center_y = char_y + TILE_SIZE // 2
+                        # Convert to screen coordinates (match static map drawing)
+                        char_x = current_y * TILE_SIZE
+                        char_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
+                        center_x = char_x + TILE_SIZE // 2
+                        center_y = char_y + TILE_SIZE // 2
 
-            # Debug screen coordinates
-            if player_id == 1:
-                print(f"SCREEN DEBUG: current_pos: ({current_x:.2f}, {current_y:.2f}) -> screen: ({char_x}, {char_y})")
+                        # Debug screen coordinates
+                        if player_id == 1:
+                            print(f"SCREEN DEBUG: current_pos: ({current_x:.2f}, {current_y:.2f}) -> screen: ({char_x}, {char_y})")
+            except Exception as e:
+                print(f"ERROR in animation for player {player_id}: {e}")
+                # Remove problematic animation
+                if player_id in self.player_animations:
+                    del self.player_animations[player_id]
+                if player_id == 1:
+                    print(f"STATIC: Player {player_id} at game state position: ({player.x}, {player.y}) -> screen: ({char_x}, {char_y})")
 
         else:
             # No animation - use static position from game state
