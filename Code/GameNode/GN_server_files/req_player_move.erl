@@ -14,7 +14,7 @@
 %% ? based on functionality. This file will include all functions relevant to a player requesting movement
 %% * it might also include a bomb requesting movement later on
 -export([read_player_from_table/2, calc_new_coordinates/2,
-        update_player_direction/3, handle_player_movement_clearance/3, handle_bomb_movement_clearance/3,
+        update_player_direction/3, handle_player_movement_clearance/3, handle_player_movement_clearance/4, handle_bomb_movement_clearance/3,
         get_managing_node_by_coord/2, node_name_to_number/1,
         get_records_at_location/2, interact_with_entity/4,
         handle_player_movement/3, insert_player_movement/2, insert_player_movement/3, check_for_obstacles/4,
@@ -47,6 +47,7 @@ read_and_update_coord(player, PlayerNum, Table) ->
     Fun = fun() ->
         case mnesia:read(Table, PlayerNum, write) of
             [Player_record = #mnesia_players{}] -> 
+                io:format("DEBUG: read_and_update_coord - Player ~p direction: ~p, position: ~p~n", [PlayerNum, Player_record#mnesia_players.direction, Player_record#mnesia_players.position]),
                 [New_x, New_y] = calc_new_coordinates(Player_record#mnesia_players.position, Player_record#mnesia_players.direction),
                 %% check if new coordinate fall within current managing GN
                 case get_managing_node_by_coord(New_x,New_y) of
@@ -336,8 +337,40 @@ update_player_direction(PlayerNum, Table, NewValue) ->
 
 
 %% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
+%% Version with direction parameter for cross-GN movements
+handle_player_movement_clearance(PlayerNum, Answer, Direction, Table_name) ->
+    %% both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first,
+    %% Then the database update occurs (different for both)
+    Player_record = read_player_from_table(PlayerNum, Table_name),
+    %% respond to the player FSM
+    if
+        Player_record#mnesia_players.target_gn == Player_record#mnesia_players.local_gn ->
+            %% Player FSM is on this node, send message directly
+            player_fsm:gn_response(PlayerNum, {move_result, Answer}); 
+        true ->
+            %% Player FSM is on another machine, forward through CN->local GN
+            gn_server:cast_message(cn_server,
+                {forward_request, Player_record#mnesia_players.local_gn,
+                    {gn_answer, {move_result, player, PlayerNum, Answer}}
+                })
+    end,
+    case Answer of
+        can_move ->
+            %% move is possible. Update data, open movement timer with the correct direction
+            insert_player_movement(PlayerNum, Table_name, Direction);
+        cant_move -> % cannot move to the other node
+            %% Update direction to none
+            case erlang:is_record(update_player_direction(PlayerNum, Table_name, 'none'), mnesia_players) of
+                true -> ok;
+                _ -> 
+                    %% couldn't find the record, crash the process
+                    erlang:error(record_not_found, [node(), Player_record])
+            end
+    end.
+
+%% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
+%% Legacy version without direction (for backward compatibility)
 handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
-    %% ? For debugging purposes ONLY, we are letting the player FSM know of approved move requests. Later on should be only if they are denied
     %% both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first,
     %% Then the database update occurs (different for both)
     Player_record = read_player_from_table(PlayerNum, Table_name),

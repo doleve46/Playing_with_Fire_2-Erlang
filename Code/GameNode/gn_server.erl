@@ -230,9 +230,9 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
 
         %% * A GN got a respond for a movement request of a player/bomb to another quarter (separate pattern-matching) - this is the forwarded reply handler
         %% * This deals with situations where the Player FSM is on the same node as the relevant GN as well as when its on another
-        {movement_clearance, player, PlayerNum, Answer} ->
-            io:format("DEBUG ASKING GN: Received movement_clearance for player ~p: ~p~n", [PlayerNum, Answer]),
-            req_player_move:handle_player_movement_clearance(PlayerNum, Answer, State#gn_state.players_table_name),
+        {movement_clearance, player, PlayerNum, Answer, Direction} ->
+            io:format("DEBUG ASKING GN: Received movement_clearance for player ~p: ~p with direction ~p~n", [PlayerNum, Answer, Direction]),
+            req_player_move:handle_player_movement_clearance(PlayerNum, Answer, Direction, State#gn_state.players_table_name),
             {noreply, State};
 
         {movement_clearance, bomb, BombIdentifier, Answer} -> % todo: implement bomb movement clearance
@@ -286,7 +286,7 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
             io:format("DEBUG TARGET GN: Move result for player ~p: ~p~n", [PlayerNum, Move_result]),
             gn_server:cast_message(cn_server,
                 {forward_request, AskingGN,
-                    {movement_clearance, player, PlayerNum, Move_result}});
+                    {movement_clearance, player, PlayerNum, Move_result, Direction}});
         bomb -> % a bomb wants to pass to this GN
             placeholder %! not yet implemented
     end,
