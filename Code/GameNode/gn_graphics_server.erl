@@ -115,66 +115,22 @@ handle_call(_Request, _From, State) ->
 
 %% Handle asynchronous casts
 handle_cast({map_update, EnhancedMapState}, State) ->
-    % io:format("🗺️ GN Graphics Server received map update!~n"),
-    % io:format("🔌 Python socket PID: ~p~n", [State#state.python_socket_pid]),  %debug
     CurrentTime = erlang:system_time(millisecond),
     
     {ActualMapState, DeadPlayers, BackendTiming, ActiveExplosions} = case EnhancedMapState of
         #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing, active_explosions := Explosions} ->
-            ExplosionCount = maps:size(Explosions),
-            % io:format("🗺️ GN received full enhanced map update from CN (#~w) with ~w explosions~n", 
-                      % [State#state.update_counter + 1, ExplosionCount]),
-            
-            NewDeaths = maps:filter(fun(PlayerID, _DeathInfo) ->
-                not maps:is_key(PlayerID, State#state.dead_players)
-            end, DeadPlayersMap),
-            
-            if map_size(NewDeaths) > 0 ->
-                NewDeathList = maps:to_list(NewDeaths),
-                io:format("💀 New deaths detected by GN: ~p~n", [NewDeathList]),
-                
-                lists:foreach(fun({PlayerID, {DeathTime, _LastState, LocalGNAtom}}) ->
-                    if LocalGNAtom =:= State#state.local_gn_name ->
-                        io:format("🩸 LOCAL PLAYER ~w DIED on this GN! (Death time: ~w)~n", [PlayerID, DeathTime]);
-                    true ->
-                        io:format("💀 Remote player ~w died on ~w~n", [PlayerID, LocalGNAtom])
-                    end
-                end, NewDeathList);
-            true -> ok
-            end,
-            
-            PreviousExplosions = maps:size(State#state.active_explosions),
-            if ExplosionCount > PreviousExplosions ->
-                NewExplosionCount = ExplosionCount - PreviousExplosions,
-                io:format("💥 ~w new explosions received from CN~n", [NewExplosionCount]);
-            ExplosionCount < PreviousExplosions ->
-                ExpiredCount = PreviousExplosions - ExplosionCount,
-                io:format("💨 ~w explosions expired~n", [ExpiredCount]);
-            true -> ok
-            end,
-            
             {GridData, DeadPlayersMap, Timing, Explosions};
-            
         #{map := GridData, dead_players := DeadPlayersMap, backend_timing := Timing} ->
-            io:format("🗺️ GN received enhanced map update from CN (#~w) with timing & death info~n", 
-                      [State#state.update_counter + 1]),
             {GridData, DeadPlayersMap, Timing, State#state.active_explosions};
-            
         #{map := GridData, dead_players := DeadPlayersMap} ->
-            io:format("🗺️ GN received map update from CN (#~w) with death info~n", 
-                      [State#state.update_counter + 1]),
             {GridData, DeadPlayersMap, State#state.backend_timing, State#state.active_explosions};
-            
         _ ->
-            io:format("🗺️ GN received basic map update from CN (#~w)~n", 
-                      [State#state.update_counter + 1]),
             {EnhancedMapState, State#state.dead_players, State#state.backend_timing, State#state.active_explosions}
     end,
 
-    % If this is the first real map update, signal the menu to start the game
+    % Signal menu to start game on first map update
     case State#state.current_map_state of
         undefined ->
-            % First map update - signal menu process to start the actual game
             case whereis(menu) of
                 undefined -> ok;
                 MenuPid -> MenuPid ! {start_actual_game}
@@ -193,7 +149,6 @@ handle_cast({map_update, EnhancedMapState}, State) ->
     },
     
     send_enhanced_map_to_socket(State#state.python_socket_pid, LocalEnhancedMapData),
-    % io:format("📤 Attempted to send map to socket~n"),
             
     NewState = State#state{
         current_map_state = LocalEnhancedMapData,
@@ -206,6 +161,7 @@ handle_cast({map_update, EnhancedMapState}, State) ->
     {noreply, NewState};
 
 handle_cast({movement_confirmation, ConfirmationData}, State) ->
+    io:format("GN forwarding movement confirmation to socket~n"),
     send_movement_confirmation_to_socket(State#state.python_socket_pid, ConfirmationData),
     {noreply, State};
 
@@ -627,15 +583,13 @@ send_movement_confirmation_to_socket(ClientPid, ConfirmationData) ->
         
         case ConfirmationData of
             #{entity_type := player, entity_data := #{player_id := PlayerID}} ->
-                io:format("🏃 JSON movement confirmation forwarded for player ~w~n", [PlayerID]);
-            #{entity_type := bomb, entity_data := #{from_pos := Pos}} ->
-                io:format("💣 JSON movement confirmation forwarded for bomb at ~w~n", [Pos]);
+                io:format("Movement confirmation forwarded for player ~w~n", [PlayerID]);
             _ ->
-                io:format("📤 JSON movement confirmation forwarded~n")
+                io:format("Movement confirmation forwarded~n")
         end
     catch
         _:Error ->
-            io:format("❌ Error sending JSON movement confirmation via socket: ~p~n", [Error])
+            io:format("Error sending movement confirmation via socket: ~p~n", [Error])
     end.
 
 send_timer_update_to_socket(undefined, _TimerData) ->
@@ -652,12 +606,10 @@ send_timer_update_to_socket(ClientPid, TimerData) ->
         DataLength = byte_size(JsonBinary),
         Message = <<DataLength:32/big, JsonBinary/binary>>,
         
-        ClientPid ! {send_data, Message},
-        
-        io:format("⏱️ JSON timer update forwarded via socket~n")
+        ClientPid ! {send_data, Message}
     catch
         _:Error ->
-            io:format("❌ Error sending JSON timer update via socket: ~p~n", [Error])
+            io:format("Error sending timer update via socket: ~p~n", [Error])
     end.
 
 send_fsm_update_to_socket(undefined, _FSMData) ->
