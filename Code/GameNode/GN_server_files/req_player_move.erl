@@ -58,7 +58,7 @@ read_and_update_coord(player, PlayerNum, Table) ->
                             direction = none
                         },
                         mnesia:write(Table, Updated_record, write),
-                        {retain_gn, Player_record}; %% return value to calling function
+                        {retain_gn, Updated_record}; %% return value to calling function
                     Other_name -> %% destination coordinate is managed by another GN (=Other_name)
                     %% update position, target_gn name, reset movement and direction
                     %% ask CN to transfer entry between tables
@@ -379,6 +379,8 @@ handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo: impleme
 
 -spec check_entered_coord(#mnesia_players{}, State::#gn_state{}) -> ok.
 check_entered_coord(Player_record, State) ->
+    io:format("**CHECK_ENTERED_COORD: Player ~p checking position ~p for powerups**~n", 
+              [Player_record#mnesia_players.player_number, Player_record#mnesia_players.position]),
     %% Check for powerups in new position, if any are found - add their effect to the player's mnesia table entry
     %% When a powerup is taken it is sent a a 'pickup(Pid)' command to stop & terminate it.
     %% This powerup entry is removed from the mnesia table - triggered by the termination msg from the powerup process.
@@ -389,16 +391,23 @@ check_entered_coord(Player_record, State) ->
             [] -> ?NO_POWERUP;
             [?NO_POWERUP] -> ?NO_POWERUP;
             [Found_powerup] -> % a powerup is present at the new position of the player
+                io:format("**CHECK_ENTERED_COORD: Found powerup ~p at position ~p, PID ~p**~n", 
+                          [Found_powerup#mnesia_powerups.type, Player_record#mnesia_players.position, Found_powerup#mnesia_powerups.pid]),
                 %% remove current powerup from table, send msg to process to terminate
                 mnesia:delete(State#gn_state.powerups_table_name, Player_record#mnesia_players.position, write), % remove powerup from table
                 powerup:pickup(Found_powerup#mnesia_powerups.pid), % send msg to terminate process
+                io:format("**CHECK_ENTERED_COORD: Powerup removed from table and pickup signal sent**~n"),
                 Found_powerup#mnesia_powerups.type % returns the powerup (from the transaction)
         end
         end,
         Powerup = mnesia:activity(transaction, Fun),
         if
-            Powerup == ?NO_POWERUP -> ok; % no powerup found in position
+            Powerup == ?NO_POWERUP -> 
+                io:format("**CHECK_ENTERED_COORD: No powerup to consume**~n"),
+                ok; % no powerup found in position
             true -> % consume power-up into player, notify player for selected powerups
+                io:format("**CHECK_ENTERED_COORD: Consuming powerup ~p for player ~p**~n", 
+                          [Powerup, Player_record#mnesia_players.player_number]),
                 consume_powerup(Powerup, Player_record, State#gn_state.players_table_name)
         end.
 
@@ -406,6 +415,8 @@ check_entered_coord(Player_record, State) ->
 
 consume_powerup(Powerup, Player_record, Players_table) ->
     %% @doc Based on current player's powerups, change/update his power in the mnesia table.
+    io:format("**CONSUME_POWERUP: Player ~p consuming powerup ~p**~n", 
+              [Player_record#mnesia_players.player_number, Powerup]),
     Updated_record = case Powerup of
         %% ---- Powerups that the player FSM should be notified about ----
         ?MOVE_SPEED -> % movespeed buff

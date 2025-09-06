@@ -292,7 +292,7 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
 %% * A player came into my quarter of the map - open a timer, let the player FSM know
 handle_cast({incoming_player, PlayerNum}, State) ->
     Player_record = req_player_move:read_player_from_table(PlayerNum, State#gn_state.players_table_name),
-    req_player_move:check_entered_coord(Player_record),
+    req_player_move:check_entered_coord(Player_record, State),
     {noreply, State};
 
 %% * A tile updates his status (broken/transition to one_hit)
