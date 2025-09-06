@@ -197,14 +197,36 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     %% move is possible. Update data, open halfway timer, respond to player FSM
                     req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
                     %% respond to the player FSM via CN->hosting GN
+                    %% Convert PID to registered name for CN forwarding system
+                    LocalGNName = case is_pid(Player#mnesia_players.local_gn) of
+                        true -> 
+                            case get_registered_name(Player#mnesia_players.local_gn) of
+                                undefined -> 
+                                    io:format("ERROR: Could not find registered name for PID ~p~n", [Player#mnesia_players.local_gn]),
+                                    erlang:error(pid_to_name_conversion_failed, [Player#mnesia_players.local_gn]);
+                                Name -> Name
+                            end;
+                        false -> Player#mnesia_players.local_gn  % Already a name
+                    end,
                     gn_server:cast_message(cn_server,
-                        {forward_request, Player#mnesia_players.local_gn, 
+                        {forward_request, LocalGNName, 
                             {gn_answer, {move_result, player, PlayerNum, accepted}}
                         });
                 cant_move -> % can't move, obstacle blocking
                     req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
+                    %% Convert PID to registered name for CN forwarding system
+                    LocalGNName = case is_pid(Player#mnesia_players.local_gn) of
+                        true -> 
+                            case get_registered_name(Player#mnesia_players.local_gn) of
+                                undefined -> 
+                                    io:format("ERROR: Could not find registered name for PID ~p~n", [Player#mnesia_players.local_gn]),
+                                    erlang:error(pid_to_name_conversion_failed, [Player#mnesia_players.local_gn]);
+                                Name -> Name
+                            end;
+                        false -> Player#mnesia_players.local_gn  % Already a name
+                    end,
                     gn_server:cast_message(cn_server,
-                        {forward_request, Player#mnesia_players.local_gn, 
+                        {forward_request, LocalGNName, 
                             {gn_answer, {move_result, player, PlayerNum, denied}}
                         });
                 dest_not_here -> % destination coordinate is overseen by another GN
