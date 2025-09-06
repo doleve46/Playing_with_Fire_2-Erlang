@@ -79,6 +79,7 @@ handle_call(_Request, _From, State) ->
 handle_cast({forward_request, Destination, Request}, State) ->
     %% * forward requests look like {forward_request, Destination_GN_name, Request={..} }
     %% * Sends the new message as {forwarded, Request={..}}
+    io:format("🔄 CN SERVER: Forwarding request to ~p: ~p~n", [Destination, Request]),
     gen_server:cast(Destination, {forwarded, Request}),
     {noreply, State};
 
@@ -327,10 +328,19 @@ trace_ray([X, Y], {PlusX, PlusY}=Direction, StepsLeft, Accums) ->
 
 %% Handler for letting all objects be affected by the explosion in the affected coordinates list
 notify_affected_objects(ResultList) ->
-    spawn(fun() -> process_affected_objects(lists:nth(1, ResultList), gn1_tiles, gn1_bombs, gn1_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(2, ResultList), gn2_tiles, gn2_bombs, gn2_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(3, ResultList), gn3_tiles, gn3_bombs, gn3_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(4, ResultList), gn4_tiles, gn4_bombs, gn4_players) end).
+    %% Deduplicate coordinates for each GN to prevent multiple damage application
+    GN1_coords = lists:usort(lists:nth(1, ResultList)),
+    GN2_coords = lists:usort(lists:nth(2, ResultList)),
+    GN3_coords = lists:usort(lists:nth(3, ResultList)),
+    GN4_coords = lists:usort(lists:nth(4, ResultList)),
+    
+    io:format("💥 NOTIFY_AFFECTED: GN1: ~p, GN2: ~p, GN3: ~p, GN4: ~p~n", 
+              [GN1_coords, GN2_coords, GN3_coords, GN4_coords]),
+    
+    spawn(fun() -> process_affected_objects(GN1_coords, gn1_tiles, gn1_bombs, gn1_players) end),
+    spawn(fun() -> process_affected_objects(GN2_coords, gn2_tiles, gn2_bombs, gn2_players) end),
+    spawn(fun() -> process_affected_objects(GN3_coords, gn3_tiles, gn3_bombs, gn3_players) end),
+    spawn(fun() -> process_affected_objects(GN4_coords, gn4_tiles, gn4_bombs, gn4_players) end).
 
 process_affected_objects(ListOfCoords, Tiles_table, Bombs_table, Players_table) ->
     Fun = fun() -> lists:foreach(
