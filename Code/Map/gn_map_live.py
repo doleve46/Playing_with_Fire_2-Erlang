@@ -1137,9 +1137,10 @@ class GNGameVisualizer:
             })
 
     def update_all_animations(self):
-        """Update all animations with server timer sync"""
+        """Update all animations with server timer sync - safe version for GN"""
         current_time = self.time
     
+        # Handle player animations (existing logic)
         for player_id in list(self.player_animations.keys()):
             anim = self.player_animations[player_id]
             if anim['active']:
@@ -1163,59 +1164,66 @@ class GNGameVisualizer:
                 if anim['progress'] >= 1.0:
                     del self.player_animations[player_id]
     
-        # Update other animations...
-        self.explosion_animations = [
-            anim for anim in self.explosion_animations
-            if current_time - anim['start_time'] < anim['duration']
-        ]
+        # Safe cleanup of other animation lists
+        if hasattr(self, 'explosion_animations'):
+            self.explosion_animations = [
+                anim for anim in self.explosion_animations
+                if current_time - anim.get('start_time', 0) < anim.get('duration', 1.0)
+            ]
+        else:
+            self.explosion_animations = []
     
-        self.game_effects = [
-            effect for effect in self.game_effects
-            if current_time - effect['start_time'] < effect['duration']
-        ]
+        if hasattr(self, 'game_effects'):
+            self.game_effects = [
+                effect for effect in self.game_effects
+                if current_time - effect.get('start_time', 0) < effect.get('duration', 1.0)
+            ]
+        else:
+            self.game_effects = []
     
+        if hasattr(self, 'bomb_animations'):
+            self.bomb_animations = {
+                bomb_id: anim for bomb_id, anim in self.bomb_animations.items()
+                if current_time - anim.get('start_time', 0) < anim.get('duration', 1.0)
+            }
+        else:
+            self.bomb_animations = {}
+    
+        # Update camera shake
         if self.camera_shake > 0:
             self.camera_shake -= 2.0 / FPS
             if self.camera_shake < 0:
                 self.camera_shake = 0
-
-         # Update bomb animations - clean up inactive ones
-        if hasattr(self, 'bomb_animations'):
-            self.bomb_animations = {
-                bomb_id: anim for bomb_id, anim in self.bomb_animations.items()
-                if anim.get('active', False) and current_time - anim['start_time'] < anim.get('duration', 1.0)
-            }
-
+            
     # ENHANCED DRAWING METHODS WITH SAFE COLOR HANDLING
     def draw_enhanced_map(self):
         """Draw the complete enhanced map with all animations and real-time effects"""
         # Apply enhanced camera shake
         shake_x = int(random.random() * self.camera_shake * 12) if self.camera_shake > 0 else 0
         shake_y = int(random.random() * self.camera_shake * 12) if self.camera_shake > 0 else 0
-
+    
         self.map_surface.fill(safe_get_color('BACKGROUND', 'map_background'))
-
+    
         # Update timing and animations
         self.time += 1 / FPS
         self.backend_time += self.timer_update_frequency
         self.update_all_animations()
-
-        # Draw enhanced tiles with shake offset (same as CN version)
+    
+        # Draw enhanced tiles with shake offset
         for x in range(MAP_SIZE):
             for y in range(MAP_SIZE):
                 pixel_x = y * TILE_SIZE + shake_x
                 pixel_y = (MAP_SIZE - 1 - x) * TILE_SIZE + shake_y
-
+    
                 tile_type = self.current_game_state.tiles[x][y]
                 powerup = self.current_game_state.powerups[x][y]
                 has_powerup = powerup != "none"
-
+    
                 # Draw enhanced floor
                 if tile_type != 2:
                     self.draw_enhanced_floor(self.map_surface, pixel_x, pixel_y)
-
+    
                 # Draw enhanced objects
-                # ADDED: tile_type == 0
                 if tile_type == 0 and has_powerup:  # Free floor with powerup
                     self.draw_standalone_powerup(self.map_surface, pixel_x, pixel_y, powerup)
                 elif tile_type == 1:  # BREAKABLE
@@ -1224,33 +1232,76 @@ class GNGameVisualizer:
                     self.draw_enhanced_brick_wall(self.map_surface, pixel_x, pixel_y)
                 elif tile_type == 3:  # STRONG
                     self.draw_enhanced_metal_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
-
+    
                 # Enhanced selection highlight
                 if self.selected_tile == (x, y):
                     self.draw_enhanced_selection_highlight(self.map_surface, pixel_x, pixel_y)
-
+    
         # Draw enhanced bombs
         for pos, bomb in self.current_game_state.bombs.items():
             pixel_x = bomb.y * TILE_SIZE + shake_x
             pixel_y = (MAP_SIZE - 1 - bomb.x) * TILE_SIZE + shake_y
             self.draw_enhanced_bomb_with_fsm_state(self.map_surface, pixel_x, pixel_y, bomb)
-
+    
         # Draw enhanced players
         for player_id, player in self.current_game_state.players.items():
             pixel_x = player.y * TILE_SIZE + shake_x
             pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
             self.draw_enhanced_player_with_complete_effects(self.map_surface, pixel_x, pixel_y, player)
-
-        # Draw all enhanced explosions
-        for explosion in self.explosion_animations:
-            self.draw_enhanced_explosion_effect(self.map_surface, explosion)
-
-        # Draw all enhanced game effects
-        self.draw_all_enhanced_game_effects(self.map_surface)
-
+    
+        # Draw explosions directly from map state (FIXED)
+        self.draw_map_explosions(self.map_surface, shake_x, shake_y)
+    
         # Blit map to virtual surface
-        self.virtual_surface.blit(self.map_surface, (MAP_OFFSET_X, MAP_OFFSET_Y))
+    self.virtual_surface.blit(self.map_surface, (MAP_OFFSET_X, MAP_OFFSET_Y))
 
+    def draw_map_explosions(self, surface, shake_x=0, shake_y=0):
+        """Draw explosions directly from current map state"""
+        for explosion in self.current_game_state.explosions:
+            center_x = explosion.y * TILE_SIZE + TILE_SIZE // 2 + shake_x
+            center_y = (MAP_SIZE - 1 - explosion.x) * TILE_SIZE + TILE_SIZE // 2 + shake_y
+            
+            # Animated explosion with pulsing effect
+            pulse = 0.7 + 0.3 * math.sin(self.time * 12)
+            base_size = 30
+            explosion_size = int(base_size * explosion.intensity * pulse)
+            
+            if explosion_size > 0:
+                # Multi-layer explosion effect
+                explosion_middle = safe_get_color('EXPLOSION_MIDDLE', 'map_explosion')
+                explosion_core = safe_get_color('EXPLOSION_CORE', 'explosion_center')
+                explosion_outer = safe_get_color('EXPLOSION_OUTER', 'explosion_outer')
+                
+                # Outer glow layer
+                outer_size = int(explosion_size * 1.5)
+                if outer_size > 0:
+                    glow_surf = pygame.Surface((outer_size * 2, outer_size * 2), pygame.SRCALPHA)
+                    glow_rgba = create_rgba_color(explosion_outer, 60, 'explosion_glow')
+                    safe_pygame_draw_circle(glow_surf, glow_rgba, 
+                                     (outer_size, outer_size), outer_size, context="explosion_glow")
+                    surface.blit(glow_surf, (center_x - outer_size, center_y - outer_size))
+                
+                # Main explosion layer
+                safe_pygame_draw_circle(surface, explosion_middle, 
+                                 (center_x, center_y), explosion_size, context="map_explosion")
+                
+                # Bright center
+                center_size = max(1, explosion_size // 2)
+                safe_pygame_draw_circle(surface, explosion_core, 
+                                 (center_x, center_y), center_size, context="explosion_center")
+                
+                # Sparks around explosion
+                for i in range(8):
+                    if random.random() < 0.7:  # 70% chance for each spark
+                        angle = i * 45 + random.randint(-20, 20)
+                        distance = explosion_size + random.randint(5, 15)
+                        spark_x = center_x + int(distance * math.cos(math.radians(angle)))
+                        spark_y = center_y + int(distance * math.sin(math.radians(angle)))
+                        spark_size = random.randint(2, 4)
+                        spark_color = safe_get_color('EXPLOSION_SPARK', 'explosion_spark')
+                        safe_pygame_draw_circle(surface, spark_color, 
+                                         (spark_x, spark_y), spark_size, context="explosion_spark")
+    
     def draw_enhanced_floor(self, surface, x, y):
         """Enhanced floor tile with realistic texture"""
         rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
@@ -1664,34 +1715,11 @@ class GNGameVisualizer:
         surface.blit(highlight_surf, (x, y))
 
     def draw_enhanced_bomb_with_fsm_state(self, surface, x, y, bomb_data: BombState):
-        """Draw enhanced bomb with FSM state visualization"""
-        bomb_id = (bomb_data.x, bomb_data.y)
-        actual_x, actual_y = x, y
+        """Draw enhanced bomb with FSM state visualization - simplified for GN"""
+        center_x = x + TILE_SIZE // 2
+        center_y = y + TILE_SIZE // 2
     
-        # Check for movement animation - but only if bomb_animations exists and has entries
-        if (hasattr(self, 'bomb_animations') and 
-            bomb_id in self.bomb_animations and 
-            self.bomb_animations[bomb_id].get('active', False)):
-            
-            anim = self.bomb_animations[bomb_id]
-            if anim.get('confirmed', False) and anim.get('type') == 'moving':
-                elapsed = self.time - anim['start_time']
-                progress = min(elapsed / anim['duration'], 1.0)
-    
-                start_x, start_y = anim['start_pos']
-                end_x, end_y = anim['end_pos']
-                
-                eased_progress = self.ease_out_quad(progress)
-                current_x = start_x + (end_x - start_x) * eased_progress
-                current_y = start_y + (end_y - start_y) * eased_progress
-    
-                actual_x = current_y * TILE_SIZE
-                actual_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
-    
-        center_x = actual_x + TILE_SIZE // 2
-        center_y = actual_y + TILE_SIZE // 2
-    
-        # FSM state-based visual effects
+        # FSM state-based visual effects (no animation complexity)
         if bomb_data.status == 'frozen':
             self.draw_frozen_bomb(surface, center_x, center_y, bomb_data)
         elif bomb_data.status == 'remote_idle':
@@ -1700,6 +1728,7 @@ class GNGameVisualizer:
             self.draw_ignited_bomb(surface, center_x, center_y, bomb_data)
         else:
             self.draw_standard_bomb(surface, center_x, center_y, bomb_data)
+
 
     def draw_frozen_bomb(self, surface, center_x, center_y, bomb_data):
         """Draw bomb in frozen state"""
