@@ -941,12 +941,12 @@ detect_movement_start(PreviousRecord, NewRecord) ->
     % Get previous movement timer (0 if no previous record)
     PreviousMovementTimer = case PreviousRecord of
         undefined -> 0;
-        #mnesia_players{movement_timer = PrevTimer} -> PrevTimer
+        #mnesia_players{movement_timer = PrevMovementTimer} -> PrevMovementTimer
     end,
     
     % Detect movement start: timer goes from 0 to positive value
-    case {PreviousMovementTimer, MovementTimer} of
-        {0, Timer} when Timer > 0, Movement =:= true, Direction =/= none ->
+    if
+        PreviousMovementTimer =:= 0, MovementTimer > 0, Movement =:= true, Direction =/= none ->
             % Movement just started! Use the timer value as total duration
             TotalDuration = MovementTimer,  % This IS the total duration
             Destination = calculate_destination([X, Y], Direction),
@@ -958,18 +958,18 @@ detect_movement_start(PreviousRecord, NewRecord) ->
                 direction => Direction,
                 speed => Speed,
                 movement_timer => MovementTimer,
-                total_duration => TotalDuration,  % Timer value is the duration
+                total_duration => TotalDuration,
                 immunity_timer => ImmunityTimer,
                 request_timer => RequestTimer,
                 movement_confirmed => true
             },
             {movement_started, PlayerData};
         
-        {PrevTimer, Timer} when PrevTimer > 0, Timer > 0 ->
+        PreviousMovementTimer > 0, MovementTimer > 0 ->
             % Movement ongoing - send timer update
             TimerData = #{
                 player_id => PlayerNum,
-                movement_timer => Timer,
+                movement_timer => MovementTimer,
                 immunity_timer => ImmunityTimer,
                 request_timer => RequestTimer,
                 position => [X, Y],
@@ -977,7 +977,7 @@ detect_movement_start(PreviousRecord, NewRecord) ->
             },
             {timer_update, TimerData};
         
-        _ ->
+        true ->
             no_movement_change
     end.
 
