@@ -13,7 +13,8 @@
 -record(powerup_state, {
     position, % position - [X,Y]
     type, % type of power up - can be movement speed, extra bombs etc..
-    original_node_ID % original creating node ID - TODO: unsure of necessity
+    gn_pid, % original creating node ID - TODO: unsure of necessity
+    pid % this process's PID
 }).
 
 -record(tile_state, {

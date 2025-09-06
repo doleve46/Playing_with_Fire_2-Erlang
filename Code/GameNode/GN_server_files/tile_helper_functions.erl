@@ -11,7 +11,7 @@
 -author("dolev").
 
 %% * it might also include a bomb requesting movement later on
--export([break_tile/2, update_to_one_hit/2]).
+-export([break_tile/2, update_to_one_hit/2, create_item/3, store_powerup_in_mnesia/4]).
 
 
 -import(gn_server, [get_registered_name/1]).
@@ -70,3 +70,41 @@ update_to_one_hit(Position, TableName) ->
         R -> R
     end,
     ReturnVal.
+
+create_item([X,Y] = Coord, ItemType, PowerupTable) ->
+    %% Create the powerup process, store it in the mnesia table
+    case powerup:start_link(X, Y, ItemType) of
+        {ok, Pid} ->
+            io:format("** Created item of type ~p at ~p with PID ~p~n", [ItemType, Coord, Pid]),
+            store_powerup_in_mnesia(Coord, ItemType, PowerupTable, Pid),
+            {ok, Pid};
+        {error, Reason} ->
+            io:format("** ERROR: Failed to create item of type ~p at ~p. Reason: ~p~n", [ItemType, Coord, Reason]),
+            {error, Reason}
+    end.
+
+
+store_powerup_in_mnesia(Coord, ItemType, PowerupTable, Pid) ->
+    Powerup_Record = #mnesia_powerups{
+        position = Coord,
+        type = ItemType,
+        gn_pid = self(),
+        pid = Pid
+    },
+    Fun = fun() ->
+        case mnesia:write(PowerupTable, Powerup_Record, write) of
+            ok ->
+                io:format("** Stored powerup of type ~p at ~p in Mnesia table ~p~n", [ItemType, Coord, PowerupTable]),
+                ok;
+            {error, Reason} ->
+                io:format("** ERROR: Failed to store powerup of type ~p at ~p in Mnesia table ~p. Reason: ~p~n", [ItemType, Coord, PowerupTable, Reason]),
+                {error, Reason};
+            Anythingelse ->
+                io:format("** ERROR: Unexpected result when storing powerup of type ~p at coordinates~p in Mnesia table ~p. Return value: ~p~n", [ItemType, Coord, PowerupTable, Anythingelse]),
+                {error, unexpected_result}
+        end
+    end,
+    case mnesia:activity(transaction, Fun) of
+        {atomic, R} -> R;
+        R -> R
+    end.

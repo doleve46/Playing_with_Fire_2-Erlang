@@ -364,7 +364,20 @@ handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
     %% Update player's active bombs count, let playerFSM know.
     notify_owner_of_bomb_explosion(Record#mnesia_bombs.owner, State),
     {noreply, State};
-        
+
+%% * handle item creation request - from blown-up tiles
+handle_info({create_item, Coord, ItemType}, State = #gn_state{}) ->
+    %% Handle item creation logic here
+    io:format("**GN SERVER: Received request to create item at coordinate ~p. Item type: ~p~n", [Coord, ItemType]),
+    case tile_helper_functions:create_item(Coord, ItemType, State#gn_state.powerups_table_name) of
+        {ok, Pid} ->
+            io:format("**GN SERVER: Successfully created item of type ~p at ~p with PID ~p~n", [ItemType, Coord, Pid]),
+            ok;
+        {error, Reason} ->
+            io:format("**GN SERVER ERROR: Failed to create item at ~p. Reason: ~p~n", [Coord, Reason])
+    end,
+    {noreply, State};
+
 %% * Handle start-of-game message from CN - pass it to player_fsm to "unlock" it
 handle_info(start_game, State) ->
     PlayerNumber = req_player_move:node_name_to_number(node()),
