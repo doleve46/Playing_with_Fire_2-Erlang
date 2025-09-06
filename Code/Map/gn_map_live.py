@@ -792,7 +792,7 @@ class GNGameVisualizer:
         }
 
     def handle_timer_update(self, timer_data: dict):
-         """Handle real-time timer updates from backend"""
+        """Handle real-time timer updates from backend"""
         entity_type = timer_data.get('entity_type', 'unknown')
         
         if entity_type == 'player':

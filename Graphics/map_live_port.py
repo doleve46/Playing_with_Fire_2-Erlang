@@ -613,42 +613,42 @@ class EnhancedSocketGameVisualizer:
             self.handle_bomb_movement_confirmation(entity_data)
 
     def handle_player_movement_confirmation(self, player_data: dict):
-    """Handle player movement with immediate start"""
-    player_id = int(player_data.get('player_id', 0))
-    from_pos = player_data.get('from_pos', [0, 0])
-    to_pos = player_data.get('to_pos', [0, 0])
-    direction = player_data.get('direction', 'north')
-    speed = int(player_data.get('speed', 1))
-    movement_timer = int(player_data.get('movement_timer', 0))
-    total_duration = int(player_data.get('total_duration', 0))
-    immunity_timer = int(player_data.get('immunity_timer', 0))
-    request_timer = int(player_data.get('request_timer', 0))
+        """Handle player movement with immediate start"""
+        player_id = int(player_data.get('player_id', 0))
+        from_pos = player_data.get('from_pos', [0, 0])
+        to_pos = player_data.get('to_pos', [0, 0])
+        direction = player_data.get('direction', 'north')
+        speed = int(player_data.get('speed', 1))
+        movement_timer = int(player_data.get('movement_timer', 0))
+        total_duration = int(player_data.get('total_duration', 0))
+        immunity_timer = int(player_data.get('immunity_timer', 0))
+        request_timer = int(player_data.get('request_timer', 0))
 
-    if total_duration <= 0:
-        base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
-        ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
-        total_duration = base_duration - (speed - 1) * ms_reduction
+        if total_duration <= 0:
+            base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
+            ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
+            total_duration = base_duration - (speed - 1) * ms_reduction
 
-    actual_duration = total_duration / 1000.0
+        actual_duration = total_duration / 1000.0
 
-    # Start animation immediately
-    self.player_animations[player_id] = {
-        'type': 'confirmed_walking',
-        'start_pos': from_pos,
-        'end_pos': to_pos,
-        'direction': direction,
-        'start_time': self.time,
-        'duration': actual_duration,
-        'speed': speed,
-        'movement_timer': movement_timer,
-        'total_duration': total_duration,
-        'confirmed': True,
-        'active': True
-    }
+        # Start animation immediately
+        self.player_animations[player_id] = {
+            'type': 'confirmed_walking',
+            'start_pos': from_pos,
+            'end_pos': to_pos,
+            'direction': direction,
+            'start_time': self.time,
+            'duration': actual_duration,
+            'speed': speed,
+            'movement_timer': movement_timer,
+            'total_duration': total_duration,
+            'confirmed': True,
+            'active': True
+        }
 
-    self.movement_timers[player_id] = movement_timer
-    self.immunity_timers[player_id] = immunity_timer
-    self.request_timers[player_id] = request_timer
+        self.movement_timers[player_id] = movement_timer
+        self.immunity_timers[player_id] = immunity_timer
+        self.request_timers[player_id] = request_timer
 
 
     def handle_bomb_movement_confirmation(self, bomb_data: dict):
