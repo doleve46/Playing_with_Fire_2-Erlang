@@ -969,7 +969,7 @@ class EnhancedSocketGameVisualizer:
                     
                     # Calculate duration from movement timer
                     duration_ms = new_player.timers.movement_timer
-                    actual_duration = duration_ms / 1000.0
+                    actual_duration = duration_ms / 1500.0  # Make animation slightly faster for better visual feel
                     
                     # Create time-based animation
                     self.player_animations[player_id] = {
@@ -993,9 +993,9 @@ class EnhancedSocketGameVisualizer:
 
     def calculate_destination_from_direction(self, x: int, y: int, direction: str) -> tuple:
         """Calculate destination coordinates based on current position and direction"""
-        if direction == 'up':
+        if direction == 'down':
             return (x - 1, y)
-        elif direction == 'down':
+        elif direction == 'up':
             return (x + 1, y)
         elif direction == 'right':
             return (x, y + 1)
