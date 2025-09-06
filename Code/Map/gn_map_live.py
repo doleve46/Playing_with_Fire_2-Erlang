@@ -1054,20 +1054,20 @@ class GNGameVisualizer:
                     )
 
     def create_bomb_placement_animation(self, x: int, y: int, bomb_data: BombState):
-    """Create bomb placement animation"""
-    self.bomb_animations[(x, y)] = {
-        'type': 'placement',
-        'timer': bomb_data.timer,
-        'max_timer': bomb_data.timer,
-        'owner': bomb_data.owner,
-        'radius': bomb_data.radius,
-        'bomb_type': bomb_data.bomb_type,
-        'status': bomb_data.status,
-        'ignited': bomb_data.ignited,
-        'start_time': self.time,
-        'pulse_phase': 0,
-        'active': True
-    }
+        """Create bomb placement animation"""
+        self.bomb_animations[(x, y)] = {
+            'type': 'placement',
+            'timer': bomb_data.timer,
+            'max_timer': bomb_data.timer,
+            'owner': bomb_data.owner,
+            'radius': bomb_data.radius,
+            'bomb_type': bomb_data.bomb_type,
+            'status': bomb_data.status,
+            'ignited': bomb_data.ignited,
+            'start_time': self.time,
+            'pulse_phase': 0,
+            'active': True
+        }
     
     def create_walking_animation(self, player_id: int, old_pos: tuple, new_pos: tuple, 
                                direction: str, speed: int, timers: PlayerTimers):
