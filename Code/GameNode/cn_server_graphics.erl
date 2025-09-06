@@ -1271,9 +1271,11 @@ update_map_with_tile(Map, TileRecord) ->
         Map
     end.
 
-update_cell_tile({_, Powerup, Bomb, Player, Explosion, Special}, TileType, Contains) ->
-    ActualPowerup = if Contains =/= none -> Contains; true -> Powerup end,
-    {TileType, ActualPowerup, Bomb, Player, Explosion, Special}.
+update_cell_tile({_, Powerup, Bomb, Player, Explosion, Special}, TileType, _Contains) ->
+    %% Don't display the tile's 'contains' field as a powerup unless the tile is broken
+    %% Powerups should only be shown when they exist as actual powerup entities
+    %% The 'contains' field is just potential powerup content, not active powerups
+    {TileType, Powerup, Bomb, Player, Explosion, Special}.
 
 replace_list_element(List, Pos, NewElement) ->
     {Before, [_|After]} = lists:split(Pos - 1, List),
