@@ -348,6 +348,7 @@ update_player_direction(PlayerNum, Table, NewValue) ->
 %% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
 %% Version with direction parameter for cross-GN movements
 handle_player_movement_clearance(PlayerNum, Answer, Direction, Table_name) ->
+    io:format("DEBUG: handle_player_movement_clearance/4 called with PlayerNum=~p, Answer=~p, Direction=~p~n", [PlayerNum, Answer, Direction]),
     %% both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first,
     %% Then the database update occurs (different for both)
     Player_record = read_player_from_table(PlayerNum, Table_name),
@@ -381,6 +382,7 @@ handle_player_movement_clearance(PlayerNum, Answer, Direction, Table_name) ->
 %% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
 %% Legacy version without direction (for backward compatibility)
 handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
+    io:format("DEBUG: handle_player_movement_clearance/3 called with PlayerNum=~p, Answer=~p (NO DIRECTION)~n", [PlayerNum, Answer]),
     %% both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first,
     %% Then the database update occurs (different for both)
     Player_record = read_player_from_table(PlayerNum, Table_name),
