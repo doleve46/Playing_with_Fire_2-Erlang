@@ -39,7 +39,12 @@
 start_link(Pos_x, Pos_y, Type) ->
     Name = list_to_atom("powerup_" ++ integer_to_list(Pos_x) ++ "_" ++ integer_to_list(Pos_y)),
     % registers *locally* as atom called 'tile_X_Y' (X,Y - numbers indicating location)
-    gen_server:start_link({local, Name}, ?MODULE, [[Pos_x, Pos_y], Type, self()], []).
+    % Get the registered name of the calling GN server instead of its PID
+    GN_Name = case gn_server:get_registered_name(self()) of
+        undefined -> self(); % Fallback to PID if name not found
+        Name -> Name
+    end,
+    gen_server:start_link({local, Name}, ?MODULE, [[Pos_x, Pos_y], Type, GN_Name], []).
 
 
 pickup(Pid) ->

@@ -66,12 +66,12 @@
 %%%===================================================================
 
 %% @doc Spawns the player FSM with appropriate I/O handler
--spec start_link(PlayerNumber::integer(), GN_Pid::pid(), IsBot::boolean(), IO_pid::pid()) ->
+-spec start_link(PlayerNumber::integer(), GN_Name::atom(), IsBot::boolean(), IO_pid::pid()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link(PlayerNumber, GN_Pid, IsBot, IO_pid) ->
+start_link(PlayerNumber, GN_Name, IsBot, IO_pid) ->
     % Spawn player FSM
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
-    gen_statem:start_link({global, ServerName}, ?MODULE, [PlayerNumber, GN_Pid, IsBot, IO_pid], []).
+    gen_statem:start_link({global, ServerName}, ?MODULE, [PlayerNumber, GN_Name, IsBot, IO_pid], []).
 
 %% @doc Start the game for the player
 start_signal(PlayerPid) ->
@@ -115,20 +115,12 @@ notify_power_up(PlayerPid, PowerUp) -> % content should be {movespeed, X} | {bom
 callback_mode() ->
     state_functions.
 
-init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
-    % Get GN name - handle both local and global registration
-    GN_registered_name = case process_info(GN_Pid, registered_name) of
-        {registered_name, LocalName} -> 
-            LocalName;  % locally registered
-        [] -> 
-            % Not locally registered, check if it's globally registered
-            % For GN servers, construct the expected global name
-            list_to_atom("GN" ++ integer_to_list(PlayerNumber) ++ "_server")
-    end,
+init([PlayerNumber, GN_Name, IsBot, IOHandlerPid]) ->
+    % GN_Name is already the registered name, no conversion needed
     Data = #player_data{
         player_number = PlayerNumber,
-        local_gn = GN_registered_name,
-        target_gn = GN_registered_name, % starting at own GN's quarter
+        local_gn = GN_Name,
+        target_gn = GN_Name, % starting at own GN's quarter
         bot = IsBot,
         io_handler_pid = IOHandlerPid
     },

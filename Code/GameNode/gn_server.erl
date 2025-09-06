@@ -197,36 +197,16 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     %% move is possible. Update data, open halfway timer, respond to player FSM
                     req_player_move:insert_player_movement(PlayerNum, State#gn_state.players_table_name),
                     %% respond to the player FSM via CN->hosting GN
-                    %% Convert PID to registered name for CN forwarding system
-                    LocalGNName = case is_pid(Player#mnesia_players.local_gn) of
-                        true -> 
-                            case get_registered_name(Player#mnesia_players.local_gn) of
-                                undefined -> 
-                                    io:format("ERROR: Could not find registered name for PID ~p~n", [Player#mnesia_players.local_gn]),
-                                    erlang:error(pid_to_name_conversion_failed, [Player#mnesia_players.local_gn]);
-                                Name -> Name
-                            end;
-                        false -> Player#mnesia_players.local_gn  % Already a name
-                    end,
+                    %% local_gn now contains the registered name, no conversion needed
                     gn_server:cast_message(cn_server,
-                        {forward_request, LocalGNName, 
+                        {forward_request, Player#mnesia_players.local_gn, 
                             {gn_answer, {move_result, player, PlayerNum, accepted}}
                         });
                 cant_move -> % can't move, obstacle blocking
                     req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
-                    %% Convert PID to registered name for CN forwarding system
-                    LocalGNName = case is_pid(Player#mnesia_players.local_gn) of
-                        true -> 
-                            case get_registered_name(Player#mnesia_players.local_gn) of
-                                undefined -> 
-                                    io:format("ERROR: Could not find registered name for PID ~p~n", [Player#mnesia_players.local_gn]),
-                                    erlang:error(pid_to_name_conversion_failed, [Player#mnesia_players.local_gn]);
-                                Name -> Name
-                            end;
-                        false -> Player#mnesia_players.local_gn  % Already a name
-                    end,
+                    %% local_gn now contains the registered name, no conversion needed
                     gn_server:cast_message(cn_server,
-                        {forward_request, LocalGNName, 
+                        {forward_request, Player#mnesia_players.local_gn, 
                             {gn_answer, {move_result, player, PlayerNum, denied}}
                         });
                 dest_not_here -> % destination coordinate is overseen by another GN
@@ -447,18 +427,30 @@ code_change(_OldVsn, State = #gn_state{}, _Extra) ->
 
 %% @doc returns the registered name of a Pid
 get_registered_name(Pid) ->
-    case process_info(Pid, registered_name) of
-        {registered_name, Name} -> Name;
-        [] ->
-            % Process is not locally registered, check global registry
-            case global:registered_names() of
-                Names ->
-                    case lists:keyfind(Pid, 2, [{Name, global:whereis_name(Name)} || Name <- Names]) of
-                        {Name, Pid} -> Name;
-                        false -> undefined
-                    end
+    % Check if PID is local to this node
+    case node(Pid) == node() of
+        true ->
+            % Local PID - can use process_info
+            case process_info(Pid, registered_name) of
+                {registered_name, Name} -> Name;
+                [] ->
+                    % Process is not locally registered, check global registry
+                    check_global_registry(Pid);
+                undefined -> undefined
             end;
-        undefined -> undefined
+        false ->
+            % Remote PID - can't use process_info, go directly to global registry
+            check_global_registry(Pid)
+    end.
+
+%% @doc Helper function to check global registry for a PID
+check_global_registry(Pid) ->
+    case global:registered_names() of
+        Names ->
+            case lists:keyfind(Pid, 2, [{Name, global:whereis_name(Name)} || Name <- Names]) of
+                {Name, Pid} -> Name;
+                false -> undefined
+            end
     end.
 
 %% @doc helper function to create mnesia table names
@@ -495,11 +487,13 @@ initialize_players(TableName, PlayerIsBot, GN_number) ->
     %% Initialize player_fsm process based on data within mnesia table (as initialized whe map was created)
     Fun = fun() ->
         [PlayerRecord = #mnesia_players{}] = mnesia:read(TableName, GN_number),
-        {ok, FSM_pid} = player_fsm:start_link(GN_number, self(), PlayerIsBot, IO_pid),
+        %% Get the registered name of this GN server instead of using PID
+        CurrentGNName = get_registered_name(self()),
+        {ok, FSM_pid} = player_fsm:start_link(GN_number, CurrentGNName, PlayerIsBot, IO_pid),
         %% Update mnesia record
         UpdatedRecord = PlayerRecord#mnesia_players{
-            local_gn = self(),
-            target_gn = self(), % by default starts at his own GN's quarter
+            local_gn = CurrentGNName,
+            target_gn = CurrentGNName, % by default starts at his own GN's quarter
             io_handler_pid = IO_pid,
             pid = FSM_pid,
             bot = PlayerIsBot},
