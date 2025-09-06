@@ -134,6 +134,7 @@ handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
 check_for_obstacles(Coordinate, BuffsList, Initiator_Direction, State = #gn_state{}) -> 
     %% ? Fetch every entity in that coordinate using QLC
     Entities_at_coord = get_records_at_location(Coordinate, State),
+    io:format("DEBUG: Entities at coordinate ~p: ~p~n", [Coordinate, Entities_at_coord]),
     %% ? Deal with possible interactions - returns can_move/cant_move
     interact_with_entity(Entities_at_coord, BuffsList, Initiator_Direction, State).
 
