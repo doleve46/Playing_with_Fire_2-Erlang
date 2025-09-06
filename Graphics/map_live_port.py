@@ -142,6 +142,54 @@ COLORS = {
     'TIMER_BAR_DANGER': (255, 100, 100),
 }
 
+# Color and drawing helper functions
+def safe_get_color(color_name, context="unknown"):
+    """Safely get color from COLORS dictionary with validation"""
+    if color_name not in COLORS:
+        print(f"WARNING: Color '{color_name}' not found in COLORS dictionary in {context}")
+        return (255, 0, 255)  # Bright magenta as error indicator
+    
+    color = COLORS[color_name]
+    return validate_color(color, f"{context}:{color_name}")
+
+def validate_color(color, context="unknown"):
+    """Validate and clamp color values to proper RGB range"""
+    if not isinstance(color, (tuple, list)) or len(color) < 3:
+        print(f"WARNING: Invalid color format {color} in {context}")
+        return (255, 0, 255)  # Bright magenta as error indicator
+    
+    # Clamp RGB values to 0-255 range
+    clamped_color = tuple(max(0, min(255, int(c))) for c in color[:3])
+    
+    # Handle alpha channel if present
+    if len(color) > 3:
+        alpha = max(0, min(255, int(color[3])))
+        return clamped_color + (alpha,)
+    
+    return clamped_color
+
+def create_rgba_color(rgb_color, alpha, context="unknown"):
+    """Safely create RGBA color with alpha channel"""
+    validated_rgb = validate_color(rgb_color, context)
+    alpha_clamped = max(0, min(255, int(alpha)))
+    return (*validated_rgb, alpha_clamped)
+
+def safe_pygame_draw_circle(surface, color, center, radius, width=0, context="circle"):
+    """Safely draw circle with color validation"""
+    validated_color = validate_color(color, context)
+    radius = max(1, int(radius))  # Ensure positive radius
+    pygame.draw.circle(surface, validated_color, center, radius, width)
+
+def safe_pygame_draw_rect(surface, color, rect, width=0, context="rect"):
+    """Safely draw rectangle with color validation"""
+    validated_color = validate_color(color, context)
+    pygame.draw.rect(surface, validated_color, rect, width)
+
+def safe_pygame_draw_ellipse(surface, color, rect, width=0, context="ellipse"):
+    """Safely draw ellipse with color validation"""
+    validated_color = validate_color(color, context)
+    pygame.draw.ellipse(surface, validated_color, rect, width)
+
 # Enhanced Data Classes
 @dataclass
 class PlayerTimers:
