@@ -183,6 +183,7 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
 
 handle_cast({forwarded, Request}, State = #gn_state{}) ->
     %% * handles forwarded messages
+    io:format("DEBUG FORWARDED: Received forwarded message: ~p~n", [Request]),
     case Request of
         {move_request, player, PlayerNum, Direction} ->
             %% *  handles a move request of a player inside my quarter whose FSM is on another node
@@ -319,6 +320,7 @@ handle_cast({bomb_message, Message}, State = #gn_state{}) ->
 
 %% * this is a catch-all&ignore clause
 handle_cast(_Request, State = #gn_state{}) -> 
+    io:format("DEBUG CATCH-ALL: Unhandled cast message: ~p~n", [_Request]),
     {noreply, State}.
 
 %%% ============== Handle info ==============
