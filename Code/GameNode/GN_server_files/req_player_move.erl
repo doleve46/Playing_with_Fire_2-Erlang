@@ -70,7 +70,7 @@ read_and_update_coord(player, PlayerNum, Table) ->
                             direction = none
                         },
                         mnesia:write(Table, Updated_record, write),
-                        {switch_gn, Current_gn_name, Other_name} %% return value
+                        {switch_gn, Current_gn_name, Other_name, Updated_record} %% return value
                     end;
             [] -> not_found % should cause an error
         end

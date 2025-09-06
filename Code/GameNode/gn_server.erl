@@ -341,12 +341,12 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
             {retain_gn, Player_record} ->
                 req_player_move:check_entered_coord(Player_record, State); %% Player FSM is updated through here
 
-            {switch_gn, Current_GN, New_GN} ->
+            {switch_gn, Current_GN, New_GN, PlayerRecord} ->
                 %% transfer records to new GN
                 gn_server:cast_message(cn_server,
                     {transfer_records, player, PlayerNum, Current_GN, New_GN}),
                 %% Let player FSM know of the GN change
-                player_fsm:update_target_gn(PlayerNum, New_GN);
+                player_fsm:update_target_gn(PlayerRecord#mnesia_players.pid, New_GN);
 
             _ -> % ! got an error somewhere, crash the process. this is mostly for debugging as of now
                 erlang:error(failure_when_updating_record, [node(), PlayerNum])
