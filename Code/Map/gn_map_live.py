@@ -1201,7 +1201,10 @@ class GNGameVisualizer:
                     self.draw_enhanced_floor(self.map_surface, pixel_x, pixel_y)
 
                 # Draw enhanced objects
-                if tile_type == 1:  # BREAKABLE
+                # ADDED: tile_type == 0
+                if tile_type == 0 and has_powerup:  # Free floor with powerup
+                    self.draw_standalone_powerup(self.map_surface, pixel_x, pixel_y, powerup)
+                elif tile_type == 1:  # BREAKABLE
                     self.draw_enhanced_wooden_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
                 elif tile_type == 2:  # UNBREAKABLE
                     self.draw_enhanced_brick_wall(self.map_surface, pixel_x, pixel_y)
@@ -1429,7 +1432,58 @@ class GNGameVisualizer:
                 shine_rgba = create_rgba_color(metal_shine, shine_alpha, 'metal_shine_strip')
                 safe_pygame_draw_rect(shine_surf, shine_rgba, (0, 0, 3, TILE_SIZE - 8), context="metal_shine_rect")
                 surface.blit(shine_surf, (shine_x - 1, y + 4))
-
+    
+    # ADDED: draw power ups not in tile
+    def draw_standalone_powerup(self, surface, x, y, powerup_type):
+    """Draw standalone powerup on free floor tile"""
+    center_x = x + TILE_SIZE // 2
+    center_y = y + TILE_SIZE // 2
+    
+    # Powerup colors based on type
+    powerup_colors = {
+        'move_speed': safe_get_color('TEXT_CYAN', 'speed_powerup'),
+        'remote_ignition': safe_get_color('TEXT_ORANGE', 'remote_powerup'),
+        'repeat_bombs': safe_get_color('TEXT_GOLD', 'repeat_powerup'),
+        'kick_bomb': validate_color((255, 100, 255), 'kick_powerup'),
+        'phased': safe_get_color('TEXT_PURPLE', 'phased_powerup'),
+        'plus_bombs': safe_get_color('TEXT_GOLD', 'plus_bombs_powerup'),
+        'bigger_explosion': safe_get_color('TEXT_RED', 'bigger_explosion_powerup'),
+        'plus_life': safe_get_color('TEXT_GREEN', 'plus_life_powerup'),
+        'freeze_bomb': safe_get_color('FREEZE_COLOR', 'freeze_powerup')
+    }
+    
+    color = powerup_colors.get(powerup_type, safe_get_color('POWERUP_CORE', 'default_powerup'))
+    
+    # Animated pulsing
+    pulse = 0.8 + 0.2 * math.sin(self.time * 5)
+    glow_size = int(20 * pulse)
+    
+    # Multi-layered powerup display
+    for layer in range(3):
+        radius = glow_size - layer * 4
+        if radius > 0:
+            alpha = int(150 * pulse * (1 - layer * 0.3))
+            
+            if alpha > 0:
+                powerup_surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+                powerup_rgba = create_rgba_color(color, alpha, f'powerup_layer_{layer}')
+                safe_pygame_draw_circle(powerup_surf, powerup_rgba, 
+                                 (radius, radius), radius, context=f"powerup_{powerup_type}")
+                surface.blit(powerup_surf, (center_x - radius, center_y - radius))
+    
+    # Central core
+    core_size = max(1, int(8 * pulse))
+    safe_pygame_draw_circle(surface, color, (center_x, center_y), core_size, context=f"powerup_core_{powerup_type}")
+    
+    # Floating particles around powerup
+    for i in range(4):
+        angle = (self.time * 2 + i * 90) % 360
+        particle_x = center_x + int(15 * math.cos(math.radians(angle)))
+        particle_y = center_y + int(15 * math.sin(math.radians(angle))) + int(2 * math.sin(self.time * 4 + i))
+        
+        particle_size = max(1, int(3 * pulse))
+        safe_pygame_draw_circle(surface, color, (particle_x, particle_y), particle_size, context=f"powerup_particle_{i}")
+    
     def draw_enhanced_selection_highlight(self, surface, x, y):
         """Draw enhanced selection highlight with animation"""
         pulse = 0.7 + 0.3 * math.sin(self.time * 6)
