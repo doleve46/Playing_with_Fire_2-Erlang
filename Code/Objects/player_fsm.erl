@@ -608,7 +608,7 @@ handle_gn_response(Response, Data) ->
             {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
             io:format("[~2..0B:~2..0B:~2..0B]: Unexpected GN response command: ~p~n",
                 [Hour, Min, Sec, {_Unknown}]),
-            error_logger:info_msg("Unexpected input command in immunity_waiting_for_response state: ~p", [{_Unknown}]),
+            error_logger:info_msg("Unexpected input command in player FSM state: ~p", [{_Unknown}]),
             send_io_ack({error, unknown_response, {_Unknown}}, Data),
             {keep_state, Data}
     end.

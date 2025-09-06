@@ -200,14 +200,14 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     %% local_gn now contains the registered name, no conversion needed
                     gn_server:cast_message(cn_server,
                         {forward_request, Player#mnesia_players.local_gn, 
-                            {gn_answer, {move_result, player, PlayerNum, accepted}}
+                            {gn_answer, {move_result, player, PlayerNum, can_move}}
                         });
                 cant_move -> % can't move, obstacle blocking
                     req_player_move:update_player_direction(PlayerNum, State#gn_state.players_table_name, none),
                     %% local_gn now contains the registered name, no conversion needed
                     gn_server:cast_message(cn_server,
                         {forward_request, Player#mnesia_players.local_gn, 
-                            {gn_answer, {move_result, player, PlayerNum, denied}}
+                            {gn_answer, {move_result, player, PlayerNum, cant_move}}
                         });
                 dest_not_here -> % destination coordinate is overseen by another GN
                     gn_server:cast_message(cn_server,
