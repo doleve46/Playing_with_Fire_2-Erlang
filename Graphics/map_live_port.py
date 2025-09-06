@@ -615,8 +615,8 @@ class EnhancedSocketGameVisualizer:
     def handle_player_movement_confirmation(self, player_data: dict):
         """Handle player movement with immediate start"""
         player_id = int(player_data.get('player_id', 0))
-        from_pos = player_data.get('from_pos', [0, 0])
-        to_pos = player_data.get('to_pos', [0, 0])
+        from_pos = [int(p) for p in player_data.get('from_pos', [0, 0])]
+        to_pos = [int(p) for p in player_data.get('to_pos', [0, 0])]
         direction = player_data.get('direction', 'north')
         speed = int(player_data.get('speed', 1))
         movement_timer = int(player_data.get('movement_timer', 0))
@@ -632,6 +632,10 @@ class EnhancedSocketGameVisualizer:
         actual_duration = total_duration / 1000.0
 
         # Start animation immediately
+        try:
+            print(f"SOCKET ANIMATION: Player {player_id}, From {from_pos} to {to_pos}, Duration {actual_duration:.2f}s")
+        except BrokenPipeError:
+            pass
         self.player_animations[player_id] = {
             'type': 'confirmed_walking',
             'start_pos': from_pos,
@@ -964,11 +968,21 @@ class EnhancedSocketGameVisualizer:
                     dest_x, dest_y = self.calculate_destination_from_direction(
                         new_player.x, new_player.y, new_player.direction)
                     
-                    # Create simple animation
+                    # Calculate duration from movement timer
+                    duration_ms = new_player.timers.movement_timer
+                    actual_duration = duration_ms / 1000.0
+                    
+                    # Create time-based animation
+                    try:
+                        print(f"CREATING ANIMATION: Player {player_id}, From {new_player.x},{new_player.y} to {dest_x},{dest_y}, Duration {actual_duration:.2f}s")
+                    except BrokenPipeError:
+                        pass
                     self.player_animations[player_id] = {
                         'start_pos': (new_player.x, new_player.y),
                         'end_pos': (dest_x, dest_y),
-                        'initial_timer': new_player.timers.movement_timer,
+                        'start_time': self.time,
+                        'duration': actual_duration,
+                        'initial_timer': duration_ms,
                         'active': True
                     }
 
@@ -1050,7 +1064,7 @@ class EnhancedSocketGameVisualizer:
     
         # Use the actual movement timer value as the total duration
         total_duration_ms = timers.movement_timer  # This should be 1200ms by default
-        actual_duration = total_duration_ms / 1000.0  # Convert to seconds for time-based fallback
+        actual_duration = total_duration_ms / 1000.0  # Convert to seconds for time-based animation
     
         self.player_animations[player_id] = {
             'type': 'walking',
@@ -1373,7 +1387,7 @@ class EnhancedSocketGameVisualizer:
 
     # Animation Update System
     def update_all_animations(self):
-        """Update all animations - calculate progress based on movement timer"""
+        """Update all animations - calculate progress based on time for smooth animation"""
         for player_id in list(self.player_animations.keys()):
             try:
                 anim = self.player_animations[player_id]
@@ -1386,20 +1400,27 @@ class EnhancedSocketGameVisualizer:
                     del self.player_animations[player_id]
                     continue
                     
-                # Calculate progress from movement timer
-                current_timer = current_player.timers.movement_timer
-                initial_timer = anim['initial_timer']
-                
-                if initial_timer > 0:
-                    # Progress = how much time has elapsed / total time
-                    elapsed = initial_timer - current_timer
-                    progress = elapsed / initial_timer
+                # Calculate progress based on time elapsed
+                if 'start_time' in anim and 'duration' in anim:
+                    elapsed = self.time - anim['start_time']
+                    progress = elapsed / anim['duration']
                     anim['progress'] = max(0.0, min(1.0, progress))
+                elif 'initial_timer' in anim:
+                    # Fallback for timer-based animations
+                    current_timer = current_player.timers.movement_timer
+                    initial_timer = anim['initial_timer']
+                    
+                    if initial_timer > 0:
+                        elapsed = initial_timer - current_timer
+                        progress = elapsed / initial_timer
+                        anim['progress'] = max(0.0, min(1.0, progress))
+                    else:
+                        anim['progress'] = 1.0
                 else:
                     anim['progress'] = 1.0
                     
-                # Animation is done when timer reaches 0
-                if current_timer <= 0:
+                # Animation is done when progress >= 1.0 or timer reaches 0
+                if anim['progress'] >= 1.0 or (current_player.timers.movement_timer <= 0 and 'initial_timer' in anim):
                     del self.player_animations[player_id]
                     
             except Exception as e:
@@ -1483,7 +1504,10 @@ class EnhancedSocketGameVisualizer:
                 
                 # Debug - print animation state
                 if player_id == 1:  # Only for player 1 to avoid spam
-                    print(f"ANIMATION: Player {player_id}, Progress: {progress:.2f}, Animation: {anim}")
+                    try:
+                        print(f"ANIMATION: Player {player_id}, Progress: {progress:.2f}, Animation: {anim}")
+                    except BrokenPipeError:
+                        pass  # Ignore broken pipe errors
                 
                 # Calculate animated position
                 start_pos = anim.get('start_pos', (player.x, player.y))
@@ -1500,9 +1524,6 @@ class EnhancedSocketGameVisualizer:
                     # Convert to screen coordinates
                     pixel_x = current_y * TILE_SIZE + shake_x
                     pixel_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE + shake_y
-                    
-                    if player_id == 1:  # Debug position
-                        print(f"POSITION: Start: {start_pos}, End: {end_pos}, Current: ({current_x:.2f}, {current_y:.2f})")
                 else:
                     # Fallback to static position
                     pixel_x = player.y * TILE_SIZE + shake_x
