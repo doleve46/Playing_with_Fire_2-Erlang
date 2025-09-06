@@ -1391,7 +1391,7 @@ class EnhancedSocketGameVisualizer:
                     # remaining_ms = self.movement_timers.get(player_id, anim['movement_timer'])
                     # ADDED: Use elapsed time from when movement actually started
                     total_elapsed = anim.get('elapsed_time', 0) + (self.time - anim['start_time']) * 1000
-                    progress = 1.0 - (remaining_ms / anim['total_duration'])
+                    progress = total_elapsed / anim['total_duration']
                     anim['progress'] = min(1.0, max(0.0, progress))
                 else:
                     anim['progress'] = min(1.0, elapsed / anim['duration'])

@@ -349,8 +349,13 @@ handle_player_movement_clearance(PlayerNum, Answer, Direction, Table_name) ->
             player_fsm:gn_response(PlayerNum, {move_result, Answer}); 
         true ->
             %% Player FSM is on another machine, forward through CN->local GN
+            %% Convert PID to registered name for CN forwarding system
+            LocalGNName = case is_pid(Player_record#mnesia_players.local_gn) of
+                true -> gn_server:get_registered_name(Player_record#mnesia_players.local_gn);
+                false -> Player_record#mnesia_players.local_gn  % Already a name
+            end,
             gn_server:cast_message(cn_server,
-                {forward_request, Player_record#mnesia_players.local_gn,
+                {forward_request, LocalGNName,
                     {gn_answer, {move_result, player, PlayerNum, Answer}}
                 })
     end,
@@ -381,8 +386,13 @@ handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
             player_fsm:gn_response(PlayerNum, {move_result, Answer}); 
         true ->
             %% Player FSM is on another machine, forward through CN->local GN
+            %% Convert PID to registered name for CN forwarding system
+            LocalGNName = case is_pid(Player_record#mnesia_players.local_gn) of
+                true -> gn_server:get_registered_name(Player_record#mnesia_players.local_gn);
+                false -> Player_record#mnesia_players.local_gn  % Already a name
+            end,
             gn_server:cast_message(cn_server,
-                {forward_request, Player_record#mnesia_players.local_gn,
+                {forward_request, LocalGNName,
                     {gn_answer, {move_result, player, PlayerNum, Answer}}
                 })
     end,
