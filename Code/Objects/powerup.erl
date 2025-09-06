@@ -42,7 +42,7 @@ start_link(Pos_x, Pos_y, Type) ->
     % Get the registered name of the calling GN server instead of its PID
     GN_Name = case gn_server:get_registered_name(self()) of
         undefined -> self(); % Fallback to PID if name not found
-        Name -> Name
+        RegisteredName -> RegisteredName
     end,
     gen_server:start_link({local, Name}, ?MODULE, [[Pos_x, Pos_y], Type, GN_Name], []).
 
