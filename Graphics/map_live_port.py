@@ -961,8 +961,7 @@ class EnhancedSocketGameVisualizer:
                 old_player = old_players[player_id]
 
                 # SIMPLE ANIMATION TRIGGER: Movement timer is active
-                if (new_player.timers.movement_timer > 0 and new_player.movement and 
-                    new_player.direction != 'none' and player_id not in self.player_animations):
+                if new_player.timers.movement_timer > 0 and player_id not in self.player_animations:
                     
                     # Calculate destination from direction
                     dest_x, dest_y = self.calculate_destination_from_direction(
@@ -973,10 +972,6 @@ class EnhancedSocketGameVisualizer:
                     actual_duration = duration_ms / 1000.0
                     
                     # Create time-based animation
-                    try:
-                        print(f"CREATING ANIMATION: Player {player_id}, From {new_player.x},{new_player.y} to {dest_x},{dest_y}, Duration {actual_duration:.2f}s")
-                    except BrokenPipeError:
-                        pass
                     self.player_animations[player_id] = {
                         'start_pos': (new_player.x, new_player.y),
                         'end_pos': (dest_x, dest_y),
@@ -998,13 +993,13 @@ class EnhancedSocketGameVisualizer:
 
     def calculate_destination_from_direction(self, x: int, y: int, direction: str) -> tuple:
         """Calculate destination coordinates based on current position and direction"""
-        if direction == 'north':
+        if direction == 'up':
             return (x - 1, y)
-        elif direction == 'south':
+        elif direction == 'down':
             return (x + 1, y)
-        elif direction == 'east':
+        elif direction == 'right':
             return (x, y + 1)
-        elif direction == 'west':
+        elif direction == 'left':
             return (x, y - 1)
         else:
             return (x, y)  # No movement
@@ -1501,13 +1496,6 @@ class EnhancedSocketGameVisualizer:
             if player_id in self.player_animations:
                 anim = self.player_animations[player_id]
                 progress = anim.get('progress', 0.0)
-                
-                # Debug - print animation state
-                if player_id == 1:  # Only for player 1 to avoid spam
-                    try:
-                        print(f"ANIMATION: Player {player_id}, Progress: {progress:.2f}, Animation: {anim}")
-                    except BrokenPipeError:
-                        pass  # Ignore broken pipe errors
                 
                 # Calculate animated position
                 start_pos = anim.get('start_pos', (player.x, player.y))
