@@ -312,9 +312,10 @@ handle_info({mnesia_table_event, {write, _Table, Record, _ActivityId}}, State) -
     NewState = case Record of
         #mnesia_players{} ->
             PlayerID = Record#mnesia_players.player_number,
+            PreviousRecord = maps:get(PlayerID, State#state.last_known_players, undefined),    % ADDED
             NewLastKnown = maps:put(PlayerID, Record, State#state.last_known_players),
             
-            case detect_enhanced_player_movement_change(Record, State#state.current_map_state) of
+            case detect_movement_start(PreviousRecord, Record) of    % changed from detect_enhanced_player_movement_change(Record, State#state.current_map_state)
                 {movement_started, PlayerData} ->
                     send_movement_confirmation_to_socket(State, player, PlayerData),
                     State#state{last_known_players = NewLastKnown};
@@ -924,7 +925,8 @@ handle_enhanced_player_death(PlayerID, Table, State) ->
         last_known_players = NewLastKnown
     }.
 
-detect_enhanced_player_movement_change(NewRecord, _CurrentMapState) ->
+% ADDED: instead of detect_enhanced_player_movement_change
+detect_movement_start(PreviousRecord, NewRecord) ->
     #mnesia_players{
         player_number = PlayerNum,
         position = [X, Y],
@@ -935,14 +937,19 @@ detect_enhanced_player_movement_change(NewRecord, _CurrentMapState) ->
         immunity_timer = ImmunityTimer,
         request_timer = RequestTimer
     } = NewRecord,
-   
-    case Movement of
-        true when Direction =/= none ->    % changed from true when Direction =/= none, MovementTimer > 0 ->
-            TotalDuration = ?TILE_MOVE - (Speed - 1) * ?MS_REDUCTION,
+    
+    % Get previous movement timer (0 if no previous record)
+    PreviousMovementTimer = case PreviousRecord of
+        undefined -> 0;
+        #mnesia_players{movement_timer = PrevTimer} -> PrevTimer
+    end,
+    
+    % Detect movement start: timer goes from 0 to positive value
+    case {PreviousMovementTimer, MovementTimer} of
+        {0, Timer} when Timer > 0, Movement =:= true, Direction =/= none ->
+            % Movement just started! Use the timer value as total duration
+            TotalDuration = MovementTimer,  % This IS the total duration
             Destination = calculate_destination([X, Y], Direction),
-
-            % ADDED: calculate elapsed time if timer is already running
-            ElapsedTime = if MovementTimer > 0 -> TotalDuration - MovementTimer; true -> 0 end,
             
             PlayerData = #{
                 player_id => PlayerNum,
@@ -951,28 +958,78 @@ detect_enhanced_player_movement_change(NewRecord, _CurrentMapState) ->
                 direction => Direction,
                 speed => Speed,
                 movement_timer => MovementTimer,
-                total_duration => TotalDuration,
-                elapsed_time => ElapsedTime,  % ADD: elapsed time
+                total_duration => TotalDuration,  % Timer value is the duration
                 immunity_timer => ImmunityTimer,
                 request_timer => RequestTimer,
                 movement_confirmed => true
             },
             {movement_started, PlayerData};
+        
+        {PrevTimer, Timer} when PrevTimer > 0, Timer > 0 ->
+            % Movement ongoing - send timer update
+            TimerData = #{
+                player_id => PlayerNum,
+                movement_timer => Timer,
+                immunity_timer => ImmunityTimer,
+                request_timer => RequestTimer,
+                position => [X, Y],
+                speed => Speed
+            },
+            {timer_update, TimerData};
+        
         _ ->
-            if MovementTimer > 0 orelse ImmunityTimer > 0 orelse RequestTimer > 0 ->
-                TimerData = #{
-                    player_id => PlayerNum,
-                    movement_timer => MovementTimer,
-                    immunity_timer => ImmunityTimer,
-                    request_timer => RequestTimer,
-                    position => [X, Y],
-                    speed => Speed
-                },
-                {timer_update, TimerData};
-            true ->
-                no_movement_change
-            end
+            no_movement_change
     end.
+
+% detect_enhanced_player_movement_change(NewRecord, _CurrentMapState) ->
+%     #mnesia_players{
+%         player_number = PlayerNum,
+%         position = [X, Y],
+%         direction = Direction,
+%         movement = Movement,
+%         speed = Speed,
+%         movement_timer = MovementTimer,
+%         immunity_timer = ImmunityTimer,
+%         request_timer = RequestTimer
+%     } = NewRecord,
+   
+%     case Movement of
+%         true when Direction =/= none ->    % changed from true when Direction =/= none, MovementTimer > 0 ->
+%             TotalDuration = ?TILE_MOVE - (Speed - 1) * ?MS_REDUCTION,
+%             Destination = calculate_destination([X, Y], Direction),
+
+%             % ADDED: calculate elapsed time if timer is already running
+%             ElapsedTime = if MovementTimer > 0 -> TotalDuration - MovementTimer; true -> 0 end,
+            
+%             PlayerData = #{
+%                 player_id => PlayerNum,
+%                 from_pos => [X, Y],
+%                 to_pos => Destination,
+%                 direction => Direction,
+%                 speed => Speed,
+%                 movement_timer => MovementTimer,
+%                 total_duration => TotalDuration,
+%                 elapsed_time => ElapsedTime,  % ADD: elapsed time
+%                 immunity_timer => ImmunityTimer,
+%                 request_timer => RequestTimer,
+%                 movement_confirmed => true
+%             },
+%             {movement_started, PlayerData};
+%         _ ->
+%             if MovementTimer > 0 orelse ImmunityTimer > 0 orelse RequestTimer > 0 ->
+%                 TimerData = #{
+%                     player_id => PlayerNum,
+%                     movement_timer => MovementTimer,
+%                     immunity_timer => ImmunityTimer,
+%                     request_timer => RequestTimer,
+%                     position => [X, Y],
+%                     speed => Speed
+%                 },
+%                 {timer_update, TimerData};
+%             true ->
+%                 no_movement_change
+%             end
+%     end.
 
 detect_enhanced_bomb_movement_change(NewRecord, _CurrentMapState) ->
     #mnesia_bombs{
