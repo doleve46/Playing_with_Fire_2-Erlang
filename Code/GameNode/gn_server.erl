@@ -254,7 +254,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                 bomb_placed ->
                     %% bomb was placed successfully, added into mnesia table by helper function
                     %% Player is NOT physically no our machine - forward the response through cn server to local gn server
-                    gn_server:cast_message(cn_server, {forward_request, AskingGN, {bomb_result, accepted}});
+                    gn_server:cast_message(cn_server, {forward_request, AskingGN, {PlayerNum, bomb_result, accepted}});
                 Error ->
                     %% Notify player FSM of failed placement
                     %% Error logging for debugging
