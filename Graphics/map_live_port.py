@@ -969,7 +969,7 @@ class EnhancedSocketGameVisualizer:
                     
                     # Calculate duration from movement timer
                     duration_ms = new_player.timers.movement_timer
-                    actual_duration = duration_ms / 1500.0  # Make animation slightly faster for better visual feel
+                    actual_duration = duration_ms / 1800.0  # Make animation slightly faster for better visual feel
                     
                     # Create time-based animation
                     self.player_animations[player_id] = {
