@@ -1506,8 +1506,35 @@ class EnhancedSocketGameVisualizer:
 
         # Draw enhanced players with complete status effects
         for player_id, player in self.current_game_state.players.items():
-            pixel_x = player.y * TILE_SIZE + shake_x
-            pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
+            # Check if player has active animation
+            if player_id in self.player_animations:
+                anim = self.player_animations[player_id]
+                progress = anim.get('progress', 0.0)
+                
+                # Calculate animated position
+                start_pos = anim.get('start_pos', (player.x, player.y))
+                end_pos = anim.get('end_pos', (player.x, player.y))
+                
+                if len(start_pos) == 2 and len(end_pos) == 2:
+                    start_x, start_y = start_pos
+                    end_x, end_y = end_pos
+                    
+                    # Interpolate position
+                    current_x = start_x + (end_x - start_x) * progress
+                    current_y = start_y + (end_y - start_y) * progress
+                    
+                    # Convert to screen coordinates
+                    pixel_x = current_y * TILE_SIZE + shake_x
+                    pixel_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE + shake_y
+                else:
+                    # Fallback to static position
+                    pixel_x = player.y * TILE_SIZE + shake_x
+                    pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
+            else:
+                # No animation - use static position
+                pixel_x = player.y * TILE_SIZE + shake_x
+                pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
+            
             self.draw_enhanced_player_with_complete_effects(self.map_surface, pixel_x, pixel_y, player)
 
         # Draw all enhanced explosions
@@ -2107,39 +2134,8 @@ class EnhancedSocketGameVisualizer:
 
         # Handle walking animation with enhanced interpolation
         char_x, char_y = x, y
-        if player_id in self.player_animations:
-            try:
-                anim = self.player_animations[player_id]
-                progress = anim.get('progress', 0.0)
-
-                # Validate animation data
-                start_pos = anim.get('start_pos')
-                end_pos = anim.get('end_pos')
-                
-                if start_pos is None or end_pos is None or len(start_pos) != 2 or len(end_pos) != 2:
-                    # Remove invalid animation
-                    del self.player_animations[player_id]
-                else:
-                    # Use linear interpolation
-                    start_x, start_y = start_pos
-                    end_x, end_y = end_pos
-
-                    # Validate coordinates are numbers
-                    if not all(isinstance(coord, (int, float)) for coord in [start_x, start_y, end_x, end_y]):
-                        del self.player_animations[player_id]
-                    else:
-                        current_x = start_x + (end_x - start_x) * progress
-                        current_y = start_y + (end_y - start_y) * progress
-
-                        # Convert to screen coordinates (match static map drawing)
-                        char_x = current_y * TILE_SIZE
-                        char_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE
-                        center_x = char_x + TILE_SIZE // 2
-                        center_y = char_y + TILE_SIZE // 2
-            except Exception as e:
-                # Remove problematic animation
-                if player_id in self.player_animations:
-                    del self.player_animations[player_id]
+        center_x = char_x + TILE_SIZE // 2
+        center_y = char_y + TILE_SIZE // 2
 
         # Draw enhanced status effects
         self.draw_enhanced_status_effects(surface, center_x, center_y, player_id)
