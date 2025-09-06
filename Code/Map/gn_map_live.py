@@ -805,6 +805,10 @@ class GNGameVisualizer:
             self.immunity_timers[player_id] = immunity_timer
             self.request_timers[player_id] = request_timer
 
+    def ease_out_quad(self, t: float) -> float:
+        """Quadratic ease-out function for smooth animation transitions"""
+        return 1 - (1 - t) * (1 - t)
+
     def handle_fsm_update(self, fsm_data: dict):
         """Handle FSM state changes for bombs and players"""
         entity_type = fsm_data.get('entity_type', 'unknown')
