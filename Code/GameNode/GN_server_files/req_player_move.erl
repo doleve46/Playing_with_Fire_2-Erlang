@@ -50,9 +50,10 @@ read_and_update_coord(player, PlayerNum, Table) ->
                 io:format("DEBUG: read_and_update_coord - Player ~p direction: ~p, position: ~p~n", [PlayerNum, Player_record#mnesia_players.direction, Player_record#mnesia_players.position]),
                 case Player_record#mnesia_players.direction of
                     none ->
-                        %% Player direction is none - no movement needed, just return
-                        io:format("DEBUG: read_and_update_coord - Player ~p has direction 'none', skipping coordinate update~n", [PlayerNum]),
-                        ok;
+                        %% Player direction is none - no movement needed, but still return player record
+                        %% for check_entered_coord (powerup pickup, etc.) at current position
+                        io:format("DEBUG: read_and_update_coord - Player ~p has direction 'none', returning current record~n", [PlayerNum]),
+                        {retain_gn, Player_record};
                     Direction ->
                         [New_x, New_y] = calc_new_coordinates(Player_record#mnesia_players.position, Direction),
                         %% check if new coordinate fall within current managing GN
