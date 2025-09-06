@@ -38,6 +38,7 @@ break_tile(Position, TableName) ->
                     empty -> ok;
                     Item when Item =/= undefined, Item =/= empty ->
                         % Create item at the tile's position
+                        io:format("🎁 POWERUP DEBUG: Tile at ~p contains ~p - scheduling powerup creation~n", [Position, Item]),
                         erlang:send_after(1000, self(), {create_item, Position, Item})
                         %TODO: this should send a self-message with a 1second delay or so to the GN server to spawn this item
                 end,
@@ -56,13 +57,18 @@ break_tile(Position, TableName) ->
 
 
 update_to_one_hit(Position, TableName) ->
+    io:format("🔄 UPDATE DEBUG: Updating tile at ~p to one_hit in table ~p~n", [Position, TableName]),
     Fun = fun() ->
         case mnesia:read(TableName, Position, sticky_write) of
             [Tile = #mnesia_tiles{}] ->
+                io:format("🔄 UPDATE DEBUG: Found tile at ~p, current type: ~p, contains: ~p~n", [Position, Tile#mnesia_tiles.type, Tile#mnesia_tiles.contains]),
                 Updated_Tile = Tile#mnesia_tiles{type = one_hit},
                 mnesia:write(TableName, Updated_Tile, write),
+                io:format("🔄 UPDATE DEBUG: Successfully updated tile at ~p to one_hit~n", [Position]),
                 ok;
-            [] -> not_found
+            [] -> 
+                io:format("🔄 UPDATE DEBUG: ERROR - No tile found at ~p in table ~p~n", [Position, TableName]),
+                not_found
         end
     end,
     ReturnVal = case mnesia:activity(transaction, Fun) of
