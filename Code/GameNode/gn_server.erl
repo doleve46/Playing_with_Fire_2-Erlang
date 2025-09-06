@@ -279,7 +279,7 @@ handle_cast({move_request_out_of_bounds, EntityType, ActualRequest}, State) ->
             {PlayerNum, Destination_coord, Direction, BuffsList, AskingGN} = ActualRequest,
             %% checks destination coordinate for obstacles (if the move is possible),
             %% this should also "kickstart" any action caused by this attempted movement
-            Move_result = req_player_move:check_for_obstables(Destination_coord, BuffsList, Direction, State),
+            Move_result = req_player_move:check_for_obstacles(Destination_coord, BuffsList, Direction, State),
             gn_server:cast_message(cn_server,
                 {forward_request, AskingGN,
                     {movement_clearance, player, PlayerNum, Move_result}});
