@@ -1282,7 +1282,7 @@ add_tiles_from_table(Table, Map) ->
         mnesia:select(Table, [{#mnesia_tiles{_ = '_'}, [], ['$_']}])
     end,
    
-    case mnesia:activity(transaction, Fun) of
+    case mnesia:activity(sync_dirty, Fun) of
         TileRecords when is_list(TileRecords) ->
             lists:foldl(fun(TileRecord, AccMap) ->
                 update_map_with_tile(AccMap, TileRecord)
@@ -1327,7 +1327,7 @@ add_powerups_from_table(Table, Map) ->
         mnesia:select(Table, [{#mnesia_powerups{_ = '_'}, [], ['$_']}])
     end,
    
-    case mnesia:activity(transaction, Fun) of
+    case mnesia:activity(sync_dirty, Fun) of
         PowerupRecords when is_list(PowerupRecords) ->
             lists:foldl(fun(PowerupRecord, AccMap) ->
                 update_map_with_powerup(AccMap, PowerupRecord)
@@ -1365,7 +1365,7 @@ add_enhanced_players_from_table(Table, Map) ->
         mnesia:select(Table, [{#mnesia_players{_ = '_'}, [], ['$_']}])
     end,
    
-    case mnesia:activity(transaction, Fun) of
+    case mnesia:activity(sync_dirty, Fun) of
         PlayerRecords when is_list(PlayerRecords) ->
             lists:foldl(fun(PlayerRecord, AccMap) ->
                 update_map_with_enhanced_player(AccMap, PlayerRecord)
@@ -1419,7 +1419,7 @@ add_enhanced_bombs_from_table(Table, Map) ->
         mnesia:select(Table, [{#mnesia_bombs{_ = '_'}, [], ['$_']}])
     end,
    
-    case mnesia:activity(transaction, Fun) of
+    case mnesia:activity(sync_dirty, Fun) of
         BombRecords when is_list(BombRecords) ->
             lists:foldl(fun(BombRecord, AccMap) ->
                 update_map_with_enhanced_bomb(AccMap, BombRecord)
