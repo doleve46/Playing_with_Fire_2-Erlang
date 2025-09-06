@@ -613,55 +613,43 @@ class EnhancedSocketGameVisualizer:
             self.handle_bomb_movement_confirmation(entity_data)
 
     def handle_player_movement_confirmation(self, player_data: dict):
-        """Handle player movement with real backend timing"""
-        player_id = int(player_data.get('player_id', 0))
-        from_pos = player_data.get('from_pos', [0, 0])
-        to_pos = player_data.get('to_pos', [0, 0])
-        direction = player_data.get('direction', 'north')
-        speed = int(player_data.get('speed', 1))
-        movement_timer = int(player_data.get('movement_timer', 0))
-        total_duration = int(player_data.get('total_duration', 0))
-        # elapsed_time = int(player_data.get('elapsed_time', 0))  # ADD: new field
-        immunity_timer = int(player_data.get('immunity_timer', 0))
-        request_timer = int(player_data.get('request_timer', 0))
+    """Handle player movement with immediate start"""
+    player_id = int(player_data.get('player_id', 0))
+    from_pos = player_data.get('from_pos', [0, 0])
+    to_pos = player_data.get('to_pos', [0, 0])
+    direction = player_data.get('direction', 'north')
+    speed = int(player_data.get('speed', 1))
+    movement_timer = int(player_data.get('movement_timer', 0))
+    total_duration = int(player_data.get('total_duration', 0))
+    immunity_timer = int(player_data.get('immunity_timer', 0))
+    request_timer = int(player_data.get('request_timer', 0))
 
-        # The total_duration from backend IS the movement timer value
-        # This means movement just started, so start animation immediately
-        # Calculate real movement duration using backend constants
-        # if total_duration == 0:
-        #     total_duration = self.backend_constants['tile_move'] - (speed - 1) * self.backend_constants['ms_reduction']
+    if total_duration <= 0:
+        base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
+        ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
+        total_duration = base_duration - (speed - 1) * ms_reduction
 
-        actual_duration = total_duration / 1000.0  # Convert to seconds
-        # # remaining_duration = movement_timer / 1000.0 if movement_timer > 0 else actual_duration
-        # elapsed_seconds = elapsed_time / 1000.0    # Convert to seconds
+    actual_duration = total_duration / 1000.0
 
-        # # ADDED: Start animation from the beginning, but adjust start time for elapsed time
-        # animation_start_time = self.time - elapsed_seconds
+    # Start animation immediately
+    self.player_animations[player_id] = {
+        'type': 'confirmed_walking',
+        'start_pos': from_pos,
+        'end_pos': to_pos,
+        'direction': direction,
+        'start_time': self.time,
+        'duration': actual_duration,
+        'speed': speed,
+        'movement_timer': movement_timer,
+        'total_duration': total_duration,
+        'confirmed': True,
+        'active': True
+    }
 
-        # Create enhanced animation with real timing
-        self.player_animations[player_id] = {
-            'type': 'confirmed_walking',
-            'start_pos': from_pos,
-            'end_pos': to_pos,
-            'direction': direction,
-            'start_time': self.time,  # Start immediately
-            'duration': actual_duration,
-            'remaining_duration': remaining_duration,
-            'speed': speed,
-            'movement_timer': movement_timer,
-            'total_duration': total_duration,
-            'confirmed': True,
-            'active': True
-        }
+    self.movement_timers[player_id] = movement_timer
+    self.immunity_timers[player_id] = immunity_timer
+    self.request_timers[player_id] = request_timer
 
-        # Update timer tracking
-        self.movement_timers[player_id] = movement_timer
-        self.immunity_timers[player_id] = immunity_timer
-        self.request_timers[player_id] = request_timer
-
-        # Add enhanced speed effects
-        if speed > 1:
-            self.create_enhanced_speed_boost_effect(player_id, from_pos[0], from_pos[1], speed, direction, immunity_timer)
 
     def handle_bomb_movement_confirmation(self, bomb_data: dict):
         """Handle bomb movement with FSM state information"""
@@ -707,27 +695,11 @@ class EnhancedSocketGameVisualizer:
             movement_timer = int(timer_data.get('movement_timer', 0))
             immunity_timer = int(timer_data.get('immunity_timer', 0))
             request_timer = int(timer_data.get('request_timer', 0))
-            position = timer_data.get('position', [0, 0])
-            speed = int(timer_data.get('speed', 1))
             
-            # Update timer tracking
             self.movement_timers[player_id] = movement_timer
             self.immunity_timers[player_id] = immunity_timer
             self.request_timers[player_id] = request_timer
-            
-            # Update existing animations with new timer info
-            if player_id in self.player_animations:
-                anim = self.player_animations[player_id]
-                anim['movement_timer'] = movement_timer
-                
-                # Recalculate progress based on actual timer
-                if anim.get('total_duration', 0) > 0:
-                    elapsed_ms = anim['total_duration'] - movement_timer
-                    anim['progress'] = min(1.0, elapsed_ms / anim['total_duration'])
-            
-            # Create timer update effects
-            if immunity_timer > 0:
-                self.create_immunity_effect(player_id, position[0], position[1], immunity_timer)
+
 
     def handle_fsm_update(self, fsm_data: dict):
         """Handle FSM state changes for bombs and players"""
@@ -1041,16 +1013,18 @@ class EnhancedSocketGameVisualizer:
 
     # Animation Creation Methods
     def create_walking_animation(self, player_id: int, old_pos: tuple, new_pos: tuple, 
-                               direction: str, speed: int, timers: PlayerTimers):
-        """Create walking animation with backend timing"""
+                           direction: str, speed: int, timers: PlayerTimers):
+        """Create walking animation immediately when movement detected"""
+        # Don't create if we already have a confirmed animation
         if (player_id in self.player_animations and 
                 self.player_animations[player_id].get('confirmed', False)):
             return
-
-        # Calculate duration using backend constants
-        total_duration = self.backend_constants['tile_move'] - (speed - 1) * self.backend_constants['ms_reduction']
+    
+        base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
+        ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
+        total_duration = base_duration - (speed - 1) * ms_reduction
         actual_duration = total_duration / 1000.0
-
+    
         self.player_animations[player_id] = {
             'type': 'walking',
             'start_pos': old_pos,
@@ -1060,16 +1034,11 @@ class EnhancedSocketGameVisualizer:
             'duration': actual_duration,
             'speed': speed,
             'movement_timer': timers.movement_timer,
-            'immunity_timer': timers.immunity_timer,
-            'request_timer': timers.request_timer,
             'total_duration': total_duration,
             'confirmed': False,
             'active': True
         }
-
-        # Add enhanced dust cloud effect
-        self.create_dust_cloud_effect(old_pos[0], old_pos[1], direction, speed)
-
+    
     def create_bomb_placement_animation(self, x: int, y: int, bomb_data: BombState):
         """Create bomb placement animation"""
         self.bomb_animations[(x, y)] = {
@@ -1377,85 +1346,48 @@ class EnhancedSocketGameVisualizer:
 
     # Animation Update System
     def update_all_animations(self):
-        """Update all animations"""
+        """Update all animations with server timer sync"""
         current_time = self.time
-
-        # Update player animations
+    
         for player_id in list(self.player_animations.keys()):
             anim = self.player_animations[player_id]
             if anim['active']:
-                elapsed = current_time - anim['start_time']
+                # Get current server timer
+                server_timer = self.movement_timers.get(player_id, 0)
                 
-                # Update progress based on actual backend timer if available
-                if anim.get('movement_timer', 0) > 0 and anim.get('total_duration', 0) > 0:
-                    # remaining_ms = self.movement_timers.get(player_id, anim['movement_timer'])
-                    # ADDED: Use elapsed time from when movement actually started
-                    total_elapsed = anim.get('elapsed_time', 0) + (self.time - anim['start_time']) * 1000
-                    progress = total_elapsed / anim['total_duration']
-                    anim['progress'] = min(1.0, max(0.0, progress))
+                if anim.get('total_duration', 0) > 0 and server_timer >= 0:
+                    # Calculate progress from server timer
+                    elapsed_ms = anim['total_duration'] - server_timer
+                    progress = elapsed_ms / anim['total_duration']
+                    anim['progress'] = max(0.0, min(1.0, progress))
+                    
+                    # End when server timer reaches 0
+                    if server_timer <= 0:
+                        anim['progress'] = 1.0
                 else:
+                    # Fallback to time-based
+                    elapsed = current_time - anim['start_time']
                     anim['progress'] = min(1.0, elapsed / anim['duration'])
                 
-                if anim['progress'] >= 1.0 or elapsed >= anim['duration']:
+                if anim['progress'] >= 1.0:
                     del self.player_animations[player_id]
-
-        # Update bomb animations
-        for pos in list(self.bomb_animations.keys()):
-            anim = self.bomb_animations[pos]
-            elapsed = current_time - anim['start_time']
-            
-            if anim.get('type') == 'moving':
-                if elapsed >= anim['duration']:
-                    del self.bomb_animations[pos]
-            else:
-                bomb_state = self.current_game_state.bombs.get(pos)
-                if bomb_state:
-                    anim['status'] = bomb_state.status
-                    anim['ignited'] = bomb_state.ignited
-                
-                if elapsed > 30:  # Safety timeout
-                    del self.bomb_animations[pos]
-
-        # Update explosion animations
+    
+        # Update other animations...
         self.explosion_animations = [
             anim for anim in self.explosion_animations
             if current_time - anim['start_time'] < anim['duration']
         ]
-
-        # Update game effects
+    
         self.game_effects = [
             effect for effect in self.game_effects
             if current_time - effect['start_time'] < effect['duration']
         ]
-
-        # Update powerup animations
-        self.powerup_animations = [
-            anim for anim in self.powerup_animations
-            if current_time - anim['start_time'] < anim['duration']
-        ]
-
-        # Update status effects
-        for player_id in list(self.status_effects.keys()):
-            effect = self.status_effects[player_id]
-            elapsed = current_time - effect['start_time']
-            
-            if effect['type'] == 'immunity':
-                remaining_timer = self.immunity_timers.get(player_id, 0)
-                if remaining_timer <= 0 or elapsed > effect['duration']:
-                    del self.status_effects[player_id]
-                else:
-                    effect['intensity'] = remaining_timer / self.backend_constants['immunity_time']
-
-        # Update camera effects
+    
         if self.camera_shake > 0:
             self.camera_shake -= 2.0 / FPS
             if self.camera_shake < 0:
                 self.camera_shake = 0
-
-    def ease_out_quad(self, t: float) -> float:
-        """Quadratic ease-out function for smooth animations"""
-        return 1 - (1 - t) * (1 - t)
-
+            
     # Enhanced Drawing System
     def draw_enhanced_map(self):
         """Draw the complete enhanced map with all animations and real-time effects"""
@@ -2200,23 +2132,27 @@ class EnhancedSocketGameVisualizer:
                 surface.blit(particle_surf, (trail_x - particle_size, trail_y - particle_size))
 
     def draw_player_timer_visualizations(self, surface, x, y, player_id, timers: PlayerTimers):
-        """Draw visual representations of all player timers"""
+        """Draw timer bars synced with server state"""
         timer_y = y
         
-        # Movement timer bar
         if timers.movement_timer > 0:
-            total_duration = self.backend_constants['tile_move']  # Base duration
-            progress = 1.0 - (timers.movement_timer / total_duration)
+            player = self.current_game_state.players.get(player_id)
+            if player:
+                base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
+                ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
+                total_duration = base_duration - (player.speed - 1) * ms_reduction
+            else:
+                total_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
+            
+            progress = max(0.0, min(1.0, timers.movement_timer / total_duration))
             self.draw_timer_bar(surface, x - 15, timer_y, 30, 4, progress, COLORS['TEXT_CYAN'], "MOVE")
             timer_y += 8
         
-        # Immunity timer bar
         if timers.immunity_timer > 0:
             progress = timers.immunity_timer / self.backend_constants['immunity_time']
             self.draw_timer_bar(surface, x - 15, timer_y, 30, 4, progress, COLORS['IMMUNITY_GLOW'], "IMM")
             timer_y += 8
         
-        # Request cooldown timer bar
         if timers.request_timer > 0:
             progress = timers.request_timer / self.backend_constants['request_cooldown']
             self.draw_timer_bar(surface, x - 15, timer_y, 30, 4, progress, COLORS['TEXT_ORANGE'], "REQ")
