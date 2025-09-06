@@ -873,7 +873,7 @@ class EnhancedSocketGameVisualizer:
         try:
             if isinstance(explosion_info, str) and 'explosion' in explosion_info.lower():
                 return ExplosionState(
-                    x=x, y=y, explosion_type='blast_center', intensity=1.0,
+                    x=y, y=x, explosion_type='blast_center', intensity=1.0,    # changed from x=x, y=y
                     remaining_time=0.5, start_time=self.time
                 )
             elif isinstance(explosion_info, (list, tuple)) and len(explosion_info) >= 3:
@@ -882,7 +882,7 @@ class EnhancedSocketGameVisualizer:
                 remaining = float(explosion_info[2]) if str(explosion_info[2]).replace('.', '').replace('-', '').isdigit() else 0.5
                 
                 return ExplosionState(
-                    x=x, y=y, explosion_type=exp_type, intensity=intensity,
+                    x=y, y=x, explosion_type=exp_type, intensity=intensity,    # changed from x=x, y=y
                     remaining_time=remaining, start_time=self.time
                 )
         except (ValueError, TypeError):
@@ -2291,7 +2291,7 @@ class EnhancedSocketGameVisualizer:
     def draw_enhanced_bomb_center_explosion(self, surface, explosion, progress):
         """Draw enhanced central bomb explosion with multiple phases"""
         center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = explosion['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
         radius = explosion.get('radius', 2)
         bomb_type = explosion.get('bomb_type', 'normal_bomb')
 
@@ -2371,7 +2371,7 @@ class EnhancedSocketGameVisualizer:
             return
 
         center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
-        center_y = explosion['x'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
         distance = explosion.get('distance', 1)
         intensity = explosion.get('intensity', 1.0)
         bomb_type = explosion.get('bomb_type', 'normal_bomb')
