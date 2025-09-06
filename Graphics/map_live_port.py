@@ -1392,35 +1392,50 @@ class EnhancedSocketGameVisualizer:
         current_time = self.time
     
         for player_id in list(self.player_animations.keys()):
-            anim = self.player_animations[player_id]
-            if anim['active']:
-                # Get current server timer
-                server_timer = self.movement_timers.get(player_id, 0)
-                
-                if anim.get('total_duration', 0) > 0 and server_timer >= 0:
-                    # Calculate progress from server timer
-                    elapsed_ms = anim['total_duration'] - server_timer
-                    progress = elapsed_ms / anim['total_duration']
-                    anim['progress'] = max(0.0, min(1.0, progress))
+            try:
+                anim = self.player_animations[player_id]
+                if anim['active']:
+                    # Get current server timer
+                    server_timer = self.movement_timers.get(player_id, 0)
                     
-                    # Debug output for animation progress
-                    if player_id == 1:  # Only show for player 1 to avoid spam
-                        print(f"Player {player_id} animation progress: {progress:.2f}, server_timer: {server_timer}")
+                    if anim.get('total_duration', 0) > 0 and server_timer >= 0:
+                        # Calculate progress from server timer
+                        elapsed_ms = anim['total_duration'] - server_timer
+                        total_duration = anim['total_duration']
+                        if total_duration > 0:
+                            progress = elapsed_ms / total_duration
+                            anim['progress'] = max(0.0, min(1.0, progress))
+                            
+                            # Debug output for animation progress
+                            if player_id == 1:  # Only show for player 1 to avoid spam
+                                print(f"Player {player_id} animation progress: {progress:.2f}, server_timer: {server_timer}")
+                        else:
+                            anim['progress'] = 1.0  # Complete immediately if duration is 0
+                        
+                        # End when server timer reaches 0
+                        if server_timer <= 0:
+                            anim['progress'] = 1.0
+                            print(f"Player {player_id} animation completed (server timer reached 0)")
+                    else:
+                        # Fallback to time-based
+                        elapsed = current_time - anim['start_time']
+                        duration = anim.get('duration', 1.0)  # Default to 1 second if not set
+                        if duration > 0:
+                            anim['progress'] = min(1.0, elapsed / duration)
+                        else:
+                            anim['progress'] = 1.0  # Complete immediately if duration is 0
+                        
+                        if player_id == 1:  # Only show for player 1 to avoid spam
+                            print(f"Player {player_id} time-based animation progress: {anim['progress']:.2f}")
                     
-                    # End when server timer reaches 0
-                    if server_timer <= 0:
-                        anim['progress'] = 1.0
-                        print(f"Player {player_id} animation completed (server timer reached 0)")
-                else:
-                    # Fallback to time-based
-                    elapsed = current_time - anim['start_time']
-                    anim['progress'] = min(1.0, elapsed / anim['duration'])
-                    
-                    if player_id == 1:  # Only show for player 1 to avoid spam
-                        print(f"Player {player_id} time-based animation progress: {anim['progress']:.2f}")
-                
-                if anim['progress'] >= 1.0:
-                    print(f"Removing completed animation for player {player_id}")
+                    if anim['progress'] >= 1.0:
+                        print(f"Removing completed animation for player {player_id}")
+                        del self.player_animations[player_id]
+            except Exception as e:
+                print(f"Error updating animation for player {player_id}: {e}")
+                print(f"Animation data: {anim}")
+                # Remove problematic animation to prevent repeated errors
+                if player_id in self.player_animations:
                     del self.player_animations[player_id]
     
         # Update other animations...
