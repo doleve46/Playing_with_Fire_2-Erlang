@@ -951,40 +951,30 @@ class EnhancedSocketGameVisualizer:
         self.detect_powerup_changes(old_state.powerups, new_state.powerups)
 
     def detect_player_changes(self, old_players: Dict[int, PlayerState], new_players: Dict[int, PlayerState]):
-        """Detect player changes"""
+        """Detect player changes and create animations"""
         for player_id, new_player in new_players.items():
             if player_id in old_players:
                 old_player = old_players[player_id]
 
-                # Movement started - detect when movement timer begins (this is when we want animation)
-                if (old_player.timers.movement_timer == 0 and new_player.timers.movement_timer > 0 and
-                        new_player.movement and new_player.direction != 'none'):
-                    # Calculate destination based on current position and direction
+                # SIMPLE ANIMATION TRIGGER: Movement timer is active
+                if (new_player.timers.movement_timer > 0 and new_player.movement and 
+                    new_player.direction != 'none' and player_id not in self.player_animations):
+                    
+                    # Calculate destination from direction
                     dest_x, dest_y = self.calculate_destination_from_direction(
                         new_player.x, new_player.y, new_player.direction)
-                    self.create_walking_animation(
-                        player_id, (new_player.x, new_player.y), (dest_x, dest_y),
-                        new_player.direction, new_player.speed, new_player.timers
-                    )
+                    
+                    # Create simple animation
+                    self.player_animations[player_id] = {
+                        'start_pos': (new_player.x, new_player.y),
+                        'end_pos': (dest_x, dest_y),
+                        'initial_timer': new_player.timers.movement_timer,
+                        'active': True
+                    }
 
-                # Ongoing movement - ensure animation exists if movement timer is active
-                elif (new_player.timers.movement_timer > 0 and new_player.movement and 
-                      new_player.direction != 'none' and player_id not in self.player_animations):
-                    # Create animation for ongoing movement (fallback case)
-                    dest_x, dest_y = self.calculate_destination_from_direction(
-                        new_player.x, new_player.y, new_player.direction)
-                    # print(f"Creating animation for ongoing movement - player {player_id}: ({new_player.x}, {new_player.y}) -> ({dest_x}, {dest_y})")
-                    self.create_walking_animation(
-                        player_id, (new_player.x, new_player.y), (dest_x, dest_y),
-                        new_player.direction, new_player.speed, new_player.timers
-                    )
-
-                # Position change - this happens when movement completes, no animation needed
-                elif ((old_player.x, old_player.y) != (new_player.x, new_player.y)):
-                    # print(f"Position updated for player {player_id}: ({old_player.x}, {old_player.y}) -> ({new_player.x}, {new_player.y})")
-                    # Remove any existing animation since movement is complete
-                    if player_id in self.player_animations:
-                        del self.player_animations[player_id]
+                # Remove animation when movement completes
+                elif new_player.timers.movement_timer == 0 and player_id in self.player_animations:
+                    del self.player_animations[player_id]
 
                 # Health change
                 if old_player.health != new_player.health:
@@ -1383,62 +1373,42 @@ class EnhancedSocketGameVisualizer:
 
     # Animation Update System
     def update_all_animations(self):
-        """Update all animations with server timer sync"""
-        current_time = self.time
-    
+        """Update all animations - calculate progress based on movement timer"""
         for player_id in list(self.player_animations.keys()):
             try:
                 anim = self.player_animations[player_id]
-                if anim['active']:
-                    # Get current server timer
-                    server_timer = self.movement_timers.get(player_id, 0)
+                if not anim['active']:
+                    continue
                     
-                    if anim.get('initial_timer', 0) > 0:
-                        # Get current movement timer from the player state
-                        current_player = self.current_game_state.players.get(player_id)
-                        if current_player and current_player.timers.movement_timer > 0:
-                            server_timer = current_player.timers.movement_timer
-                        else:
-                            server_timer = self.movement_timers.get(player_id, 0)
-                        
-                        # Calculate progress from server timer: progress = (initial - current) / initial
-                        initial_timer = anim['initial_timer']
-                        if server_timer >= 0 and initial_timer > 0:
-                            elapsed_ms = initial_timer - server_timer
-                            progress = elapsed_ms / initial_timer
-                            anim['progress'] = max(0.0, min(1.0, progress))
-                        else:
-                            anim['progress'] = 1.0  # Complete if no valid timer
-                    else:
-                        anim['progress'] = 1.0  # Complete immediately if no valid timer data
-                    
-                    # End when server timer reaches 0 or animation is complete
-                    current_player = self.current_game_state.players.get(player_id)
-                    current_timer = current_player.timers.movement_timer if current_player else 0
-                    if current_timer <= 0 or anim['progress'] >= 1.0:
-                        anim['progress'] = 1.0
-                        # print(f"Player {player_id} animation completed (server timer reached 0)")
-                else:
-                    # Fallback to time-based
-                    elapsed = current_time - anim['start_time']
-                    duration = anim.get('duration', 1.0)  # Default to 1 second if not set
-                    if duration > 0:
-                        anim['progress'] = min(1.0, elapsed / duration)
-                    else:
-                        anim['progress'] = 1.0  # Complete immediately if duration is 0
-                    
-                    # if player_id == 1:  # Only show for player 1 to avoid spam
-                    #     print(f"Player {player_id} time-based animation progress: {anim['progress']:.2f}")
-                
-                if anim['progress'] >= 1.0:
-                    # print(f"Removing completed animation for player {player_id}")
+                # Get current player data
+                current_player = self.current_game_state.players.get(player_id)
+                if not current_player:
                     del self.player_animations[player_id]
+                    continue
+                    
+                # Calculate progress from movement timer
+                current_timer = current_player.timers.movement_timer
+                initial_timer = anim['initial_timer']
+                
+                if initial_timer > 0:
+                    # Progress = how much time has elapsed / total time
+                    elapsed = initial_timer - current_timer
+                    progress = elapsed / initial_timer
+                    anim['progress'] = max(0.0, min(1.0, progress))
+                else:
+                    anim['progress'] = 1.0
+                    
+                # Animation is done when timer reaches 0
+                if current_timer <= 0:
+                    del self.player_animations[player_id]
+                    
             except Exception as e:
-                # print(f"Error updating animation for player {player_id}: {e}")
-                # print(f"Animation data: {anim}")
-                # Remove problematic animation to prevent repeated errors
+                # Remove broken animation
                 if player_id in self.player_animations:
-                    del self.player_animations[player_id]        # Update other animations...
+                    del self.player_animations[player_id]
+                    
+        # Update other animations...
+        current_time = self.time
         self.explosion_animations = [
             anim for anim in self.explosion_animations
             if current_time - anim['start_time'] < anim['duration']
@@ -1511,6 +1481,10 @@ class EnhancedSocketGameVisualizer:
                 anim = self.player_animations[player_id]
                 progress = anim.get('progress', 0.0)
                 
+                # Debug - print animation state
+                if player_id == 1:  # Only for player 1 to avoid spam
+                    print(f"ANIMATION: Player {player_id}, Progress: {progress:.2f}, Animation: {anim}")
+                
                 # Calculate animated position
                 start_pos = anim.get('start_pos', (player.x, player.y))
                 end_pos = anim.get('end_pos', (player.x, player.y))
@@ -1526,6 +1500,9 @@ class EnhancedSocketGameVisualizer:
                     # Convert to screen coordinates
                     pixel_x = current_y * TILE_SIZE + shake_x
                     pixel_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE + shake_y
+                    
+                    if player_id == 1:  # Debug position
+                        print(f"POSITION: Start: {start_pos}, End: {end_pos}, Current: ({current_x:.2f}, {current_y:.2f})")
                 else:
                     # Fallback to static position
                     pixel_x = player.y * TILE_SIZE + shake_x
