@@ -956,19 +956,55 @@ class EnhancedSocketGameVisualizer:
             if player_id in old_players:
                 old_player = old_players[player_id]
 
-                # Position change - only create animation if not already confirmed
-                if ((old_player.x, old_player.y) != (new_player.x, new_player.y) and
-                        player_id not in self.player_animations):
+                # Movement started - detect when movement timer begins (this is when we want animation)
+                if (old_player.timers.movement_timer == 0 and new_player.timers.movement_timer > 0 and
+                        new_player.movement and new_player.direction != 'none'):
+                    # Calculate destination based on current position and direction
+                    dest_x, dest_y = self.calculate_destination_from_direction(
+                        new_player.x, new_player.y, new_player.direction)
+                    print(f"� Movement started for player {player_id}: ({new_player.x}, {new_player.y}) → ({dest_x}, {dest_y}) (direction: {new_player.direction})")
                     self.create_walking_animation(
-                        player_id, (old_player.x, old_player.y), (new_player.x, new_player.y),
+                        player_id, (new_player.x, new_player.y), (dest_x, dest_y),
                         new_player.direction, new_player.speed, new_player.timers
                     )
+
+                # Ongoing movement - ensure animation exists if movement timer is active
+                elif (new_player.timers.movement_timer > 0 and new_player.movement and 
+                      new_player.direction != 'none' and player_id not in self.player_animations):
+                    # Create animation for ongoing movement (fallback case)
+                    dest_x, dest_y = self.calculate_destination_from_direction(
+                        new_player.x, new_player.y, new_player.direction)
+                    print(f"Creating animation for ongoing movement - player {player_id}: ({new_player.x}, {new_player.y}) → ({dest_x}, {dest_y})")
+                    self.create_walking_animation(
+                        player_id, (new_player.x, new_player.y), (dest_x, dest_y),
+                        new_player.direction, new_player.speed, new_player.timers
+                    )
+
+                # Position change - this happens when movement completes, no animation needed
+                elif ((old_player.x, old_player.y) != (new_player.x, new_player.y)):
+                    print(f"📍 Position updated for player {player_id}: ({old_player.x}, {old_player.y}) → ({new_player.x}, {new_player.y})")
+                    # Remove any existing animation since movement is complete
+                    if player_id in self.player_animations:
+                        del self.player_animations[player_id]
 
                 # Health change
                 if old_player.health != new_player.health:
                     if new_player.health < old_player.health:
                         self.create_damage_effect(player_id, new_player.x, new_player.y, 
                                                  old_player.health - new_player.health)
+
+    def calculate_destination_from_direction(self, x: int, y: int, direction: str) -> tuple:
+        """Calculate destination coordinates based on current position and direction"""
+        if direction == 'north':
+            return (x - 1, y)
+        elif direction == 'south':
+            return (x + 1, y)
+        elif direction == 'east':
+            return (x, y + 1)
+        elif direction == 'west':
+            return (x, y - 1)
+        else:
+            return (x, y)  # No movement
 
     def detect_bomb_lifecycle(self, old_bombs: Dict[tuple, BombState], new_bombs: Dict[tuple, BombState]):
         """Detect bomb lifecycle changes"""
@@ -1016,30 +1052,32 @@ class EnhancedSocketGameVisualizer:
                         self.create_powerup_spawn_animation(x, y, new_powerup)
 
     # Animation Creation Methods
-    def create_walking_animation(self, player_id: int, old_pos: tuple, new_pos: tuple, 
+    def create_walking_animation(self, player_id: int, start_pos: tuple, end_pos: tuple, 
                            direction: str, speed: int, timers: PlayerTimers):
-        """Create walking animation immediately when movement detected"""
-        # Don't create if we already have a confirmed animation
-        if (player_id in self.player_animations and 
-                self.player_animations[player_id].get('confirmed', False)):
+        """Create walking animation when movement timer starts"""
+        # Don't create if we already have an active animation
+        if player_id in self.player_animations:
             return
     
         base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
         ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
         total_duration = base_duration - (speed - 1) * ms_reduction
         actual_duration = total_duration / 1000.0
+        
+        # Debug output to verify animation creation
+        print(f"Creating walking animation for player {player_id}: {start_pos} → {end_pos} (direction: {direction}, speed: {speed}, timer: {timers.movement_timer}ms)")
     
         self.player_animations[player_id] = {
             'type': 'walking',
-            'start_pos': old_pos,
-            'end_pos': new_pos,
+            'start_pos': start_pos,
+            'end_pos': end_pos,
             'direction': direction,
             'start_time': self.time,
             'duration': actual_duration,
             'speed': speed,
             'movement_timer': timers.movement_timer,
             'total_duration': total_duration,
-            'confirmed': False,
+            'confirmed': True,  # Mark as confirmed since we're creating it based on movement timer
             'active': True
         }
     
@@ -1365,15 +1403,24 @@ class EnhancedSocketGameVisualizer:
                     progress = elapsed_ms / anim['total_duration']
                     anim['progress'] = max(0.0, min(1.0, progress))
                     
+                    # Debug output for animation progress
+                    if player_id == 1:  # Only show for player 1 to avoid spam
+                        print(f"Player {player_id} animation progress: {progress:.2f}, server_timer: {server_timer}")
+                    
                     # End when server timer reaches 0
                     if server_timer <= 0:
                         anim['progress'] = 1.0
+                        print(f"Player {player_id} animation completed (server timer reached 0)")
                 else:
                     # Fallback to time-based
                     elapsed = current_time - anim['start_time']
                     anim['progress'] = min(1.0, elapsed / anim['duration'])
+                    
+                    if player_id == 1:  # Only show for player 1 to avoid spam
+                        print(f"Player {player_id} time-based animation progress: {anim['progress']:.2f}")
                 
                 if anim['progress'] >= 1.0:
+                    print(f"Removing completed animation for player {player_id}")
                     del self.player_animations[player_id]
     
         # Update other animations...
@@ -2063,13 +2110,38 @@ class EnhancedSocketGameVisualizer:
             center_x = char_x + TILE_SIZE // 2
             center_y = char_y + TILE_SIZE // 2
 
-            # Enhanced walking animation
-            walk_frequency = 8 + speed * 2
-            walk_bounce = math.sin(progress * math.pi * walk_frequency) * (2 + speed * 0.5)
+            # Enhanced walking animation with more pronounced movement
+            walk_frequency = 6 + speed * 1.5  # Slightly slower for better visibility
+            walk_bounce = math.sin(progress * math.pi * walk_frequency) * (4 + speed * 1.0)  # More bounce
             center_y -= walk_bounce
+            
+            # Add horizontal sway for more realistic walking
+            direction = anim.get('direction', 'north')
+            if direction in ['north', 'south']:
+                walk_sway = math.sin(progress * math.pi * walk_frequency * 0.5) * 2
+                center_x += walk_sway
+            elif direction in ['east', 'west']:
+                walk_sway = math.sin(progress * math.pi * walk_frequency * 0.5) * 2
+                center_y += walk_sway
 
         # Draw enhanced status effects
         self.draw_enhanced_status_effects(surface, center_x, center_y, player_id)
+        
+        # Draw walking animation indicator
+        if player_id in self.player_animations:
+            anim = self.player_animations[player_id]
+            progress = anim.get('progress', 0.0)
+            
+            # Draw movement trail/glow to make animation more visible
+            glow_intensity = 0.8 - (progress * 0.3)  # Fade as animation progresses
+            glow_size = int(50 * glow_intensity)
+            
+            if glow_size > 0:
+                glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
+                alpha = int(60 * glow_intensity)
+                glow_color = COLORS['SPEED_BOOST_COLOR']
+                pygame.draw.circle(glow_surf, (*glow_color, alpha), (glow_size, glow_size), glow_size)
+                surface.blit(glow_surf, (center_x - glow_size, center_y - glow_size))
 
         # Draw the player character
         self.draw_enhanced_player_character(surface, char_x, char_y, player_id, enhanced_color, skin_color, skin_shadow_color)
@@ -2139,7 +2211,8 @@ class EnhancedSocketGameVisualizer:
         """Draw timer bars synced with server state"""
         timer_y = y
         
-        if timers.movement_timer > 0:
+        # Hide movement timer if player has an active walking animation (replace progress bar with animation)
+        if timers.movement_timer > 0 and player_id not in self.player_animations:
             player = self.current_game_state.players.get(player_id)
             if player:
                 base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
