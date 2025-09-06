@@ -48,30 +48,37 @@ read_and_update_coord(player, PlayerNum, Table) ->
         case mnesia:read(Table, PlayerNum, write) of
             [Player_record = #mnesia_players{}] -> 
                 io:format("DEBUG: read_and_update_coord - Player ~p direction: ~p, position: ~p~n", [PlayerNum, Player_record#mnesia_players.direction, Player_record#mnesia_players.position]),
-                [New_x, New_y] = calc_new_coordinates(Player_record#mnesia_players.position, Player_record#mnesia_players.direction),
-                %% check if new coordinate fall within current managing GN
-                case get_managing_node_by_coord(New_x,New_y) of
-                    Current_gn_name -> % Player is not about to leave current GN's quarter
-                    %% update position, reset direction and movement
-                        Updated_record = Player_record#mnesia_players{
-                            position = [New_x, New_y],
-                            movement = false,
-                            direction = none
-                        },
-                        mnesia:write(Table, Updated_record, write),
-                        {retain_gn, Updated_record}; %% return value to calling function
-                    Other_name -> %% destination coordinate is managed by another GN (=Other_name)
-                    %% update position, target_gn name, reset movement and direction
-                    %% ask CN to transfer entry between tables
-                        Updated_record = Player_record#mnesia_players{
-                            position = [New_x, New_y],
-                            target_gn = Other_name,
-                            movement = false,
-                            direction = none
-                        },
-                        mnesia:write(Table, Updated_record, write),
-                        {switch_gn, Current_gn_name, Other_name, Updated_record} %% return value
-                    end;
+                case Player_record#mnesia_players.direction of
+                    none ->
+                        %% Player direction is none - no movement needed, just return
+                        io:format("DEBUG: read_and_update_coord - Player ~p has direction 'none', skipping coordinate update~n", [PlayerNum]),
+                        ok;
+                    Direction ->
+                        [New_x, New_y] = calc_new_coordinates(Player_record#mnesia_players.position, Direction),
+                        %% check if new coordinate fall within current managing GN
+                        case get_managing_node_by_coord(New_x,New_y) of
+                            Current_gn_name -> % Player is not about to leave current GN's quarter
+                            %% update position, reset direction and movement
+                                Updated_record = Player_record#mnesia_players{
+                                    position = [New_x, New_y],
+                                    movement = false,
+                                    direction = none
+                                },
+                                mnesia:write(Table, Updated_record, write),
+                                {retain_gn, Updated_record}; %% return value to calling function
+                            Other_name -> %% destination coordinate is managed by another GN (=Other_name)
+                            %% update position, target_gn name, reset movement and direction
+                            %% ask CN to transfer entry between tables
+                                Updated_record = Player_record#mnesia_players{
+                                    position = [New_x, New_y],
+                                    target_gn = Other_name,
+                                    movement = false,
+                                    direction = none
+                                },
+                                mnesia:write(Table, Updated_record, write),
+                                {switch_gn, Current_gn_name, Other_name, Updated_record} %% return value
+                        end
+                end;
             [] -> not_found % should cause an error
         end
     end,
@@ -90,14 +97,15 @@ read_player_from_table(PlayerNum, Table) ->
     mnesia:activity(transaction, Fun).
 
 
--spec calc_new_coordinates(Position::list(), Direction::up|down|left|right) -> list().
+-spec calc_new_coordinates(Position::list(), Direction::up|down|left|right|none) -> list().
 calc_new_coordinates(Position, Direction) ->
     [X,Y] = Position,
     case Direction of
         up -> [X, Y+1];
         down -> [X, Y-1];
         left -> [X-1, Y];
-        right -> [X+1,Y]
+        right -> [X+1,Y];
+        none -> Position  % Return current position if no direction
     end.
 %% =====================================================================
 %% ? solving the clusterfuck for managing the movement check
