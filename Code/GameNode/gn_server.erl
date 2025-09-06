@@ -349,7 +349,7 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
         {noreply, State};
 
 %% * handle bomb explosions
-handle_info({'DOWN', _Ref, process, Pid, exploded}, State = #gn_state{}) ->
+handle_info({'DOWN', _Ref, process, Pid, {shutdown, exploded}}, State = #gn_state{}) ->
     %% Read and remove bomb from mnesia table. Pass record to cn_server to process explosion
     Record = case req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name) of
         R when is_record(R, mnesia_bombs) -> 

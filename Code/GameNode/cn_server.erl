@@ -274,7 +274,7 @@ bomb_explosion_handler(Coord, Radius) ->
     io:format("💥 EXPLOSION_HANDLER: Sending ~p coordinates to graphics: ~p~n", [length(FlattenedCoords), FlattenedCoords]),
     cn_server_graphics:show_explosion(FlattenedCoords),
     %% Sends inflict_damage messages to all objects affected by the explosion
-    notify_affected_objects(ResultList). % TODO: something doesnt work here
+    notify_affected_objects(ResultList).
 
 calculate_explosion_reach([X, Y], Max_range) ->
     Fun = fun() -> calculate_affected([X, Y], Max_range) end,
@@ -351,36 +351,50 @@ process_affected_objects(ListOfCoords, Tiles_table, Bombs_table, Players_table) 
 
 process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) ->
     %% using QLC querries to make this faster
-    TilesPids = qlc:e(qlc:q(
-        [T#mnesia_tiles.pid || T <- mnesia:table(Tiles_table), T#mnesia_tiles.position == Coord]
+    TilesRecords = qlc:e(qlc:q(
+        [T#mnesia_tiles{} || T <- mnesia:table(Tiles_table), T#mnesia_tiles.position == Coord]
     )),
-    BombsPids = qlc:e(qlc:q(
-        [B#mnesia_bombs.pid || B <- mnesia:table(Bombs_table), B#mnesia_bombs.position == Coord]
+    BombsRecords = qlc:e(qlc:q(
+        [B#mnesia_bombs{} || B <- mnesia:table(Bombs_table), B#mnesia_bombs.position == Coord]
     )),
-    PlayersPids = qlc:e(qlc:q(
-        [P#mnesia_players.pid || P <- mnesia:table(Players_table), P#mnesia_players.position == Coord]
+    PlayersRecords = qlc:e(qlc:q(
+        [P#mnesia_players{} || P <- mnesia:table(Players_table), P#mnesia_players.position == Coord]
     )),
     %% Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
     %% io print of the affected objects
     io:format("💥 EXPLOSION at ~p affects ~p tiles, ~p bombs, and ~p players.~n",
-        [Coord, length(TilesPids), length(BombsPids), length(PlayersPids)]),
-    io:format("DEBUG: Explosion at coord ~p: Affected objects: ~p~n", [Coord, {TilesPids, BombsPids, PlayersPids}]),
-    inflict_damage_handler(TilesPids, tile, damage_taken),
-    inflict_damage_handler(BombsPids, bomb_as_fsm, damage_taken),
-    inflict_damage_handler(PlayersPids, player_fsm, inflict_damage),
+        [Coord, length(TilesRecords), length(BombsRecords), length(PlayersRecords)]),
+    inflict_damage_handler(TilesRecords, tile, damage_taken, Tiles_table),
+    inflict_damage_handler(BombsRecords, bomb_as_fsm, damage_taken, Bombs_table),
+    inflict_damage_handler(PlayersRecords, player_fsm, inflict_damage, Players_table),
     ok.
 
 
-inflict_damage_handler(PidsList, Module, Function) ->
-    lists:foreach(fun(Pid) ->
+inflict_damage_handler(RecordsList, Module, Function, Table) ->
+    lists:foreach(fun(Record) ->
         try
-            _ = apply(Module, Function, [Pid]),
-            io:format("💥 Sent damage to ~p: ~p:~p(~p)~n", [Pid, Module, Function, Pid])
+            case Record of
+                R when is_record(R, mnesia_tiles) ->
+                    io:format("💥 Tile at ~p taking damage~n", [Record#mnesia_tiles.position]),
+                    _ = apply(Module, Function, [Record#mnesia_tiles.pid]),
+                    io:format("💥 Sent damage to: ~p:~p(~p)~n", [Module, Function, Record#mnesia_tiles.pid]);
+                R when is_record(R, mnesia_bombs) ->
+                    io:format("💥 Bomb at ~p taking damage~n", [Record#mnesia_bombs.position]),
+                    _ = apply(Module, Function, [Record#mnesia_bombs.pid]),
+                    io:format("💥 Sent damage to: ~p:~p(~p)~n", [Module, Function, Record#mnesia_bombs.pid]);
+                R when is_record(R, mnesia_players) ->
+                    io:format("💥 Player ~p at ~p taking damage~n", [Record#mnesia_players.player_number, Record#mnesia_players.position]),
+                    _ = apply(Module, Function, [Record#mnesia_players.pid]),
+                    io:format("💥 Sent damage to: ~p:~p(~p)~n", [Module, Function, Record#mnesia_players.pid]),
+                    UpdatedRecord = Record#mnesia_players{life = Record#mnesia_players.life - 1},
+                    mnesia:write(Table, UpdatedRecord, write),
+                    io:format("💥 Updated player ~p life to ~p~n", [Record#mnesia_players.player_number, UpdatedRecord#mnesia_players.life])
+            end
         catch
             Class:Reason ->
-                io:format(standard_error, "Error calling ~p:~p(~p). Class: ~p, Reason: ~p~n", [Module, Function, Pid, Class, Reason])
+                io:format(standard_error, "Error calling ~p:~p(). Class: ~p, Reason: ~p~n", [Module, Function, Class, Reason])
         end
-    end, PidsList),
+    end, RecordsList),
     ok.
 
 

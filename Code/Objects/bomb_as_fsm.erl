@@ -204,7 +204,7 @@ armed(cast, ignite, StateData = #bomb_state{}) ->
 
 armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 armed(info, bomb_tick, StateData = #bomb_state{}) ->
     %% internal tick message - decrease internal timer by 1000 ms
@@ -218,7 +218,7 @@ armed(info, bomb_tick, StateData = #bomb_state{}) ->
                 NewTimer =< 0 -> % time to explode
                     %% trigger explosion immediately
                     %% cancel state_timeout and move to exploded state
-                    {stop, exploded, StateData};
+                    {stop, {shutdown, exploded}, StateData};
                 true -> % update timer and set new state_timeout
                     %% let GN know about the new timer value
                     gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {update_timer, self(), NewTimer}}),
@@ -247,7 +247,7 @@ active_movement(enter, _OldState, StateData = #bomb_state{}) ->
 
 active_movement(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 active_movement(cast, freeze, StateData = #bomb_state{}) ->
     %% if already frozen - do nothing.
@@ -356,7 +356,7 @@ delayed_explosion_state(info, _AnyMessage, StateData = #bomb_state{}) ->
 
 delayed_explosion_state(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 delayed_explosion_state(_Type, _Message, StateData = #bomb_state{}) ->
     log_unexpected_message(delayed_explosion_state, _Type, _Message),
@@ -398,7 +398,7 @@ remote_idle(cast, ignite, StateData = #bomb_state{}) ->
             },
             {next_state, remote_armed, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]};
         true ->
-            {stop, exploded, StateData}
+            {stop, {shutdown, exploded}, StateData}
     end;
 
 remote_idle(_Type, _Message, StateData = #bomb_state{}) ->
@@ -423,7 +423,7 @@ remote_armed(info, bomb_tick, StateData = #bomb_state{}) ->
                 NewTimer =< 0 -> % time to explode
                     %% trigger explosion immediately
                     %% cancel state_timeout and move to exploded state
-                    {stop, exploded, StateData};
+                    {stop, {shutdown, exploded}, StateData};
                 true -> % update timer and set new state_timeout
                     %% let GN know about the new timer value
                     gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {update_timer, self(), NewTimer}}),
@@ -434,7 +434,7 @@ remote_armed(info, bomb_tick, StateData = #bomb_state{}) ->
 
 remote_armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 remote_armed(cast, freeze, StateData = #bomb_state{}) ->
     %% Already frozen, ignore this
@@ -561,7 +561,7 @@ remote_idle_movement(cast, ignite, StateData = #bomb_state{}) ->
     %% else (frozen) - update record, start state_timeout timer & switch to remote_armed_frozen_movement
     case StateData#bomb_state.status of
         normal -> % not frozen, explode immediately
-            {stop, exploded, StateData};
+            {stop, {shutdown, exploded}, StateData};
         frozen -> % frozen, update record, start timer, switch states
             UpdatedData = StateData#bomb_state{
                 ignited = {true, erlang:system_time(millisecond)},
@@ -586,7 +586,7 @@ remote_idle_movement(_Type, _Message, StateData = #bomb_state{}) ->
 
 remote_armed_frozen_movement(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 remote_armed_frozen_movement(cast, freeze, StateData = #bomb_state{}) ->
     %% already frozen, change nothing
