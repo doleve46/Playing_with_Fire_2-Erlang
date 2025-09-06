@@ -725,7 +725,7 @@ create_simple_map_data(MapState) ->
         <<"dead_players">> => #{},
         <<"update_time">> => erlang:system_time(millisecond),
         <<"local_gn">> => maps:get(local_gn, MapState, gn1),
-        <<"active_explosions">> => #{},
+        <<"active_explosions">> => convert_for_json(maps:get(active_explosions, MapState, #{})),    % changed from # {}
         <<"backend_timing">> => #{
             <<"tick_delay">> => 50,
             <<"tile_move">> => 1200
@@ -759,14 +759,16 @@ convert_gn_cell_safely({Tile, Powerup, Bomb, Player, Explosion, Special}) ->
         safe_atom_to_binary_gn(Tile),
         safe_atom_to_binary_gn(Powerup),
         convert_bomb_safely_gn(Bomb),
-        convert_player_safely_gn(Player)
+        convert_player_safely_gn(Player),
+        convert_explosion_safely_gn(Explosion)    % added this line for showing explosion
     ];
 convert_gn_cell_safely({Tile, Powerup, Bomb, Player}) ->
     [
         safe_atom_to_binary_gn(Tile),
         safe_atom_to_binary_gn(Powerup),
         convert_bomb_safely_gn(Bomb),
-        convert_player_safely_gn(Player)
+        convert_player_safely_gn(Player),
+        <<"none">>    % explosion placeholder
     ];
 convert_gn_cell_safely(_) ->
     [<<"free">>, <<"none">>, <<"none">>, <<"none">>].
@@ -816,6 +818,17 @@ convert_player_safely_gn({PlayerID, Life, Speed, Direction, Movement, MovementTi
     ];
 
 convert_player_safely_gn(_) ->
+    <<"none">>.
+
+%% added function to handle explosion data
+convert_explosion_safely_gn(none) ->
+    <<"none">>;
+convert_explosion_safely_gn(explosion) ->
+    <<"explosion">>;
+convert_explosion_safely_gn(ExplosionData) when is_tuple(ExplosionData) ->
+    % Handle complex explosion data if needed
+    <<"explosion">>;
+convert_explosion_safely_gn(_) ->
     <<"none">>.
 
 monitor_python_output(Port) ->

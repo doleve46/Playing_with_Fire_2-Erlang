@@ -730,6 +730,7 @@ class GNGameVisualizer:
         speed = int(player_data.get('speed', 1))
         movement_timer = int(player_data.get('movement_timer', 0))
         total_duration = int(player_data.get('total_duration', 0))
+        elapsed_time = int(player_data.get('elapsed_time', 0))  # ADD: new field
         immunity_timer = int(player_data.get('immunity_timer', 0))
         request_timer = int(player_data.get('request_timer', 0))
 
@@ -738,7 +739,8 @@ class GNGameVisualizer:
             total_duration = self.backend_constants['tile_move'] - (speed - 1) * self.backend_constants['ms_reduction']
         
         actual_duration = total_duration / 1000.0  # Convert to seconds
-        remaining_duration = movement_timer / 1000.0 if movement_timer > 0 else actual_duration
+        # remaining_duration = movement_timer / 1000.0 if movement_timer > 0 else actual_duration
+        elapsed_seconds = elapsed_time / 1000.0    # Convert to seconds
 
         # Create enhanced animation with real timing
         self.player_animations[player_id] = {
@@ -746,7 +748,7 @@ class GNGameVisualizer:
             'start_pos': from_pos,
             'end_pos': to_pos,
             'direction': direction,
-            'start_time': self.time,
+            'start_time': animation_start_time,  # changed from 'start_time': self.time,
             'duration': actual_duration,
             'remaining_duration': remaining_duration,
             'speed': speed,
@@ -1132,7 +1134,9 @@ class GNGameVisualizer:
                 
                 # Update progress based on actual backend timer if available
                 if anim.get('movement_timer', 0) > 0 and anim.get('total_duration', 0) > 0:
-                    remaining_ms = self.movement_timers.get(player_id, anim['movement_timer'])
+                    # remaining_ms = self.movement_timers.get(player_id, anim['movement_timer'])
+                    # ADDED: Use elapsed time from when movement actually started
+                    total_elapsed = anim.get('elapsed_time', 0) + (self.time - anim['start_time']) * 1000
                     progress = 1.0 - (remaining_ms / anim['total_duration'])
                     anim['progress'] = min(1.0, max(0.0, progress))
                 else:
