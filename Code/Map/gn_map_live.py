@@ -722,7 +722,7 @@ class GNGameVisualizer:
             self.handle_bomb_movement_confirmation(entity_data)
 
     def handle_player_movement_confirmation(self, player_data: dict):
-        """Handle player movement with real backend timing"""
+        """Handle player movement with immediate start"""
         player_id = int(player_data.get('player_id', 0))
         from_pos = player_data.get('from_pos', [0, 0])
         to_pos = player_data.get('to_pos', [0, 0])
@@ -730,40 +730,31 @@ class GNGameVisualizer:
         speed = int(player_data.get('speed', 1))
         movement_timer = int(player_data.get('movement_timer', 0))
         total_duration = int(player_data.get('total_duration', 0))
-        # elapsed_time = int(player_data.get('elapsed_time', 0))  # ADD: new field
         immunity_timer = int(player_data.get('immunity_timer', 0))
         request_timer = int(player_data.get('request_timer', 0))
-
-        # The total_duration from backend IS the movement timer value
-        # This means movement just started, so start animation immediately
-        # Calculate real movement duration using backend constants
-        # if total_duration == 0:
-        #     total_duration = self.backend_constants['tile_move'] - (speed - 1) * self.backend_constants['ms_reduction']
-
-        actual_duration = total_duration / 1000.0  # Convert to seconds
-        # # remaining_duration = movement_timer / 1000.0 if movement_timer > 0 else actual_duration
-        # elapsed_seconds = elapsed_time / 1000.0    # Convert to seconds
-
-        # # ADDED: Start animation from the beginning, but adjust start time for elapsed time
-        # animation_start_time = self.time - elapsed_seconds
-
-        # Create enhanced animation with real timing
+    
+        if total_duration <= 0:
+            base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
+            ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
+            total_duration = base_duration - (speed - 1) * ms_reduction
+    
+        actual_duration = total_duration / 1000.0
+    
+        # Start animation immediately
         self.player_animations[player_id] = {
             'type': 'confirmed_walking',
             'start_pos': from_pos,
             'end_pos': to_pos,
             'direction': direction,
-            'start_time': self.time,    # Start immediately
+            'start_time': self.time,
             'duration': actual_duration,
-            'remaining_duration': remaining_duration,
             'speed': speed,
             'movement_timer': movement_timer,
             'total_duration': total_duration,
             'confirmed': True,
             'active': True
         }
-
-        # Update timer tracking
+    
         self.movement_timers[player_id] = movement_timer
         self.immunity_timers[player_id] = immunity_timer
         self.request_timers[player_id] = request_timer
@@ -801,7 +792,7 @@ class GNGameVisualizer:
         }
 
     def handle_timer_update(self, timer_data: dict):
-        """Handle real-time timer updates from backend"""
+         """Handle real-time timer updates from backend"""
         entity_type = timer_data.get('entity_type', 'unknown')
         
         if entity_type == 'player':
@@ -809,10 +800,7 @@ class GNGameVisualizer:
             movement_timer = int(timer_data.get('movement_timer', 0))
             immunity_timer = int(timer_data.get('immunity_timer', 0))
             request_timer = int(timer_data.get('request_timer', 0))
-            position = timer_data.get('position', [0, 0])
-            speed = int(timer_data.get('speed', 1))
             
-            # Update timer tracking
             self.movement_timers[player_id] = movement_timer
             self.immunity_timers[player_id] = immunity_timer
             self.request_timers[player_id] = request_timer
@@ -1062,15 +1050,17 @@ class GNGameVisualizer:
 
     def create_walking_animation(self, player_id: int, old_pos: tuple, new_pos: tuple, 
                                direction: str, speed: int, timers: PlayerTimers):
-        """Create walking animation with backend timing"""
+        """Create walking animation immediately when movement detected"""
+        # Don't create if we already have a confirmed animation
         if (player_id in self.player_animations and 
                 self.player_animations[player_id].get('confirmed', False)):
             return
-
-        # Calculate duration using backend constants
-        total_duration = self.backend_constants['tile_move'] - (speed - 1) * self.backend_constants['ms_reduction']
+    
+        base_duration = self.backend_constants.get('tile_move', TILE_MOVE_BASE)
+        ms_reduction = self.backend_constants.get('ms_reduction', MS_REDUCTION)
+        total_duration = base_duration - (speed - 1) * ms_reduction
         actual_duration = total_duration / 1000.0
-
+    
         self.player_animations[player_id] = {
             'type': 'walking',
             'start_pos': old_pos,
@@ -1080,8 +1070,6 @@ class GNGameVisualizer:
             'duration': actual_duration,
             'speed': speed,
             'movement_timer': timers.movement_timer,
-            'immunity_timer': timers.immunity_timer,
-            'request_timer': timers.request_timer,
             'total_duration': total_duration,
             'confirmed': False,
             'active': True
@@ -1128,49 +1116,47 @@ class GNGameVisualizer:
             })
 
     def update_all_animations(self):
-        """Update all animations"""
+        """Update all animations with server timer sync"""
         current_time = self.time
-
-        # Update player animations
+    
         for player_id in list(self.player_animations.keys()):
             anim = self.player_animations[player_id]
             if anim['active']:
-                elapsed = current_time - anim['start_time']
+                # Get current server timer
+                server_timer = self.movement_timers.get(player_id, 0)
                 
-                # Update progress based on actual backend timer if available
-                if anim.get('movement_timer', 0) > 0 and anim.get('total_duration', 0) > 0:
-                    # remaining_ms = self.movement_timers.get(player_id, anim['movement_timer'])
-                    # ADDED: Use elapsed time from when movement actually started
-                    total_elapsed = anim.get('elapsed_time', 0) + (self.time - anim['start_time']) * 1000
-                    progress = 1.0 - (remaining_ms / anim['total_duration'])
-                    anim['progress'] = min(1.0, max(0.0, progress))
+                if anim.get('total_duration', 0) > 0 and server_timer >= 0:
+                    # Calculate progress from server timer
+                    elapsed_ms = anim['total_duration'] - server_timer
+                    progress = elapsed_ms / anim['total_duration']
+                    anim['progress'] = max(0.0, min(1.0, progress))
+                    
+                    # End when server timer reaches 0
+                    if server_timer <= 0:
+                        anim['progress'] = 1.0
                 else:
+                    # Fallback to time-based
+                    elapsed = current_time - anim['start_time']
                     anim['progress'] = min(1.0, elapsed / anim['duration'])
                 
-                if anim['progress'] >= 1.0 or elapsed >= anim['duration']:
+                if anim['progress'] >= 1.0:
                     del self.player_animations[player_id]
-
-        # Update explosion animations
+    
+        # Update other animations...
         self.explosion_animations = [
             anim for anim in self.explosion_animations
             if current_time - anim['start_time'] < anim['duration']
         ]
-
-        # Update game effects
+    
         self.game_effects = [
             effect for effect in self.game_effects
             if current_time - effect['start_time'] < effect['duration']
         ]
-
-        # Update camera effects
+    
         if self.camera_shake > 0:
             self.camera_shake -= 2.0 / FPS
             if self.camera_shake < 0:
                 self.camera_shake = 0
-
-    def ease_out_quad(self, t: float) -> float:
-        """Quadratic ease-out function for smooth animations"""
-        return 1 - (1 - t) * (1 - t)
 
     # ENHANCED DRAWING METHODS WITH SAFE COLOR HANDLING
     def draw_enhanced_map(self):
