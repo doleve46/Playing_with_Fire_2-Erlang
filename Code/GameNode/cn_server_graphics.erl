@@ -373,7 +373,7 @@ handle_info({'DOWN', _MonitorRef, process, _RemotePid, noconnection}, State) ->
 
 handle_info(Info, State) ->
     io:format("ℹ️ Unexpected message: ~p~n", [Info]),
-    {noreply, State}.
+    {noreply, State};
 
 handle_info(send_periodic_timer_updates, State) ->
     lists:foreach(fun({PlayerID, PlayerRecord}) ->
