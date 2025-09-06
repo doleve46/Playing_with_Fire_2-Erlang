@@ -937,9 +937,13 @@ detect_enhanced_player_movement_change(NewRecord, _CurrentMapState) ->
     } = NewRecord,
    
     case Movement of
-        true when Direction =/= none, MovementTimer > 0 ->
+        true when Direction =/= none ->    % changed from true when Direction =/= none, MovementTimer > 0 ->
             TotalDuration = ?TILE_MOVE - (Speed - 1) * ?MS_REDUCTION,
             Destination = calculate_destination([X, Y], Direction),
+
+            % ADDED: calculate elapsed time if timer is already running
+            ElapsedTime = if MovementTimer > 0 -> TotalDuration - MovementTimer; true -> 0 end,
+            
             PlayerData = #{
                 player_id => PlayerNum,
                 from_pos => [X, Y],
@@ -948,6 +952,7 @@ detect_enhanced_player_movement_change(NewRecord, _CurrentMapState) ->
                 speed => Speed,
                 movement_timer => MovementTimer,
                 total_duration => TotalDuration,
+                elapsed_time => ElapsedTime,  % ADD: elapsed time
                 immunity_timer => ImmunityTimer,
                 request_timer => RequestTimer,
                 movement_confirmed => true
