@@ -403,7 +403,7 @@ handle_info(send_periodic_timer_updates, State) ->
     end, maps:to_list(State#state.last_known_players)),
     
     erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
-    {noreply, State};
+    {noreply, State}.
 
 %% Cleanup on termination
 terminate(Reason, State) ->
