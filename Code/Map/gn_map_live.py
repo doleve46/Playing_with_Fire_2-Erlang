@@ -1145,10 +1145,12 @@ class GNGameVisualizer:
         for player_id, new_player in new_state.players.items():
             if player_id in old_state.players:
                 old_player = old_state.players[player_id]
-                if ((old_player.x, old_player.y) != (new_player.x, new_player.y) and
-                        player_id not in self.player_animations):
+                old_pos = (old_player.x, old_player.y)
+                new_pos = (new_player.x, new_player.y)
+                
+                if (old_pos != new_pos and player_id not in self.player_animations):
                     self.create_walking_animation(
-                        player_id, (old_player.x, old_player.y), (new_player.x, new_player.y),
+                        player_id, old_pos, new_pos,
                         new_player.direction, new_player.speed, new_player.timers
                     )
 
