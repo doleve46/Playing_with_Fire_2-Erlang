@@ -1313,10 +1313,37 @@ class GNGameVisualizer:
             pixel_y = (MAP_SIZE - 1 - bomb.x) * TILE_SIZE + shake_y
             self.draw_enhanced_bomb_with_fsm_state(self.map_surface, pixel_x, pixel_y, bomb)
 
-        # Draw enhanced players
+        # Draw enhanced players with animation support
         for player_id, player in self.current_game_state.players.items():
-            pixel_x = player.y * TILE_SIZE + shake_x
-            pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
+            # Check if player has active animation
+            if player_id in self.player_animations:
+                anim = self.player_animations[player_id]
+                progress = anim.get('progress', 0.0)
+                
+                # Calculate animated position
+                start_pos = anim.get('start_pos', (player.x, player.y))
+                end_pos = anim.get('end_pos', (player.x, player.y))
+                
+                if len(start_pos) == 2 and len(end_pos) == 2:
+                    start_x, start_y = start_pos
+                    end_x, end_y = end_pos
+                    
+                    # Interpolate position
+                    current_x = start_x + (end_x - start_x) * progress
+                    current_y = start_y + (end_y - start_y) * progress
+                    
+                    # Convert to screen coordinates
+                    pixel_x = current_y * TILE_SIZE + shake_x
+                    pixel_y = (MAP_SIZE - 1 - current_x) * TILE_SIZE + shake_y
+                else:
+                    # Fallback to static position
+                    pixel_x = player.y * TILE_SIZE + shake_x
+                    pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
+            else:
+                # No animation - use static position
+                pixel_x = player.y * TILE_SIZE + shake_x
+                pixel_y = (MAP_SIZE - 1 - player.x) * TILE_SIZE + shake_y
+            
             self.draw_enhanced_player_with_complete_effects(self.map_surface, pixel_x, pixel_y, player)
 
         # Draw all enhanced explosions
@@ -1538,18 +1565,6 @@ class GNGameVisualizer:
             float_offset = int(3 * math.sin(self.time * 3))
             icon_x = center_x - powerup_icon.get_width() // 2
             icon_y = center_y - powerup_icon.get_height() // 2 + float_offset
-            
-            # Add a subtle glow behind the icon
-            glow_pulse = 0.7 + 0.3 * math.sin(self.time * 4)
-            glow_size = int(25 * glow_pulse)
-            
-            if glow_size > 0:
-                glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
-                glow_color = safe_get_color('POWERUP_GLOW', 'powerup_icon_glow')
-                glow_alpha = int(100 * glow_pulse)
-                glow_rgba = create_rgba_color(glow_color, glow_alpha, 'powerup_icon_glow')
-                safe_pygame_draw_circle(glow_surf, glow_rgba, (glow_size, glow_size), glow_size, context="powerup_icon_glow")
-                surface.blit(glow_surf, (center_x - glow_size, center_y - glow_size + float_offset))
             
             surface.blit(powerup_icon, (icon_x, icon_y))
             return
