@@ -839,6 +839,21 @@ class EnhancedSocketGameVisualizer:
         
         # Add to dead players
         self.current_game_state.dead_players[player_id] = death_info
+        
+        # Remove from active players if present
+        if player_id in self.current_game_state.players:
+            print(f"🎯 PYTHON: Removing player {player_id} from active players")
+            del self.current_game_state.players[player_id]
+        
+        # Clean up animations for dead player
+        if player_id in self.player_animations:
+            print(f"🎯 PYTHON: Cleaning up animations for dead player {player_id}")
+            del self.player_animations[player_id]
+            
+        print(f"🎯 PYTHON: After death - Player {player_id} in active players: {player_id in self.current_game_state.players}")
+        print(f"🎯 PYTHON: After death - Player {player_id} in dead players: {player_id in self.current_game_state.dead_players}")
+        print(f"🎯 PYTHON: Total active players: {len(self.current_game_state.players)}")
+        print(f"🎯 PYTHON: Total dead players: {len(self.current_game_state.dead_players)}")
 
     def parse_game_state(self, json_grid: List) -> bool:
         """Parse complete game state from JSON grid data"""
