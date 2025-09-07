@@ -769,7 +769,7 @@ convert_bomb_safely(_) ->
 %% Convert player info safely
 convert_player_safely(none) ->
     <<"none">>;
-convert_player_safely({PlayerID, Life, Speed, Direction, Movement, MovementTimer, ImmunityTimer, RequestTimer}) ->
+convert_player_safely({PlayerID, Life, Speed, Direction, Movement, MovementTimer, ImmunityTimer, RequestTimer, Bombs, ExplosionRadius, SpecialAbilities}) ->
     [
         ensure_integer(PlayerID),
         ensure_integer(Life),
@@ -778,10 +778,34 @@ convert_player_safely({PlayerID, Life, Speed, Direction, Movement, MovementTimer
         Movement,
         ensure_integer(MovementTimer),
         ensure_integer(ImmunityTimer),
-        ensure_integer(RequestTimer)
+        ensure_integer(RequestTimer),
+        ensure_integer(Bombs),
+        ensure_integer(ExplosionRadius),
+        convert_special_abilities_safely(SpecialAbilities)
+    ];
+convert_player_safely({PlayerID, Life, Speed, Direction, Movement, MovementTimer, ImmunityTimer, RequestTimer}) ->
+    % Backwards compatibility for old format - use default values
+    [
+        ensure_integer(PlayerID),
+        ensure_integer(Life),
+        ensure_integer(Speed),
+        safe_atom_to_binary(Direction),
+        Movement,
+        ensure_integer(MovementTimer),
+        ensure_integer(ImmunityTimer),
+        ensure_integer(RequestTimer),
+        1,  % Default bombs
+        1,  % Default explosion_radius
+        []  % Default empty special_abilities
     ];
 convert_player_safely(_) ->
     <<"none">>.
+
+%% Convert special abilities list to JSON-safe format
+convert_special_abilities_safely(SpecialAbilities) when is_list(SpecialAbilities) ->
+    [safe_atom_to_binary(Ability) || Ability <- SpecialAbilities];
+convert_special_abilities_safely(_) ->
+    [].
 
 %% Ensure value is an integer
 ensure_integer(Val) when is_integer(Val) -> Val;
@@ -1521,7 +1545,10 @@ update_map_with_enhanced_player(Map, PlayerRecord) ->
         movement = Movement,
         movement_timer = MovementTimer,
         immunity_timer = ImmunityTimer,
-        request_timer = RequestTimer
+        request_timer = RequestTimer,
+        bombs = Bombs,
+        explosion_radius = ExplosionRadius,
+        special_abilities = SpecialAbilities
     } = PlayerRecord,
    
     if X >= 0, X < ?MAP_SIZE, Y >= 0, Y < ?MAP_SIZE ->
@@ -1530,7 +1557,8 @@ update_map_with_enhanced_player(Map, PlayerRecord) ->
         
         EnhancedPlayerInfo = {
             PlayerID, Life, Speed, Direction, Movement, 
-            MovementTimer, ImmunityTimer, RequestTimer
+            MovementTimer, ImmunityTimer, RequestTimer,
+            Bombs, ExplosionRadius, SpecialAbilities
         },
         
         NewCell = update_cell_enhanced_player(OldCell, EnhancedPlayerInfo),

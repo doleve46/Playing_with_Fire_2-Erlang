@@ -231,8 +231,15 @@ class PlayerState:
     direction: str
     movement: bool
     timers: PlayerTimers
+    bombs: int = 1
+    explosion_radius: int = 1
+    special_abilities: list = None
     status: str = 'alive'
     last_update: float = 0.0
+    
+    def __post_init__(self):
+        if self.special_abilities is None:
+            self.special_abilities = []
 
 @dataclass
 class BombState:
@@ -496,6 +503,15 @@ class EnhancedSocketGameVisualizer:
             'bigger_explosion': 'increased radius.png',
             'plus_life': 'extra life.png',
             'freeze_bomb': 'freeze bomb.png'
+        }
+        
+        # Map special abilities to display names and icons
+        self.special_ability_mapping = {
+            'remote_ignition': ('remote bomb.png', 'Remote'),
+            'repeat_bombs': ('cool weird bomb icon.png', 'Repeat'),
+            'kick_bomb': ('kick bomb.png', 'Kick'),
+            'phased': ('phase v2.png', 'Phase'),
+            'freeze_bomb': ('freeze bomb.png', 'Freeze')
         }
         self.load_powerup_icons()
 
@@ -1096,11 +1112,11 @@ class EnhancedSocketGameVisualizer:
                     return PlayerState(
                         player_id=player_num, x=x, y=y, health=3, speed=1,
                         direction='north', movement=False,
-                        timers=PlayerTimers(), status='alive',
-                        last_update=self.time
+                        timers=PlayerTimers(), bombs=1, explosion_radius=1, special_abilities=[],
+                        status='alive', last_update=self.time
                     )
             elif isinstance(player_info, (list, tuple)) and len(player_info) >= 8:
-                # Enhanced format: [player_id, life, speed, direction, movement, movement_timer, immunity_timer, request_timer]
+                # Enhanced format: [player_id, life, speed, direction, movement, movement_timer, immunity_timer, request_timer, bombs?, explosion_radius?, special_abilities?]
                 player_id = player_info[0]
                 health = int(player_info[1]) if str(player_info[1]).replace('-', '').isdigit() else 3
                 speed = int(player_info[2]) if str(player_info[2]).replace('-', '').isdigit() else 1
@@ -1109,6 +1125,19 @@ class EnhancedSocketGameVisualizer:
                 movement_timer = int(player_info[5]) if str(player_info[5]).replace('-', '').isdigit() else 0
                 immunity_timer = int(player_info[6]) if str(player_info[6]).replace('-', '').isdigit() else 0
                 request_timer = int(player_info[7]) if str(player_info[7]).replace('-', '').isdigit() else 0
+                
+                # Parse new power-up fields if available (length >= 11)
+                bombs = 1
+                explosion_radius = 1
+                special_abilities = []
+                
+                if len(player_info) >= 11:
+                    bombs = int(player_info[8]) if str(player_info[8]).replace('-', '').isdigit() else 1
+                    explosion_radius = int(player_info[9]) if str(player_info[9]).replace('-', '').isdigit() else 1
+                    if isinstance(player_info[10], (list, tuple)):
+                        special_abilities = [str(ability) for ability in player_info[10]]
+                    elif isinstance(player_info[10], str) and player_info[10] != '':
+                        special_abilities = [str(player_info[10])]
 
                 # Extract player number
                 if isinstance(player_id, str) and 'player_' in player_id:
@@ -1127,6 +1156,7 @@ class EnhancedSocketGameVisualizer:
                     player_id=player_num, x=x, y=y, health=health, speed=speed,
                     direction=direction, movement=movement,
                     timers=PlayerTimers(movement_timer, immunity_timer, request_timer),
+                    bombs=bombs, explosion_radius=explosion_radius, special_abilities=special_abilities,
                     status='alive', last_update=self.time
                 )
         except (ValueError, TypeError, IndexError):
@@ -1528,7 +1558,7 @@ class EnhancedSocketGameVisualizer:
             'death_time': death_time,
             'local_gn': local_gn,
             'start_time': self.time,
-            'duration': 3.0,
+            'duration': 5.0,
             'last_known_state': last_known_state,
             'active': True
         })
@@ -3358,6 +3388,101 @@ class EnhancedSocketGameVisualizer:
                 for i in range(boost_level):
                     arrow_x = avatar_x + 110 + i * 10
                     self.draw_enhanced_mini_speed_arrow(surface, arrow_x, stats_start_y + stat_height * 3 + 8)
+                    
+            # Power-up display - Line 1: Explosion radius and Bomb Type
+            powerup_y = stats_start_y + stat_height * 4
+            self.draw_player_powerup_line1(surface, avatar_x + 35, powerup_y, player_data, is_dead)
+            
+            # Power-up display - Line 2: Max Bombs and Special
+            powerup_y2 = stats_start_y + stat_height * 5
+            self.draw_player_powerup_line2(surface, avatar_x + 35, powerup_y2, player_data, is_dead)
+        elif is_dead and player_data:
+            # Show grayed out speed for dead players
+            current_speed = player_data.speed
+            speed_text = f"Speed: {current_speed}"
+            speed_color = COLORS['TEXT_GREY']
+            speed_surface = self.small_font.render(speed_text, True, speed_color)
+            surface.blit(speed_surface, (avatar_x + 35, stats_start_y + stat_height * 3))
+            
+            # Show grayed out power-ups for dead players
+            powerup_y = stats_start_y + stat_height * 4
+            self.draw_player_powerup_line1(surface, avatar_x + 35, powerup_y, player_data, is_dead)
+            
+            powerup_y2 = stats_start_y + stat_height * 5
+            self.draw_player_powerup_line2(surface, avatar_x + 35, powerup_y2, player_data, is_dead)
+
+    def draw_player_powerup_line1(self, surface, x, y, player_data, is_dead):
+        """Draw power-up line 1: [explosion icon] [radius value]  Bomb Type: [bomb icon if applicable]"""
+        text_color = COLORS['TEXT_GREY'] if is_dead else COLORS['TEXT_WHITE']
+        icon_size = 16
+        
+        # Explosion radius icon and value
+        if 'bigger_explosion' in self.powerup_panel_icons:
+            explosion_icon = self.powerup_panel_icons['bigger_explosion']
+            surface.blit(explosion_icon, (x, y))
+        
+        radius_text = str(player_data.explosion_radius)
+        radius_surface = self.small_font.render(radius_text, True, text_color)
+        surface.blit(radius_surface, (x + icon_size + 3, y + 2))
+        
+        # Bomb Type label and icon
+        bomb_type_text = "Bomb Type:"
+        bomb_type_surface = self.small_font.render(bomb_type_text, True, text_color)
+        bomb_type_x = x + icon_size + 25
+        surface.blit(bomb_type_surface, (bomb_type_x, y + 2))
+        
+        # Determine bomb type from special abilities
+        bomb_icon = None
+        if 'remote_ignition' in player_data.special_abilities:
+            bomb_icon = self.powerup_panel_icons.get('remote_ignition')
+        elif 'repeat_bombs' in player_data.special_abilities:
+            bomb_icon = self.powerup_panel_icons.get('repeat_bombs')
+        
+        if bomb_icon:
+            bomb_icon_x = bomb_type_x + 70
+            surface.blit(bomb_icon, (bomb_icon_x, y))
+
+    def draw_player_powerup_line2(self, surface, x, y, player_data, is_dead):
+        """Draw power-up line 2: Max Bombs: [number]  Special: [special power if applicable]"""
+        text_color = COLORS['TEXT_GREY'] if is_dead else COLORS['TEXT_WHITE']
+        
+        # Max Bombs
+        bombs_text = f"Max Bombs: {player_data.bombs}"
+        bombs_surface = self.small_font.render(bombs_text, True, text_color)
+        surface.blit(bombs_surface, (x, y + 2))
+        
+        # Special abilities
+        special_text = "Special:"
+        special_surface = self.small_font.render(special_text, True, text_color)
+        special_x = x + 80
+        surface.blit(special_surface, (special_x, y + 2))
+        
+        # Find special ability (only one should be active at a time)
+        special_ability = None
+        special_icon = None
+        
+        for ability in player_data.special_abilities:
+            if ability in ['freeze_bomb', 'kick_bomb', 'phased']:
+                special_ability = ability
+                if ability == 'freeze_bomb':
+                    special_ability = 'freeze'
+                elif ability == 'kick_bomb':
+                    special_ability = 'kick'
+                elif ability == 'phased':
+                    special_ability = 'phase'
+                special_icon = self.powerup_panel_icons.get(ability)
+                break
+        
+        if special_ability:
+            # Draw special ability text
+            ability_surface = self.small_font.render(special_ability, True, text_color)
+            ability_x = special_x + 50
+            surface.blit(ability_surface, (ability_x, y + 2))
+            
+            # Draw special ability icon if available
+            if special_icon:
+                icon_x = ability_x + len(special_ability) * 6 + 5
+                surface.blit(special_icon, (icon_x, y))
 
     def draw_enhanced_mini_player(self, surface, x, y, player_num, scale=1.0, is_dead=False):
         """Draw enhanced mini player"""
