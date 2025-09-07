@@ -3570,6 +3570,24 @@ class EnhancedSocketGameVisualizer:
         # Enhanced status display
         self.draw_enhanced_status_display()
 
+    def draw_death_event_indicator(self):
+        """Draw death event indicator on screen"""
+        # Show death event message for 3 seconds
+        if self.time - self.last_death_event_time < 3.0 and self.death_event_message:
+            # Calculate position (center top of screen)
+            text_surface = self.font.render(self.death_event_message, True, COLORS['TEXT_RED'])
+            text_rect = text_surface.get_rect()
+            x = (WINDOW_WIDTH - text_rect.width) // 2
+            y = 50
+            
+            # Draw background
+            bg_rect = pygame.Rect(x - 10, y - 5, text_rect.width + 20, text_rect.height + 10)
+            pygame.draw.rect(self.virtual_surface, (0, 0, 0, 180), bg_rect)
+            pygame.draw.rect(self.virtual_surface, COLORS['TEXT_RED'], bg_rect, 2)
+            
+            # Draw text
+            self.virtual_surface.blit(text_surface, (x, y))
+
     def draw_enhanced_status_display(self):
         """Draw enhanced status display"""
         status_y = 10
