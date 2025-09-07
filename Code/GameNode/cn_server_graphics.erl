@@ -872,17 +872,25 @@ send_explosion_event_to_socket(ClientPid, ExplosionData) ->
             io:format("❌ Error sending explosion event via socket: ~p~n", [Error])
     end.
 
-send_death_event_to_socket(undefined, _DeathData) ->
-    ok;
+%send_death_event_to_socket(undefined, _DeathData) ->
+%    ok;
 send_death_event_to_socket(ClientPid, DeathData) ->
     try
+        io:format("🔍 DEBUG: Starting death event socket send. ClientPid: ~p, DeathData: ~p~n", [ClientPid, DeathData]),
+        
+        ConvertedData = convert_for_json(DeathData),
+        io:format("🔍 DEBUG: Data converted for JSON: ~p~n", [ConvertedData]),
+        
         JsonMessage = #{
             <<"type">> => <<"death_event">>,
             <<"timestamp">> => erlang:system_time(millisecond),
-            <<"data">> => convert_for_json(DeathData)
+            <<"data">> => ConvertedData
         },
+        io:format("🔍 DEBUG: JSON message created: ~p~n", [JsonMessage]),
         
         JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
+        io:format("🔍 DEBUG: JSON encoded successfully, size: ~p bytes~n", [byte_size(JsonBinary)]),
+        
         DataLength = byte_size(JsonBinary),
         Message = <<DataLength:32/big, JsonBinary/binary>>,
         
@@ -892,8 +900,8 @@ send_death_event_to_socket(ClientPid, DeathData) ->
         LocalGN = maps:get(local_gn, DeathData),
         io:format("💀 JSON death event sent via socket for player ~w on ~w~n", [PlayerID, LocalGN])
     catch
-        _:Error ->
-            io:format("❌ Error sending death event via socket: ~p~n", [Error])
+        error:Error:Stacktrace ->
+            io:format("❌ Error sending death event via socket: ~p~nStacktrace: ~p~n", [Error, Stacktrace])
     end.
 
 %%%===================================================================
