@@ -518,8 +518,8 @@ class EnhancedSocketGameVisualizer:
         icons_path = os.path.join(script_dir, "assets", "powerup icons")
         
         # Calculate icon sizes
-        map_icon_size = int(TILE_SIZE * 0.8)  # 32px for 40px tiles (map display)
-        panel_icon_size = 20  # Smaller size for panel display
+        map_icon_size = int(TILE_SIZE * 1.0)  # 40px for 40px tiles (full tile size for map display)
+        panel_icon_size = 50  # Proper 50px size for panel display
         
         if not os.path.exists(icons_path):
             self.create_fallback_icons(map_icon_size, panel_icon_size)
@@ -3262,21 +3262,19 @@ class EnhancedSocketGameVisualizer:
 
         start_x = 20
         start_y = 100
-        panel_icon_size = 50  # Increased from 20 to 50 pixels
+        panel_icon_size = 50  # 50x50 pixel icons
         
         for i, (powerup_type, name, color) in enumerate(powerup_types):
-            x = start_x + (i % 6) * 140  # Increased spacing from 100 to 140
-            y = start_y + (i // 6) * 70  # Increased vertical spacing from 30 to 70
+            x = start_x + (i % 5) * 200  # 5 powerups per row with 200px spacing
+            y = start_y + (i // 5) * 60   # Rows with 60px vertical spacing
             
             # Animated glow
             glow_intensity = 0.7 + 0.3 * math.sin(self.time * 3 + i * 0.5)
             
-            # Try to use the loaded panel icon first
+            # Try to use the loaded panel icon (now properly sized at 50px)
             panel_icon = self.powerup_panel_icons.get(powerup_type)
             if panel_icon:
-                # Scale the panel icon to 50x50 pixels
-                scaled_panel_icon = pygame.transform.scale(panel_icon, (panel_icon_size, panel_icon_size))
-                self.powerup_panel_surface.blit(scaled_panel_icon, (x, y))
+                self.powerup_panel_surface.blit(panel_icon, (x, y))
             else:
                 # Fallback to colored square if icon not available
                 fallback_color = tuple(int(c * glow_intensity) for c in color)
@@ -3284,7 +3282,7 @@ class EnhancedSocketGameVisualizer:
                 pygame.draw.rect(self.powerup_panel_surface, (255, 255, 255), (x, y, panel_icon_size, panel_icon_size), 1)
             
             name_surface = self.small_font.render(name, True, color)
-            self.powerup_panel_surface.blit(name_surface, (x + panel_icon_size + 10, y + 15))  # Adjusted positioning
+            self.powerup_panel_surface.blit(name_surface, (x + panel_icon_size + 10, y + 18))  # Centered text positioning
 
         # Blit to virtual surface
         self.virtual_surface.blit(self.powerup_panel_surface, (0, POWERUP_OFFSET_Y))
