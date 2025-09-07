@@ -19,7 +19,7 @@
         get_records_at_location/2, interact_with_entity/4,
         handle_player_movement/3, insert_player_movement/2, insert_player_movement/3, check_for_obstacles/4,
         read_and_remove_bomb/2, get_gn_number_by_coord/2,
-        read_and_update_coord/3, check_entered_coord/2, update_player_cooldowns/2]).
+        read_and_update_coord/3, check_entered_coord/2, update_player_cooldowns/2, remove_player_record/2]).
 
 -import(gn_server, [get_registered_name/1]).
 
@@ -530,3 +530,18 @@ update_player_cooldowns(Message, Players_table) ->
             ok
     end,
     ok.
+
+
+remove_player_record(PlayerNum, Table) ->
+    Fun = fun() ->
+        %% Read entry from current GN
+        case mnesia:read(Table, PlayerNum, read) of
+            [Record] ->
+                %% delete from table from the GN we are leaving
+                ok = mnesia:delete(Table, Record, write),
+                io:format("DEBUG: remove_player_record - Player ~p removed from table ~p~n", [PlayerNum, Table]);
+            [] ->
+                {error, not_found}
+        end
+    end,
+    mnesia:activity(transaction, Fun).

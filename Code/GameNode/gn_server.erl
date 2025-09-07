@@ -178,6 +178,15 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
             {noreply, State};
         {cooldown_update, TargetGN, UpdateContent} ->
             gn_server:cast_message(cn_server, {forward_request, TargetGN, {cooldown_update, TargetGN, UpdateContent}}),
+            {noreply, State};
+
+        %% * Handling player death message
+        {player_died, ThisGN, PlayerNum} ->
+            %% Player has died, remove from mnesia table
+            req_player_move:remove_player_record(PlayerNum, State#gn_state.players_table_name),
+            {noreply, State};
+        {player_died, TargetGN, PlayerNum} ->
+            gn_server:cast_message(cn_server, {forward_request, TargetGN, {player_died, TargetGN, PlayerNum}}),
             {noreply, State}
     end;
 
@@ -271,6 +280,15 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
         %% * An answer from target GN for a bomb placement was forwarded back to us (local GN) - notify player FSM
         {PlayerNum, bomb_result, Answer} ->
             player_fsm:gn_response(PlayerNum, {bomb_result, Answer}),
+            {noreply, State};
+
+        %% * Handling player death message
+        {player_died, ThisGN, PlayerNum} ->
+            %% Player has died, remove from mnesia table
+            req_player_move:remove_player_record(PlayerNum, State#gn_state.players_table_name),
+            {noreply, State};
+        {player_died, TargetGN, PlayerNum} ->
+            gn_server:cast_message(cn_server, {forward_request, TargetGN, {player_died, TargetGN, PlayerNum}}),
             {noreply, State}
             
     end;
