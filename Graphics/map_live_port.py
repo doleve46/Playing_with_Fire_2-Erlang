@@ -684,14 +684,18 @@ class EnhancedSocketGameVisualizer:
                 self.backend_constants.update(new_backend_timing)
                 self.timer_update_frequency = self.backend_constants.get('tick_delay', TICK_DELAY) / 1000.0
 
-            # Check for newly dead players
+            # Check for newly dead players and merge with existing dead players
             for player_id, death_info in new_dead_players.items():
                 player_id_int = int(player_id)
                 if player_id_int not in self.current_game_state.dead_players:
                     self.create_enhanced_death_animation(player_id_int, death_info)
             
-            # Update game state
-            self.current_game_state.dead_players = {int(k): v for k, v in new_dead_players.items()}
+            # Update game state - MERGE dead players instead of overwriting
+            # This preserves players killed by death_event messages
+            if new_dead_players:
+                for player_id, death_info in new_dead_players.items():
+                    self.current_game_state.dead_players[int(player_id)] = death_info
+                debug_log(f"Map update merged dead players. Total dead: {list(self.current_game_state.dead_players.keys())}")
             self.current_game_state.backend_timing = new_backend_timing
             self.current_game_state.update_time = time.time()
 
