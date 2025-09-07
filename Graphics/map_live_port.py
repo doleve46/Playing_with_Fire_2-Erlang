@@ -19,7 +19,7 @@ pygame.init()
 TILE_SIZE = 40  # Size of each tile in pixels
 MAP_SIZE = 16  # Size of the map in tiles (16x16)
 PLAYER_PANEL_WIDTH = 250  # Enhanced left panel for player stats
-POWERUP_PANEL_HEIGHT = 160  # Enhanced bottom panel for power-ups
+POWERUP_PANEL_HEIGHT = 200  # Enhanced bottom panel for power-ups (increased to fit 2 rows)
 TIMER_PANEL_WIDTH = 180  # Right panel for timer information
 WINDOW_WIDTH = PLAYER_PANEL_WIDTH + MAP_SIZE * TILE_SIZE + TIMER_PANEL_WIDTH + 30  # Total width
 WINDOW_HEIGHT = MAP_SIZE * TILE_SIZE + POWERUP_PANEL_HEIGHT + 30  # Total height
@@ -1971,8 +1971,12 @@ class EnhancedSocketGameVisualizer:
         else:
             self.draw_standard_bomb(surface, center_x, center_y, bomb_data)
 
-        # Draw FSM state indicator
-        self.draw_bomb_fsm_indicator(surface, center_x, center_y + TILE_SIZE//2 + 15, bomb_data.status)
+        # Draw FSM state indicator (but show "REMOTE" for remote bombs regardless of FSM status)
+        if bomb_data.status == 'remote_idle' or bomb_data.bomb_type == 'remote_ignition':
+            display_status = 'remote_idle'  # Force remote display
+        else:
+            display_status = bomb_data.status
+        self.draw_bomb_fsm_indicator(surface, center_x, center_y + TILE_SIZE//2 + 15, display_status)
 
         # Draw enhanced timer display
         if bomb_data.timer > 0:
@@ -1980,7 +1984,7 @@ class EnhancedSocketGameVisualizer:
             self.draw_enhanced_timer_display(surface, center_x, center_y + TILE_SIZE//2 + 25, timer_seconds)
         elif bomb_data.status == 'remote_idle' or bomb_data.bomb_type == 'remote_ignition':
             remote_text = "REMOTE"
-            text_surface = self.mini_font.render(remote_text, True, COLORS['TEXT_CYAN'])
+            text_surface = self.mini_font.render(remote_text, True, (50, 255, 100))  # Green color to match bomb
             text_rect = text_surface.get_rect(center=(center_x, center_y + TILE_SIZE//2 + 25))
             surface.blit(text_surface, text_rect)
         elif bomb_data.status == 'frozen':
@@ -2014,25 +2018,24 @@ class EnhancedSocketGameVisualizer:
 
     def draw_remote_bomb(self, surface, center_x, center_y, bomb_data):
         """Draw bomb in remote_idle state"""
-        # Pulsing remote indicator
-        pulse = 0.6 + 0.4 * math.sin(self.time * 3)
-        bomb_size = int(16 * pulse)
+        # Fixed size remote bomb (no breathing animation)
+        bomb_size = 16
         
-        # Remote glow
+        # Green glow for remote bombs
         remote_size = int(bomb_size * 1.5)
         remote_surf = pygame.Surface((remote_size * 2, remote_size * 2), pygame.SRCALPHA)
-        pygame.draw.circle(remote_surf, (*COLORS['TEXT_CYAN'], 100), (remote_size, remote_size), remote_size)
+        pygame.draw.circle(remote_surf, (50, 255, 100, 120), (remote_size, remote_size), remote_size)  # Green glow
         surface.blit(remote_surf, (center_x - remote_size, center_y - remote_size))
         
         # Main bomb body
         pygame.draw.circle(surface, COLORS['BOMB_BLACK'], (center_x, center_y), bomb_size)
-        pygame.draw.circle(surface, COLORS['TEXT_CYAN'], (center_x, center_y), bomb_size, 2)
+        pygame.draw.circle(surface, (50, 255, 100), (center_x, center_y), bomb_size, 2)  # Green border
         
         # Remote control indicator
-        pygame.draw.circle(surface, COLORS['TEXT_CYAN'], (center_x, center_y - bomb_size + 4), 3)
-        pygame.draw.line(surface, COLORS['TEXT_CYAN'], 
+        pygame.draw.circle(surface, (50, 255, 100), (center_x, center_y - bomb_size + 4), 3)  # Green indicator
+        pygame.draw.line(surface, (50, 255, 100), 
                         (center_x, center_y - bomb_size + 1), 
-                        (center_x, center_y - bomb_size - 8), 2)
+                        (center_x, center_y - bomb_size - 8), 2)  # Green antenna
 
     def draw_ignited_bomb(self, surface, center_x, center_y, bomb_data):
         """Draw bomb in ignited state"""
@@ -2142,7 +2145,7 @@ class EnhancedSocketGameVisualizer:
         """Draw FSM state indicator"""
         status_colors = {
             'armed': COLORS['TEXT_ORANGE'],
-            'remote_idle': COLORS['TEXT_CYAN'],
+            'remote_idle': (50, 255, 100),  # Green for remote bombs
             'frozen': COLORS['FREEZE_COLOR'],
             'moving': COLORS['TEXT_PURPLE'],
             'ignited': COLORS['BOMB_FUSE']
