@@ -3316,14 +3316,14 @@ class EnhancedSocketGameVisualizer:
                         (0, 0, WINDOW_WIDTH, POWERUP_PANEL_HEIGHT), 2)
 
         # Title
-        title_text = "POWER-UPS & SOCKET CONTROLS"
+        title_text = "CONTROLS & POWER-UPS"
         title_surface = self.title_font.render(title_text, True, COLORS['TEXT_GOLD'])
         self.powerup_panel_surface.blit(title_surface, (20, 15))
 
         # Controls info
         controls = [
-            "ESC - Exit | R - Request refresh | H - Help | Click tiles to inspect",
-            f"Socket connection to {CN_SERVER_HOST}:{CN_SERVER_PORT} with real-time updates"
+            "W - Move Up | A - Move Left | S - Move Down | D - Move Right | SPACE - Place bomb | Q - Ignite Bomb (remote only) | Click tiles to inspect",
+            f"Socket connection to {CN_SERVER_HOST}:{CN_SERVER_PORT}"
         ]
         
         for i, control in enumerate(controls):
