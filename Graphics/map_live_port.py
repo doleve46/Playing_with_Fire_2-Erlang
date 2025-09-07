@@ -953,12 +953,17 @@ class EnhancedSocketGameVisualizer:
         # Update game state - but preserve dead player state
         # Only add players to active list if they're not in dead_players
         filtered_new_players = {}
+        debug_log(f"Processing map update - found {len(new_players)} players in map data")
+        debug_log(f"Current dead players: {list(self.current_game_state.dead_players.keys())}")
+        
         for player_id, player_data in new_players.items():
             if player_id not in self.current_game_state.dead_players:
                 filtered_new_players[player_id] = player_data
+                debug_log(f"Adding alive player {player_id} to active list")
             else:
                 debug_log(f"Skipping dead player {player_id} from map update")
         
+        debug_log(f"Final active players after filtering: {list(filtered_new_players.keys())}")
         self.current_game_state.players = filtered_new_players
         self.current_game_state.bombs = new_bombs
         self.current_game_state.explosions = new_explosions
@@ -3143,6 +3148,13 @@ class EnhancedSocketGameVisualizer:
             y_pos = start_y + (player_id - 1) * player_height
             player_data = self.current_game_state.players.get(player_id)
             is_dead = player_id in self.current_game_state.dead_players
+            
+            # Debug output for player 1 only (to avoid spam)
+            if player_id == 1:
+                debug_log(f"Drawing player {player_id}: player_data={player_data is not None}, is_dead={is_dead}")
+                debug_log(f"Dead players list: {list(self.current_game_state.dead_players.keys())}")
+                debug_log(f"Active players list: {list(self.current_game_state.players.keys())}")
+            
             self.draw_enhanced_single_player_stats(self.player_panel_surface, player_id, y_pos, player_height, player_data, is_dead)
 
         # Blit to virtual surface
@@ -3593,6 +3605,11 @@ class EnhancedSocketGameVisualizer:
             
             # Draw text
             self.virtual_surface.blit(text_surface, (x, y))
+        
+        # Always show current state for debugging
+        state_text = f"Dead: {list(self.current_game_state.dead_players.keys())} | Active: {list(self.current_game_state.players.keys())}"
+        state_surface = self.small_font.render(state_text, True, COLORS['TEXT_WHITE'])
+        self.virtual_surface.blit(state_surface, (10, 80))
 
     def draw_enhanced_status_display(self):
         """Draw enhanced status display"""
