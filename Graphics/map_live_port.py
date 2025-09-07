@@ -287,7 +287,7 @@ class SocketManager:
             if self.socket:
                 self.close()
                 
-            print(f"🔌 Connecting to CN server at {self.host}:{self.port}...")
+            print(f"CONNECTING to CN server at {self.host}:{self.port}...")
             
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.settimeout(SOCKET_TIMEOUT)
@@ -301,20 +301,20 @@ class SocketManager:
             self.socket.connect((self.host, self.port))
             self.connected = True
             self.connection_attempts = 0
-            
-            print("✅ Connected to CN server successfully!")
+
+            print("[SUCCESS]: Connected to CN server successfully!")
             return True
             
         except socket.timeout:
-            print("❌ Connection timeout - CN server may not be running")
+            print("[ERROR]: Connection timeout - CN server may not be running")
             self.connected = False
             return False
         except ConnectionRefusedError:
-            print("❌ Connection refused - CN server not accepting connections")
+            print("[ERROR]: Connection refused - CN server not accepting connections")
             self.connected = False
             return False
         except Exception as e:
-            print(f"❌ Connection failed: {e}")
+            print(f"[ERROR]: Connection failed: {e}")
             self.connected = False
             return False
 
@@ -338,7 +338,7 @@ class SocketManager:
                 # Receive data
                 data = self.socket.recv(4096)
                 if not data:
-                    print("⚠️ CN server disconnected")
+                    print("[WARNING] CN server disconnected")
                     self.connected = False
                     break
                     
@@ -364,7 +364,7 @@ class SocketManager:
                                 self.message_queue.append(message)
                                 
                         except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                            print(f"❌ Failed to parse message: {e}")
+                            print(f"[ERROR]: Failed to parse message: {e}")
                     else:
                         # Wait for more data
                         break
@@ -373,7 +373,7 @@ class SocketManager:
                 # Normal timeout, continue
                 continue
             except Exception as e:
-                print(f"❌ Socket error: {e}")
+                print(f"[ERROR]: Socket error: {e}")
                 self.connected = False
                 break
 
@@ -399,7 +399,7 @@ class SocketManager:
             return True
             
         except Exception as e:
-            print(f"❌ Failed to send message: {e}")
+            print(f"[ERROR]: Failed to send message: {e}")
             self.connected = False
             return False
 
@@ -413,9 +413,7 @@ class SocketManager:
             
         self.last_connect_time = current_time
         self.connection_attempts += 1
-        
-        print(f"🔄 Reconnection attempt {self.connection_attempts}/{MAX_RECONNECT_ATTEMPTS}")
-        
+                
         if self.connect():
             return True
             
@@ -437,21 +435,12 @@ class EnhancedSocketGameVisualizer:
         self.current_height = initial_height
         self.scale_factor = min(initial_width / WINDOW_WIDTH, initial_height / WINDOW_HEIGHT)
 
-        # Enhanced font system with emoji support
-        try:
-            # Try to use system fonts that support emojis
-            self.title_font = pygame.font.SysFont('dejavu sans', 36)
-            self.font = pygame.font.SysFont('dejavu sans', 24)
-            self.small_font = pygame.font.SysFont('dejavu sans', 18)
-            self.mini_font = pygame.font.SysFont('dejavu sans', 14)
-            self.powerup_font = pygame.font.SysFont('dejavu sans', 20)
-        except:
-            # Fallback to default fonts if system fonts not available
-            self.title_font = pygame.font.Font(None, 36)
-            self.font = pygame.font.Font(None, 24)
-            self.small_font = pygame.font.Font(None, 18)
-            self.mini_font = pygame.font.Font(None, 14)
-            self.powerup_font = pygame.font.Font(None, 20)
+        # Enhanced font system
+        self.title_font = pygame.font.Font(None, 36)
+        self.font = pygame.font.Font(None, 24)
+        self.small_font = pygame.font.Font(None, 18)
+        self.mini_font = pygame.font.Font(None, 14)
+        self.powerup_font = pygame.font.Font(None, 20)
 
         # Socket management
         self.socket_manager = SocketManager(CN_SERVER_HOST, CN_SERVER_PORT)
@@ -509,6 +498,10 @@ class EnhancedSocketGameVisualizer:
             'freeze_bomb': 'freeze bomb.png'
         }
         self.load_powerup_icons()
+
+        # Load trophy icon for winner display
+        self.trophy_icon = None
+        self.load_trophy_icon()
 
         # Game state
         self.map_initialized = False
@@ -625,6 +618,48 @@ class EnhancedSocketGameVisualizer:
             self.powerup_icons[powerup_type] = self.create_fallback_icon(powerup_type, map_icon_size)
             self.powerup_panel_icons[powerup_type] = self.create_fallback_icon(powerup_type, panel_icon_size)
 
+    def load_trophy_icon(self):
+        """Load the trophy icon for winner display"""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        trophy_path = os.path.join(script_dir, "assets", "winners trophy icon.png")
+        
+        try:
+            if os.path.exists(trophy_path):
+                # Load the trophy icon and scale it appropriately
+                original_trophy = pygame.image.load(trophy_path).convert_alpha()
+                # Scale trophy to about 64x64 for winner display
+                trophy_size = 64
+                self.trophy_icon = pygame.transform.scale(original_trophy, (trophy_size, trophy_size))
+            else:
+                # Create a fallback trophy icon
+                self.trophy_icon = self.create_fallback_trophy_icon()
+        except pygame.error:
+            # Create a fallback trophy icon if loading fails
+            self.trophy_icon = self.create_fallback_trophy_icon()
+
+    def create_fallback_trophy_icon(self):
+        """Create a simple fallback trophy icon"""
+        trophy_size = 64
+        trophy_icon = pygame.Surface((trophy_size, trophy_size), pygame.SRCALPHA)
+        
+        # Draw a simple trophy shape
+        gold_color = (255, 215, 0)
+        
+        # Trophy cup
+        cup_rect = pygame.Rect(16, 20, 32, 24)
+        pygame.draw.ellipse(trophy_icon, gold_color, cup_rect)
+        pygame.draw.rect(trophy_icon, gold_color, (20, 32, 24, 16))
+        
+        # Trophy base
+        base_rect = pygame.Rect(12, 48, 40, 8)
+        pygame.draw.rect(trophy_icon, gold_color, base_rect)
+        
+        # Trophy handles
+        pygame.draw.circle(trophy_icon, gold_color, (12, 28), 6, 3)
+        pygame.draw.circle(trophy_icon, gold_color, (52, 28), 6, 3)
+        
+        return trophy_icon
+
     def connect_to_server(self) -> bool:
         """Connect to CN server and start receiving thread"""
         if self.socket_manager.connect():
@@ -677,7 +712,6 @@ class EnhancedSocketGameVisualizer:
             elif message_type == 'death_event':
                 self.handle_death_event(message_data)
             else:
-                print(f"⚠️ Unknown message type: {message_type}")
 
     def process_map_update(self, map_data: dict) -> bool:
         """Process map update with enhanced backend timing information"""
@@ -722,7 +756,7 @@ class EnhancedSocketGameVisualizer:
                 if self.waiting_for_initial_map:
                     self.waiting_for_initial_map = False
                     self.map_initialized = True
-                    print("✅ Initial map loaded! Now receiving real-time updates...")
+                    print("[SUCCESS]: Initial map loaded! Now receiving real-time updates...")
 
                 # Detect changes for enhanced animations
                 if self.previous_game_state:
@@ -732,7 +766,61 @@ class EnhancedSocketGameVisualizer:
             return False
             
         except Exception as e:
-            print(f"❌ Error processing map update: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        """Process map update with enhanced backend timing information"""
+        try:
+            # Start game timer on first map update
+            if self.game_start_time is None:
+                self.game_start_time = time.time()
+            
+            # Store previous state for animation detection
+            self.previous_game_state = self.copy_game_state(self.current_game_state)
+
+            # Extract enhanced map information
+            grid_data = map_data.get('map', [])
+            new_dead_players = map_data.get('dead_players', {})
+            new_backend_timing = map_data.get('backend_timing', {})
+            new_update_time = map_data.get('update_time', time.time() * 1000)
+            new_active_explosions = map_data.get('active_explosions', {})
+            
+            # Update backend constants if provided
+            if new_backend_timing:
+                self.backend_constants.update(new_backend_timing)
+                self.timer_update_frequency = self.backend_constants.get('tick_delay', TICK_DELAY) / 1000.0
+
+            # Check for newly dead players and merge with existing dead players
+            for player_id, death_info in new_dead_players.items():
+                player_id_int = int(player_id)
+                if player_id_int not in self.current_game_state.dead_players:
+                    self.create_enhanced_death_animation(player_id_int, death_info)
+            
+            # Update game state - MERGE dead players instead of overwriting
+            # This preserves players killed by death_event messages
+            if new_dead_players:
+                for player_id, death_info in new_dead_players.items():
+                    self.current_game_state.dead_players[int(player_id)] = death_info
+            self.current_game_state.backend_timing = new_backend_timing
+            self.current_game_state.update_time = time.time()
+
+            # Parse the enhanced map data
+            success = self.parse_game_state(grid_data)
+            if success:
+                # Set map as initialized if this is first successful parse
+                if self.waiting_for_initial_map:
+                    self.waiting_for_initial_map = False
+                    self.map_initialized = True
+                    print("[SUCCESS]: Initial map loaded! Now receiving real-time updates...")
+
+                # Detect changes for enhanced animations
+                if self.previous_game_state:
+                    self.detect_game_changes(self.previous_game_state, self.current_game_state)
+
+                return True
+            return False
+            
+        except Exception as e:
             import traceback
             traceback.print_exc()
             return False
@@ -912,7 +1000,7 @@ class EnhancedSocketGameVisualizer:
         if len(alive_players) == 1:
             self.game_winner = alive_players[0]
             self.game_end_time = time.time()
-            print(f"🏆 Player {self.game_winner} wins the game!")
+            print(f"Player {self.game_winner} wins the game!")
     
     def get_game_time_string(self):
         """Get formatted game time string"""
@@ -3190,7 +3278,7 @@ class EnhancedSocketGameVisualizer:
                 3: COLORS['PLAYER_3_DEAD'], 4: COLORS['PLAYER_4_DEAD']
             }
             text_color = COLORS['TEXT_GREY']
-            status_text = "💀 DEAD"
+            status_text = "[DEAD]"
             status_color = COLORS['TEXT_RED']
         else:
             player_colors = {
@@ -3202,7 +3290,7 @@ class EnhancedSocketGameVisualizer:
                 status_text = f"[ALIVE] at ({player_data.x}, {player_data.y})"
                 status_color = COLORS['TEXT_GREEN']
             else:
-                status_text = "⏳ WAITING"
+                status_text = "[WAITING]"
                 status_color = COLORS['TEXT_ORANGE']
 
         player_color = player_colors.get(player_id, COLORS['PLAYER_1'])
@@ -3470,7 +3558,7 @@ class EnhancedSocketGameVisualizer:
                 if event.key == pygame.K_ESCAPE:
                     return False
                 elif event.key == pygame.K_r:
-                    print("🔄 Manual refresh requested")
+                    print("[REFRESH] Manual refresh requested")
                     if self.socket_manager.connected:
                         self.socket_manager.send_message({
                             "type": "refresh_request",
@@ -3535,29 +3623,15 @@ class EnhancedSocketGameVisualizer:
         tile_names = {0: 'FREE_SPACE', 1: 'WOODEN_BARREL', 2: 'BRICK_WALL', 3: 'METAL_BARREL'}
         tile_name = tile_names.get(tile_type, f'UNKNOWN_{tile_type}')
 
-        print(f"\n🎯 Enhanced Tile Inspection at ({tile_x}, {tile_y}):")
-        print(f"   📍 Tile Type: {tile_name}")
-        print(f"   🎁 Power-up: {powerup}")
 
         # Check for players
         players_here = [p for p in self.current_game_state.players.values() 
                        if p.x == tile_x and p.y == tile_y]
-        for player in players_here:
-            print(f"   👤 Player {player.player_id}:")
-            print(f"      💖 Health: {player.health}")
-            print(f"      ⚡ Speed: {player.speed}")
-            print(f"      🧭 Direction: {player.direction}")
-            print(f"      ⏱️ Timers: Move={player.timers.movement_timer}ms, Immunity={player.timers.immunity_timer}ms")
 
         # Check for bombs
         bombs_here = [b for b in self.current_game_state.bombs.values() 
                      if b.x == tile_x and b.y == tile_y]
-        for bomb in bombs_here:
-            print(f"   💣 Bomb:")
-            print(f"      🎯 Type: {bomb.bomb_type}")
-            print(f"      ⏰ Timer: {bomb.timer}ms")
-            print(f"      👤 Owner: Player {bomb.owner}")
-            print(f"      🎰 FSM State: {bomb.status}")
+
 
         print()
 
@@ -3641,10 +3715,17 @@ class EnhancedSocketGameVisualizer:
             map_center_y = MAP_OFFSET_Y + (MAP_SIZE * TILE_SIZE) // 2
             
             # Winner text
-            winner_text = f"🏆 Player {self.game_winner} Wins! 🏆"
+            winner_text = f"Player {self.game_winner} Wins!"
             winner_surface = self.title_font.render(winner_text, True, COLORS['TEXT_GREEN'])
             winner_rect = winner_surface.get_rect()
-            winner_x = map_center_x - winner_rect.width // 2
+            
+            # Trophy icon dimensions
+            trophy_spacing = 20  # Space between trophy and text
+            trophy_size = 64 if self.trophy_icon else 0
+            
+            # Calculate total width including trophies
+            total_text_width = winner_rect.width + (2 * trophy_size) + (2 * trophy_spacing)
+            winner_x = map_center_x - total_text_width // 2 + trophy_size + trophy_spacing
             winner_y = map_center_y - 40
             
             # Game time text
@@ -3655,7 +3736,7 @@ class EnhancedSocketGameVisualizer:
             time_y = map_center_y + 20
             
             # Draw background for winner display
-            total_width = max(winner_rect.width, time_rect.width) + 40
+            total_width = max(total_text_width, time_rect.width) + 40
             total_height = winner_rect.height + time_rect.height + 80
             bg_x = map_center_x - total_width // 2
             bg_y = map_center_y - total_height // 2
@@ -3666,8 +3747,25 @@ class EnhancedSocketGameVisualizer:
             pygame.draw.rect(bg_surface, (0, 0, 0, 200), (0, 0, total_width, total_height))
             pygame.draw.rect(bg_surface, COLORS['TEXT_GREEN'], (0, 0, total_width, total_height), 3)
             
+            # Draw background
             self.virtual_surface.blit(bg_surface, (bg_x, bg_y))
+            
+            # Draw left trophy icon
+            if self.trophy_icon:
+                left_trophy_x = winner_x - trophy_size - trophy_spacing
+                left_trophy_y = winner_y + (winner_rect.height - trophy_size) // 2
+                self.virtual_surface.blit(self.trophy_icon, (left_trophy_x, left_trophy_y))
+            
+            # Draw winner text
             self.virtual_surface.blit(winner_surface, (winner_x, winner_y))
+            
+            # Draw right trophy icon
+            if self.trophy_icon:
+                right_trophy_x = winner_x + winner_rect.width + trophy_spacing
+                right_trophy_y = winner_y + (winner_rect.height - trophy_size) // 2
+                self.virtual_surface.blit(self.trophy_icon, (right_trophy_x, right_trophy_y))
+            
+            # Draw time text
             self.virtual_surface.blit(time_surface, (time_x, time_y))
 
     def draw_enhanced_status_display(self):
@@ -3675,17 +3773,17 @@ class EnhancedSocketGameVisualizer:
         status_y = 10
         
         if self.waiting_for_initial_map:
-            status_text = f"⏳ Connecting to {CN_SERVER_HOST}:{CN_SERVER_PORT}..."
+            status_text = f"[CONNECTING] to {CN_SERVER_HOST}:{CN_SERVER_PORT}..."
             color = COLORS['TEXT_ORANGE']
         elif not self.socket_manager.connected:
-            status_text = f"❌ Disconnected from {CN_SERVER_HOST}:{CN_SERVER_PORT}"
+            status_text = f"[DISCONNECTED] from {CN_SERVER_HOST}:{CN_SERVER_PORT}"
             color = COLORS['TEXT_RED']
         else:
             dead_count = len(self.current_game_state.dead_players)
             active_animations = (len(self.player_animations) + len(self.bomb_animations) + 
                                len(self.explosion_animations) + len(self.game_effects))
             
-            status_text = (f"🔗 Connected to CN server | Dead: {dead_count} | "
+            status_text = (f"[CONNECTED] to CN server | Dead: {dead_count} | "
                          f"Animations: {active_animations} | FPS: {self.current_fps:.1f}")
             color = COLORS['TEXT_GREEN']
 
@@ -3703,13 +3801,13 @@ class EnhancedSocketGameVisualizer:
 
     def run_enhanced_game_loop(self):
         """Main enhanced game loop with socket communication"""
-        print("🚀 Starting Enhanced Socket Game Visualizer...")
-        print(f"🔗 Connecting to CN server at {CN_SERVER_HOST}:{CN_SERVER_PORT}")
-        print("🎨 Features: Enhanced graphics, socket communication, FSM states, real-time effects")
+        print("[START] Starting Enhanced Socket Game Visualizer...")
+        print(f"[CONNECT] Connecting to CN server at {CN_SERVER_HOST}:{CN_SERVER_PORT}")
+        print("[FEATURES] Features: Enhanced graphics, socket communication, FSM states, real-time effects")
         
         # Initial connection attempt
         if not self.connect_to_server():
-            print("❌ Failed to connect to server. Will retry automatically...")
+            print("[ERROR] Failed to connect to server. Will retry automatically...")
 
         running = True
         last_reconnect_attempt = 0
@@ -3726,7 +3824,7 @@ class EnhancedSocketGameVisualizer:
             elif current_time - last_reconnect_attempt > RECONNECT_DELAY:
                 # Attempt reconnection
                 if self.socket_manager.attempt_reconnect():
-                    print("✅ Reconnected to CN server!")
+                    print("[SUCCESS]: Reconnected to CN server!")
                     self.connection_status = "Connected"
                 else:
                     self.connection_status = "Reconnecting..."
@@ -3744,7 +3842,7 @@ class EnhancedSocketGameVisualizer:
                 
                 waiting_pulse = 0.8 + 0.2 * math.sin(self.time * 3)
                 
-                main_text = f"⏳ Connecting to Enhanced CN Server..."
+                main_text = f"[CONNECTING] Connecting to Enhanced CN Server..."
                 main_surface = self.font.render(main_text, True, 
                                               tuple(int(c * waiting_pulse) for c in COLORS['TEXT_WHITE']))
                 main_rect = main_surface.get_rect(center=(self.current_width // 2, self.current_height // 2 - 30))
@@ -3766,7 +3864,7 @@ class EnhancedSocketGameVisualizer:
 
         # Cleanup
         print("\n🛑 Enhanced Game Visualizer shutting down...")
-        print(f"📊 Final Statistics: FPS: {self.current_fps:.1f}, Messages: {self.message_count}")
+        print(f"[STATS] Final Statistics: FPS: {self.current_fps:.1f}, Messages: {self.message_count}")
         
         self.socket_manager.running = False
         self.socket_manager.close()
