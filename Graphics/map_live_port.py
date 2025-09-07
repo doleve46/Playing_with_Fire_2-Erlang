@@ -8,9 +8,26 @@ import socket
 import json
 import threading
 import os
+import logging
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
+
+# Set up logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('death_debug.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+def debug_log(message):
+    """Debug logging function"""
+    logging.info(f"🎯 PYTHON: {message}")
+    print(f"🎯 PYTHON: {message}")  # Also print to console
+    sys.stdout.flush()  # Force flush
 
 # Initialize Pygame
 pygame.init()
@@ -431,6 +448,10 @@ class EnhancedSocketGameVisualizer:
         self.powerup_pulse = 0.0
         self.camera_shake = 0.0
         self.selected_tile = None
+        
+        # Death event tracking for visual indicator
+        self.last_death_event_time = 0.0
+        self.death_event_message = ""
 
         # Backend constants (will be updated from server)
         self.backend_constants = {
@@ -634,6 +655,7 @@ class EnhancedSocketGameVisualizer:
             elif message_type == 'explosion_event':
                 self.handle_explosion_event(message_data)
             elif message_type == 'death_event':
+                debug_log(f"Received death_event message: {message_data}")
                 self.handle_death_event(message_data)
             else:
                 print(f"⚠️ Unknown message type: {message_type}")
@@ -833,6 +855,11 @@ class EnhancedSocketGameVisualizer:
         local_gn = death_data.get('local_gn', 'unknown')
         last_known_state = death_data.get('last_known_state')
         
+        debug_log(f"Handling death event for player {player_id}")
+        debug_log(f"Death time: {death_time}, local_gn: {local_gn}")
+        debug_log(f"Before death - Player {player_id} in active players: {player_id in self.current_game_state.players}")
+        debug_log(f"Before death - Player {player_id} in dead players: {player_id in self.current_game_state.dead_players}")
+        
         # Create death animation
         death_info = (death_time, last_known_state, local_gn)
         self.create_enhanced_death_animation(player_id, death_info)
@@ -840,20 +867,24 @@ class EnhancedSocketGameVisualizer:
         # Add to dead players
         self.current_game_state.dead_players[player_id] = death_info
         
+        # Set visual indicator
+        self.last_death_event_time = self.time
+        self.death_event_message = f"Player {player_id} DIED!"
+        
         # Remove from active players if present
         if player_id in self.current_game_state.players:
-            print(f"🎯 PYTHON: Removing player {player_id} from active players")
+            debug_log(f"Removing player {player_id} from active players")
             del self.current_game_state.players[player_id]
         
         # Clean up animations for dead player
         if player_id in self.player_animations:
-            print(f"🎯 PYTHON: Cleaning up animations for dead player {player_id}")
+            debug_log(f"Cleaning up animations for dead player {player_id}")
             del self.player_animations[player_id]
             
-        print(f"🎯 PYTHON: After death - Player {player_id} in active players: {player_id in self.current_game_state.players}")
-        print(f"🎯 PYTHON: After death - Player {player_id} in dead players: {player_id in self.current_game_state.dead_players}")
-        print(f"🎯 PYTHON: Total active players: {len(self.current_game_state.players)}")
-        print(f"🎯 PYTHON: Total dead players: {len(self.current_game_state.dead_players)}")
+        debug_log(f"After death - Player {player_id} in active players: {player_id in self.current_game_state.players}")
+        debug_log(f"After death - Player {player_id} in dead players: {player_id in self.current_game_state.dead_players}")
+        debug_log(f"Total active players: {len(self.current_game_state.players)}")
+        debug_log(f"Total dead players: {len(self.current_game_state.dead_players)}")
 
     def parse_game_state(self, json_grid: List) -> bool:
         """Parse complete game state from JSON grid data"""
@@ -896,6 +927,9 @@ class EnhancedSocketGameVisualizer:
                 if player_info != 'none':
                     player_data = self.parse_player_info(player_info, x, y)
                     if player_data:
+                        # Debug: Check if this player is supposed to be dead
+                        if player_data.player_id in self.current_game_state.dead_players:
+                            debug_log(f"Map update contains dead player {player_data.player_id} at ({x}, {y}) - will be filtered out")
                         new_players[player_data.player_id] = player_data
 
                 # Parse bomb information
@@ -910,8 +944,16 @@ class EnhancedSocketGameVisualizer:
                     if explosion_data:
                         new_explosions.append(explosion_data)
 
-        # Update game state
-        self.current_game_state.players = new_players
+        # Update game state - but preserve dead player state
+        # Only add players to active list if they're not in dead_players
+        filtered_new_players = {}
+        for player_id, player_data in new_players.items():
+            if player_id not in self.current_game_state.dead_players:
+                filtered_new_players[player_id] = player_data
+            else:
+                debug_log(f"Skipping dead player {player_id} from map update")
+        
+        self.current_game_state.players = filtered_new_players
         self.current_game_state.bombs = new_bombs
         self.current_game_state.explosions = new_explosions
 
@@ -3504,6 +3546,12 @@ class EnhancedSocketGameVisualizer:
         self.draw_enhanced_player_stats_panel()
         self.draw_enhanced_timer_panel()
         self.draw_enhanced_powerups_panel()
+        
+        # Draw death event indicator
+        self.draw_death_event_indicator()
+
+        # Draw death event indicator
+        self.draw_death_event_indicator()
 
         # Scale and display
         if self.scale_factor != 1.0:
