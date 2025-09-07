@@ -1981,14 +1981,142 @@ class GNGameVisualizer:
         if progress >= 1.0:
             return
 
+        explosion_type = explosion['type']
+        
+        if explosion_type == 'bomb_center_enhanced':
+            self.draw_enhanced_bomb_center_explosion(surface, explosion, progress)
+        elif explosion_type == 'explosion_ray_enhanced':
+            self.draw_enhanced_explosion_ray(surface, explosion, progress)
+        elif explosion_type == 'coordinate_explosion':
+            self.draw_coordinate_explosion(surface, explosion, progress)
+        else:
+            self.draw_standard_explosion(surface, explosion, progress)
+
+    def draw_enhanced_bomb_center_explosion(self, surface, explosion, progress):
+        """Draw enhanced central bomb explosion with multiple phases"""
+        center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
+        radius = explosion.get('radius', 2)
+        bomb_type = explosion.get('bomb_type', 'normal_bomb')
+
+        if progress < 0.2:  # Initial blast wave
+            blast_radius = int(progress * 120 * radius / 2)
+            intensity = 1.0 - progress * 3
+            
+            # Multi-layered explosion
+            for layer in range(4):
+                layer_radius = max(1, blast_radius - layer * 15)
+                layer_alpha = int(255 * intensity * (1 - layer * 0.2))
+                
+                if layer == 0:
+                    color = safe_get_color('EXPLOSION_CORE', 'bomb_explosion_core')
+                elif layer == 1:
+                    color = safe_get_color('EXPLOSION_MIDDLE', 'bomb_explosion_middle')
+                else:
+                    color = safe_get_color('EXPLOSION_OUTER', 'bomb_explosion_outer')
+                
+                explosion_surf = pygame.Surface((layer_radius * 2, layer_radius * 2), pygame.SRCALPHA)
+                explosion_rgba = create_rgba_color(color, layer_alpha, f'bomb_explosion_layer_{layer}')
+                safe_pygame_draw_circle(explosion_surf, explosion_rgba, 
+                                 (layer_radius, layer_radius), layer_radius, context=f"bomb_explosion_{layer}")
+                surface.blit(explosion_surf, (center_x - layer_radius, center_y - layer_radius))
+                
+        elif progress < 0.6:  # Fire and debris phase
+            fire_progress = (progress - 0.2) / 0.4
+            
+            # Fire particles
+            for i in range(20 + radius * 5):
+                angle = random.random() * 2 * math.pi
+                distance = random.random() * 60 * radius / 2
+                particle_x = center_x + int(math.cos(angle) * distance)
+                particle_y = center_y + int(math.sin(angle) * distance) - int(fire_progress * 20)
+                
+                particle_size = random.randint(2, 8)
+                fire_intensity = 1.0 - fire_progress
+                
+                # Color varies from white-hot to red
+                if fire_intensity > 0.7:
+                    color = validate_color((255, 255, int(200 + 55 * fire_intensity)), 'fire_white_hot')
+                elif fire_intensity > 0.4:
+                    color = validate_color((255, int(100 + 155 * fire_intensity), 0), 'fire_orange')
+                else:
+                    color = validate_color((int(100 + 155 * fire_intensity), 0, 0), 'fire_red')
+                
+                alpha = int(255 * fire_intensity)
+                if alpha > 0:
+                    particle_surf = pygame.Surface((particle_size * 2, particle_size * 2), pygame.SRCALPHA)
+                    particle_rgba = create_rgba_color(color, alpha, 'fire_particle')
+                    safe_pygame_draw_circle(particle_surf, particle_rgba, 
+                                     (particle_size, particle_size), particle_size, context="fire_particle")
+                    surface.blit(particle_surf, (particle_x - particle_size, particle_y - particle_size))
+
+    def draw_enhanced_explosion_ray(self, surface, explosion, progress):
+        """Draw enhanced explosion ray with realistic propagation"""
+        if progress > 1.0:
+            return
+
+        center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
+        distance = explosion.get('distance', 1)
+        intensity = explosion.get('intensity', 1.0)
+        bomb_type = explosion.get('bomb_type', 'normal_bomb')
+
+        # Enhanced ray visualization
+        ray_intensity = intensity * (1.0 - progress * 0.7)
+        ray_size = int(TILE_SIZE * 0.9 * ray_intensity)
+
+        if ray_size > 0:
+            # Type-specific effects
+            if bomb_type == 'remote_ignition':
+                base_color = safe_get_color('TEXT_CYAN', 'remote_explosion_ray')
+            elif bomb_type == 'freeze_bomb':
+                base_color = safe_get_color('FREEZE_COLOR', 'freeze_explosion_ray')
+            else:
+                base_color = safe_get_color('EXPLOSION_MIDDLE', 'standard_explosion_ray')
+
+            # Multi-layer explosion ray
+            for layer in range(3):
+                layer_size = max(1, ray_size - layer * 6)
+                layer_alpha = int(200 * ray_intensity * (1 - layer * 0.3))
+                
+                if layer == 0:
+                    color = safe_get_color('EXPLOSION_CORE', 'explosion_ray_core')
+                elif layer == 1:
+                    color = base_color
+                else:
+                    color = safe_get_color('EXPLOSION_OUTER', 'explosion_ray_outer')
+
+                ray_surf = pygame.Surface((layer_size * 2, layer_size * 2), pygame.SRCALPHA)
+                ray_rgba = create_rgba_color(color, layer_alpha, f'explosion_ray_layer_{layer}')
+                safe_pygame_draw_circle(ray_surf, ray_rgba, 
+                                 (layer_size, layer_size), layer_size, context=f"explosion_ray_{layer}")
+                surface.blit(ray_surf, (center_x - layer_size, center_y - layer_size))
+
+            # Sparks and debris
+            if progress < 0.5:
+                spark_color = safe_get_color('EXPLOSION_SPARK', 'explosion_sparks')
+                for i in range(distance * 2):
+                    if random.random() < 0.6:
+                        spark_angle = random.random() * 2 * math.pi
+                        spark_distance = random.randint(ray_size, ray_size + 15)
+                        spark_x = center_x + int(math.cos(spark_angle) * spark_distance)
+                        spark_y = center_y + int(math.sin(spark_angle) * spark_distance)
+                        
+                        spark_size = random.randint(1, 3)
+                        safe_pygame_draw_circle(surface, spark_color, (spark_x, spark_y), spark_size, context="explosion_spark")
+
+    def draw_coordinate_explosion(self, surface, explosion, progress):
+        """Draw explosion at specific coordinates from explosion event"""
+        # Apply coordinate transformation like bombs and players
         center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
         center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
         explosion_type = explosion.get('explosion_type', 'standard')
         
-        # Pulsing explosion
+        # Pulsing explosion with type-specific effects
         pulse_size = int(30 * (1 - progress) * math.sin(progress * math.pi))
         
         if pulse_size > 0:
+            # Color based on explosion type
             if explosion_type == 'ice':
                 color = safe_get_color('FREEZE_COLOR', 'ice_explosion')
             elif explosion_type == 'remote':
@@ -1998,18 +2126,242 @@ class GNGameVisualizer:
 
             explosion_surf = pygame.Surface((pulse_size * 2, pulse_size * 2), pygame.SRCALPHA)
             alpha = int(200 * (1 - progress))
-            explosion_rgba = create_rgba_color(color, alpha, 'explosion_effect')
+            explosion_rgba = create_rgba_color(color, alpha, 'coordinate_explosion')
             safe_pygame_draw_circle(explosion_surf, explosion_rgba, 
-                             (pulse_size, pulse_size), pulse_size, context="explosion_circle")
+                             (pulse_size, pulse_size), pulse_size, context="coordinate_explosion")
             surface.blit(explosion_surf, (center_x - pulse_size, center_y - pulse_size))
 
+    def draw_standard_explosion(self, surface, explosion, progress):
+        """Draw standard explosion effect"""
+        # Apply coordinate transformation like bombs and players
+        center_x = explosion['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - explosion['x']) * TILE_SIZE + TILE_SIZE // 2
+        intensity = explosion.get('intensity', 1.0)
+
+        explosion_size = int(25 * intensity * (1 - progress))
+        if explosion_size > 0:
+            alpha = int(150 * (1 - progress))
+            explosion_surf = pygame.Surface((explosion_size * 2, explosion_size * 2), pygame.SRCALPHA)
+            explosion_color = safe_get_color('EXPLOSION_MIDDLE', 'standard_explosion')
+            explosion_rgba = create_rgba_color(explosion_color, alpha, 'standard_explosion')
+            safe_pygame_draw_circle(explosion_surf, explosion_rgba,
+                             (explosion_size, explosion_size), explosion_size, context="standard_explosion")
+            surface.blit(explosion_surf, (center_x - explosion_size, center_y - explosion_size))
+
     def draw_all_enhanced_game_effects(self, surface):
-        """Draw all enhanced game effects"""
+        """Draw all enhanced game effects with improved visuals"""
         for effect in self.game_effects:
             effect_type = effect.get('type', 'unknown')
             
-            if effect_type == 'player_death_enhanced':
+            if effect_type == 'bomb_kick_enhanced':
+                self.draw_enhanced_bomb_kick_effect(surface, effect)
+            elif effect_type == 'speed_boost_enhanced':
+                self.draw_enhanced_speed_boost_effect(surface, effect)
+            elif effect_type == 'speed_particle':
+                self.draw_speed_particle_effect(surface, effect)
+            elif effect_type == 'kick_particle':
+                self.draw_kick_particle_effect(surface, effect)
+            elif effect_type == 'player_death_enhanced':
                 self.draw_enhanced_player_death_effect(surface, effect)
+            elif effect_type == 'death_particle':
+                self.draw_death_particle_effect(surface, effect)
+            elif effect_type == 'damage_enhanced':
+                self.draw_enhanced_damage_effect(surface, effect)
+            elif effect_type == 'screen_flash':
+                self.draw_screen_flash_effect(surface, effect)
+
+    def draw_enhanced_bomb_kick_effect(self, surface, effect):
+        """Draw enhanced bomb kick effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+        
+        if progress > 1.0:
+            return
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
+        bomb_type = effect.get('bomb_type', 'normal_bomb')
+
+        # Impact burst with type-specific colors
+        burst_size = int(35 * progress)
+        alpha = int(150 * (1 - progress))
+
+        if burst_size > 0 and alpha > 0:
+            # Type-specific colors
+            if bomb_type == 'remote_ignition':
+                burst_color = safe_get_color('TEXT_CYAN', 'kick_remote_burst')
+            elif bomb_type == 'freeze_bomb':
+                burst_color = safe_get_color('FREEZE_COLOR', 'kick_freeze_burst')
+            else:
+                burst_color = validate_color((255, 200, 100), 'kick_normal_burst')
+
+            # Starburst pattern
+            for angle in range(0, 360, 30):
+                end_x = center_x + int(burst_size * math.cos(math.radians(angle)))
+                end_y = center_y + int(burst_size * math.sin(math.radians(angle)))
+                
+                line_width = max(1, int(4 * (1 - progress)))
+                burst_rgba = create_rgba_color(burst_color, alpha, 'kick_burst_line')
+                safe_pygame_draw_line(surface, burst_rgba, (center_x, center_y), (end_x, end_y), line_width, context="kick_burst")
+
+    def draw_enhanced_speed_boost_effect(self, surface, effect):
+        """Draw enhanced speed boost effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+        
+        if progress > 1.0:
+            return
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
+        speed = effect.get('speed', 1)
+
+        # Speed aura
+        aura_size = int(40 * (1 - progress) * (speed / 4))
+        
+        if aura_size > 0:
+            aura_alpha = int(120 * (1 - progress))
+            speed_color = safe_get_color('SPEED_BOOST_COLOR', 'speed_boost_aura')
+
+            aura_surf = pygame.Surface((aura_size * 2, aura_size * 2), pygame.SRCALPHA)
+            aura_rgba = create_rgba_color(speed_color, aura_alpha, 'speed_boost_aura')
+            safe_pygame_draw_circle(aura_surf, aura_rgba, 
+                             (aura_size, aura_size), aura_size, context="speed_boost_aura")
+            surface.blit(aura_surf, (center_x - aura_size, center_y - aura_size))
+
+    def draw_speed_particle_effect(self, surface, effect):
+        """Draw speed particle effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+        
+        if progress > 1.0:
+            return
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
+        direction = effect.get('direction', 'north')
+        particle_id = effect.get('particle_id', 0)
+
+        # Direction vectors
+        directions = {'north': (0, -1), 'south': (0, 1), 'east': (1, 0), 'west': (-1, 0)}
+        dx, dy = directions.get(direction, (0, 0))
+        
+        # Particle position
+        distance = progress * 30 + particle_id * 5
+        particle_x = center_x + dx * distance
+        particle_y = center_y + dy * distance
+        
+        # Particle properties
+        particle_size = max(1, int(6 * (1 - progress)))
+        alpha = int(180 * (1 - progress))
+        
+        if alpha > 0 and particle_size > 0:
+            particle_surf = pygame.Surface((particle_size * 2, particle_size * 2), pygame.SRCALPHA)
+            speed_color = safe_get_color('SPEED_BOOST_COLOR', 'speed_particle')
+            particle_rgba = create_rgba_color(speed_color, alpha, 'speed_particle')
+            safe_pygame_draw_circle(particle_surf, particle_rgba,
+                             (particle_size, particle_size), particle_size, context="speed_particle")
+            surface.blit(particle_surf, (particle_x - particle_size, particle_y - particle_size))
+
+    def draw_kick_particle_effect(self, surface, effect):
+        """Draw kick particle effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+        
+        if progress > 1.0:
+            return
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
+        angle = effect.get('angle', 0)
+
+        # Particle trajectory
+        distance = progress * 40
+        particle_x = center_x + int(math.cos(math.radians(angle)) * distance)
+        particle_y = center_y + int(math.sin(math.radians(angle)) * distance)
+        
+        particle_size = max(1, int(4 * (1 - progress)))
+        alpha = int(150 * (1 - progress))
+        
+        if alpha > 0:
+            kick_color = safe_get_color('TEXT_ORANGE', 'kick_particle')
+            kick_rgba = create_rgba_color(kick_color, alpha, 'kick_particle')
+            safe_pygame_draw_circle(surface, kick_rgba, (particle_x, particle_y), particle_size, context="kick_particle")
+
+    def draw_death_particle_effect(self, surface, effect):
+        """Draw death particle effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+        
+        if progress > 1.0:
+            return
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2
+        particle_id = effect.get('particle_id', 0)
+
+        # Random particle movement
+        angle = (particle_id * 45 + progress * 180) % 360
+        distance = progress * 25
+        particle_x = center_x + int(math.cos(math.radians(angle)) * distance)
+        particle_y = center_y + int(math.sin(math.radians(angle)) * distance) - int(progress * 15)
+        
+        particle_size = max(1, int(5 * (1 - progress)))
+        alpha = int(180 * (1 - progress))
+        
+        if alpha > 0:
+            death_color = safe_get_color('TEXT_RED', 'death_particle')
+            death_rgba = create_rgba_color(death_color, alpha, 'death_particle')
+            safe_pygame_draw_circle(surface, death_rgba, (particle_x, particle_y), particle_size, context="death_particle")
+
+    def draw_enhanced_damage_effect(self, surface, effect):
+        """Draw enhanced damage effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+        
+        if progress > 1.0:
+            return
+
+        center_x = effect['y'] * TILE_SIZE + TILE_SIZE // 2
+        center_y = (MAP_SIZE - 1 - effect['x']) * TILE_SIZE + TILE_SIZE // 2 - int(progress * 20)
+        damage = effect.get('damage', 1)
+
+        # Damage text effect
+        alpha = int(255 * (1 - progress))
+        if alpha > 0:
+            font_size = max(14, int(18 + damage * 4))
+            damage_font = pygame.font.Font(None, font_size)
+            damage_text = f"-{damage}"
+            
+            damage_color = safe_get_color('TEXT_RED', 'damage_text')
+            damage_rgba = create_rgba_color(damage_color, alpha, 'damage_text')
+            
+            # Create text surface with alpha
+            text_surf = damage_font.render(damage_text, True, damage_color)
+            alpha_surf = pygame.Surface(text_surf.get_size(), pygame.SRCALPHA)
+            alpha_surf.fill((*damage_color, alpha))
+            text_surf.blit(alpha_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            
+            surface.blit(text_surf, (center_x - text_surf.get_width() // 2, center_y))
+
+    def draw_screen_flash_effect(self, surface, effect):
+        """Draw screen flash effect"""
+        elapsed = self.time - effect['start_time']
+        progress = elapsed / effect['duration']
+        
+        if progress > 1.0:
+            return
+
+        intensity = effect.get('intensity', 0.5)
+        color = effect.get('color', (255, 255, 255))
+        
+        flash_alpha = int(255 * intensity * (1 - progress))
+        if flash_alpha > 0:
+            flash_surf = pygame.Surface((MAP_SIZE * TILE_SIZE, MAP_SIZE * TILE_SIZE), pygame.SRCALPHA)
+            flash_color = validate_color(color, 'screen_flash')
+            flash_rgba = create_rgba_color(flash_color, flash_alpha, 'screen_flash')
+            flash_surf.fill(flash_rgba)
+            surface.blit(flash_surf, (0, 0))
 
     def draw_enhanced_player_death_effect(self, surface, effect):
         """Draw enhanced player death effect"""

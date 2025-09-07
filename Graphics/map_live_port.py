@@ -2667,27 +2667,6 @@ class EnhancedSocketGameVisualizer:
                     pygame.draw.circle(particle_surf, (*color, alpha), 
                                      (particle_size, particle_size), particle_size)
                     surface.blit(particle_surf, (particle_x - particle_size, particle_y - particle_size))
-                    
-        else:  # Smoke phase
-            smoke_progress = (progress - 0.6) / 0.4
-            smoke_intensity = 1.0 - smoke_progress
-            
-            # Rising smoke particles
-            for i in range(10):
-                angle = random.random() * 2 * math.pi
-                base_distance = random.random() * 30
-                particle_x = center_x + int(math.cos(angle) * base_distance)
-                particle_y = center_y - int(smoke_progress * 80) + random.randint(-10, 10)
-                
-                smoke_size = random.randint(8, 20)
-                smoke_alpha = int(120 * smoke_intensity * random.random())
-                
-                if smoke_alpha > 0:
-                    smoke_color = (60, 60, 60)
-                    smoke_surf = pygame.Surface((smoke_size * 2, smoke_size * 2), pygame.SRCALPHA)
-                    pygame.draw.circle(smoke_surf, (*smoke_color, smoke_alpha),
-                                     (smoke_size, smoke_size), smoke_size)
-                    surface.blit(smoke_surf, (particle_x - smoke_size, particle_y - smoke_size))
 
     def draw_enhanced_explosion_ray(self, surface, explosion, progress):
         """Draw enhanced explosion ray with realistic propagation"""
