@@ -109,6 +109,8 @@ init([GNNodes]) ->
     start_python_visualizer(),
     
     io:format("Enhanced CN Graphics Server initialized with Socket communication~n"),
+    io:format("**DEBUG: CN Graphics Server PID: ~p~n", [self()]),
+    io:format(standard_io, "**DEBUG: CN Graphics Server PID (standard_io): ~p~n", [self()]),
     {ok, State}.
 
 % ADDED
@@ -267,6 +269,7 @@ handle_info({'EXIT', Pid, Reason}, State) when Pid == State#state.python_socket_
     {noreply, NewState};
 
 handle_info(setup_subscriptions, State) ->
+    io:format("**DEBUG: Setting up subscriptions NOW~n"),
     io:format("📡 Setting up enhanced mnesia subscriptions...~n"),
     Tables = get_all_tables(),
     SubscribedTables = setup_mnesia_subscriptions(Tables),
@@ -280,6 +283,7 @@ handle_info(monitor_gn_graphics_servers, State) ->
     {noreply, State#state{gn_graphics_servers = ReferencesList}};
 
 handle_info(periodic_update, State) ->
+    io:format("**DEBUG: Periodic update triggered~n"),
     CurrentTime = erlang:system_time(millisecond),
     
     % io:format("📡 Periodic update - GN servers list: ~p~n", [State#state.gn_graphics_servers]),
@@ -348,11 +352,14 @@ handle_info(cleanup_expired_elements, State) ->
 
 % Enhanced mnesia table event handling
 handle_info({mnesia_table_event, {write, Table, Record, _ActivityId}}, State) ->
+    io:format("**DEBUG: MNESIA WRITE EVENT for table ~w~n", [Table]),
+    io:format(standard_error, "**MNESIA_WRITE: Processing write event for table ~w~n", [Table]),
     NewState = case Record of
         #mnesia_players{} ->
             PlayerID = Record#mnesia_players.player_number,
             Position = Record#mnesia_players.position,
             io:format("**CN_GRAPHICS: Player ~w position update on table ~w: ~w~n", [PlayerID, Table, Position]),
+            io:format(standard_error, "**CN_GRAPHICS: Player ~w position update on table ~w: ~w~n", [PlayerID, Table, Position]),
             PreviousRecord = maps:get(PlayerID, State#state.last_known_players, undefined),    % ADDED
             NewLastKnown = maps:put(PlayerID, Record, State#state.last_known_players),
             
@@ -383,6 +390,7 @@ handle_info({mnesia_table_event, {write, Table, Record, _ActivityId}}, State) ->
     handle_mnesia_update(NewState);
 
 handle_info({mnesia_table_event, {delete, Table, Key, _ActivityId}}, State) ->
+    io:format("**DEBUG: MNESIA DELETE EVENT for table ~w, key ~w~n", [Table, Key]),
     NewState = case Table of
         TableName when TableName == gn1_players; TableName == gn2_players; 
                        TableName == gn3_players; TableName == gn4_players ->
@@ -1016,6 +1024,7 @@ handle_enhanced_player_death(PlayerID, Table, State) ->
 
 % ADDED: instead of detect_enhanced_player_movement_change
 detect_movement_start(PreviousRecord, NewRecord) ->
+    io:format("**DEBUG: DETECT_MOVEMENT_START called for player~n"),
     #mnesia_players{
         player_number = PlayerNum,
         position = [X, Y],
