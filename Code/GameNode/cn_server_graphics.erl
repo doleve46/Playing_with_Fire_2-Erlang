@@ -881,14 +881,19 @@ send_death_event_to_socket(ClientPid, DeathData) ->
         ConvertedData = convert_for_json(DeathData),
         io:format("🔍 DEBUG: Data converted for JSON: ~p~n", [ConvertedData]),
         
+        % Remove undefined values to avoid JSX issues
+        CleanedData = maps:filter(fun(_K, V) -> V =/= undefined end, ConvertedData),
+        io:format("🔍 DEBUG: Data cleaned (undefined removed): ~p~n", [CleanedData]),
+        
         JsonMessage = #{
             <<"type">> => <<"death_event">>,
             <<"timestamp">> => erlang:system_time(millisecond),
-            <<"data">> => ConvertedData
+            <<"data">> => CleanedData
         },
         io:format("🔍 DEBUG: JSON message created: ~p~n", [JsonMessage]),
         
-        JsonBinary = jsx:encode(JsonMessage, [return_maps, strict, {encoding, utf8}]),
+        % Use simpler JSX options
+        JsonBinary = jsx:encode(JsonMessage),
         io:format("🔍 DEBUG: JSON encoded successfully, size: ~p bytes~n", [byte_size(JsonBinary)]),
         
         DataLength = byte_size(JsonBinary),
