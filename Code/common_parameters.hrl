@@ -10,7 +10,7 @@
 -author("dolev").
 
 %% Timing related definitions
--define(EXPLODE_DELAY, 3000). % time for normal explosion to occur
+-define(EXPLODE_DELAY, 5000). % time for normal explosion to occur
 -define(FREEZE_DELAY, 2000). % time added to the counter when a bomb is frozen
 -define(TICK_DELAY, 50). % a small delay, used for very short bomb interactions and io handler polling intervals
 -define(TILE_MOVE, 1200). % time to complete a tile movement in normal movespeed (=1)

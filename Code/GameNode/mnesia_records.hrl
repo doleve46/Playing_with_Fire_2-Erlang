@@ -36,7 +36,7 @@
     direction = none, % none/up/down/left/right
     owner = none, % player name/ID (?) of whoever placed the bomb. 'none' is for a bomb that fell from a broken tile (or simply no owner)
     gn_pid, % GN Pid who oversees this process
-    internal_timer = 3000, % timer for having restore points for bomb explosion timer
+    internal_timer = 5000, % timer for having restore points for bomb explosion timer
     pid = none
 }).
 
