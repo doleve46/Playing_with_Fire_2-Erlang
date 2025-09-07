@@ -184,6 +184,8 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
         {player_died, ThisGN, PlayerNum} ->
             %% Player has died, remove from mnesia table
             req_player_move:remove_player_record(PlayerNum, State#gn_state.players_table_name),
+            %% notify graphics server directly about player death
+            gen_server:cast({global, cn_server_graphics}, {player_death_notification, PlayerNum, ThisGN}),
             {noreply, State};
         {player_died, TargetGN, PlayerNum} ->
             gn_server:cast_message(cn_server, {forward_request, TargetGN, {player_died, TargetGN, PlayerNum}}),
@@ -283,9 +285,11 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             {noreply, State};
 
         %% * Handling player death message
-        {player_died, _TargetGN, PlayerNum} ->
+        {player_died, TargetGN, PlayerNum} ->
             %% Player has died, remove from mnesia table
             req_player_move:remove_player_record(PlayerNum, State#gn_state.players_table_name),
+            %% notify graphics server directly about player death
+            gen_server:cast({global, cn_server_graphics}, {player_death_notification, PlayerNum, TargetGN}),
             {noreply, State}
             
     end;

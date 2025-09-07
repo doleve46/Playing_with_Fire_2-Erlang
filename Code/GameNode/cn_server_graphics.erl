@@ -172,6 +172,30 @@ handle_cast({add_explosions_direct, Coordinates}, State) ->
     
     {noreply, FinalState};
 
+handle_cast({player_death_notification, PlayerNum, TargetGN}, State) ->
+    io:format("💀 Received direct player death notification: Player ~w died (from GN ~w)~n", [PlayerNum, TargetGN]),
+    
+    % Determine the table name based on the target GN
+    TableName = case TargetGN of
+        'GN1_server' -> gn1_players;
+        'GN2_server' -> gn2_players;
+        'GN3_server' -> gn3_players;
+        'GN4_server' -> gn4_players;
+        _ -> 
+            io:format("⚠️ Unknown GN server: ~p, defaulting to gn1_players~n", [TargetGN]),
+            gn1_players
+    end,
+    
+    % Handle the player death directly
+    NewState = handle_enhanced_player_death(PlayerNum, TableName, State),
+    
+    % Force an immediate map update to reflect the death
+    UpdatedMapState = create_enhanced_map_state(NewState),
+    FinalState = NewState#state{current_map_state = UpdatedMapState},
+    send_map_to_all_targets(FinalState),
+    
+    {noreply, FinalState};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
