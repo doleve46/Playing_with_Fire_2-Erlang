@@ -444,7 +444,7 @@ class EnhancedSocketGameVisualizer:
 
         # Enhanced mapping dictionaries
         self.tile_mapping = {
-            'free': 0, 'breakable': 1, 'unbreakable': 2, 'strong': 3, 'player_start': 4
+            'free': 0, 'breakable': 1, 'unbreakable': 2, 'strong': 3, 'player_start': 4, 'one_hit': 5
         }
         self.powerup_mapping = {
             'none': 'none', 'move_speed': 'move_speed', 'remote_ignition': 'remote_ignition',
@@ -1562,6 +1562,8 @@ class EnhancedSocketGameVisualizer:
                     self.draw_enhanced_brick_wall(self.map_surface, pixel_x, pixel_y)
                 elif tile_type == 3:  # STRONG
                     self.draw_enhanced_metal_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
+                elif tile_type == 5:  # ONE_HIT (damaged strong barrel)
+                    self.draw_enhanced_damaged_metal_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
 
                 # Enhanced selection highlight
                 if self.selected_tile == (x, y):
@@ -1788,6 +1790,87 @@ class EnhancedSocketGameVisualizer:
                 shine_surf = pygame.Surface((3, TILE_SIZE - 8), pygame.SRCALPHA)
                 pygame.draw.rect(shine_surf, (*COLORS['METAL_SHINE'], shine_alpha), (0, 0, 3, TILE_SIZE - 8))
                 surface.blit(shine_surf, (shine_x - 1, y + 4))
+
+        # Enhanced powerup glow
+        if has_powerup:
+            self.draw_enhanced_powerup_glow(surface, center_x, center_y)
+
+    def draw_enhanced_damaged_metal_barrel(self, surface, x, y, has_powerup=False):
+        """Enhanced damaged metal barrel (one_hit state) with visible damage"""
+        # Drop shadow
+        shadow_surf = pygame.Surface((TILE_SIZE + 8, TILE_SIZE + 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow_surf, COLORS['SHADOW'], (0, 0, TILE_SIZE + 8, TILE_SIZE + 8))
+        surface.blit(shadow_surf, (x - 4, y - 4))
+
+        center_x = x + TILE_SIZE // 2
+        center_y = y + TILE_SIZE // 2
+
+        # Damaged barrel body with darker colors and dents
+        for i in range(TILE_SIZE):
+            column_x = x + i
+            distance_from_center = abs(i - TILE_SIZE // 2)
+            curvature = int(6 * (1 - (distance_from_center / (TILE_SIZE // 2))))
+            
+            # Darker damaged metal colors
+            if distance_from_center < TILE_SIZE // 4:
+                color = COLORS['METAL_MID']
+            elif distance_from_center < TILE_SIZE // 3:
+                color = COLORS['METAL_DARK']
+            else:
+                color = COLORS['METAL_SHADOW']
+            
+            # Add damage variation (darker spots)
+            if (i + int(self.time * 2)) % 7 == 0:
+                color = tuple(max(0, c - 30) for c in color)
+            
+            pygame.draw.line(surface, color, 
+                           (column_x, y + curvature + 2), 
+                           (column_x, y + TILE_SIZE - curvature - 2), 1)
+
+        # Damaged metal bands with rust/corrosion
+        band_positions = [0.2, 0.8]
+        for band_ratio in band_positions:
+            band_y = y + int(TILE_SIZE * band_ratio)
+            band_width = TILE_SIZE - 4
+            
+            # Rusty/damaged band colors
+            pygame.draw.rect(surface, (90, 60, 40), 
+                           (x + 2, band_y - 3, band_width, 6))
+            pygame.draw.rect(surface, (70, 50, 30), 
+                           (x + 2, band_y - 2, band_width, 4))
+            pygame.draw.rect(surface, COLORS['METAL_SHADOW'], 
+                           (center_x - band_width // 2, band_y - 2, band_width, 1))
+
+        # Visible cracks and damage marks
+        crack_color = (40, 40, 40)
+        
+        # Vertical crack
+        crack_x = center_x + random.randint(-8, 8)
+        pygame.draw.line(surface, crack_color, 
+                        (crack_x, y + 6), (crack_x, y + TILE_SIZE - 6), 2)
+        
+        # Horizontal crack
+        crack_y = center_y + random.randint(-6, 6)
+        pygame.draw.line(surface, crack_color, 
+                        (x + 8, crack_y), (x + TILE_SIZE - 8, crack_y), 1)
+        
+        # Dent marks (small dark circles)
+        for i in range(3):
+            dent_x = x + random.randint(8, TILE_SIZE - 8)
+            dent_y = y + random.randint(8, TILE_SIZE - 8)
+            pygame.draw.circle(surface, crack_color, (dent_x, dent_y), 2)
+
+        # Dim metallic shine (less shiny due to damage)
+        shine_positions = [0.3, 0.7]
+        for shine_ratio in shine_positions:
+            shine_x = x + int(TILE_SIZE * shine_ratio)
+            shine_intensity = 0.3 + 0.2 * math.sin(self.time * 2 + shine_ratio * 10)  # Reduced shine
+            shine_alpha = int(80 * shine_intensity)  # Much dimmer than normal
+            
+            if shine_alpha > 0:
+                shine_surf = pygame.Surface((2, TILE_SIZE - 12), pygame.SRCALPHA)
+                pygame.draw.rect(shine_surf, (*COLORS['METAL_SHINE'], shine_alpha), (0, 0, 2, TILE_SIZE - 12))
+                surface.blit(shine_surf, (shine_x - 1, y + 6))
 
         # Enhanced powerup glow
         if has_powerup:
