@@ -283,12 +283,9 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
             {noreply, State};
 
         %% * Handling player death message
-        {player_died, ThisGN, PlayerNum} ->
+        {player_died, _TargetGN, PlayerNum} ->
             %% Player has died, remove from mnesia table
             req_player_move:remove_player_record(PlayerNum, State#gn_state.players_table_name),
-            {noreply, State};
-        {player_died, TargetGN, PlayerNum} ->
-            gn_server:cast_message(cn_server, {forward_request, TargetGN, {player_died, TargetGN, PlayerNum}}),
             {noreply, State}
             
     end;
