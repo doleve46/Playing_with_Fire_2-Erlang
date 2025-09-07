@@ -3414,7 +3414,7 @@ class EnhancedSocketGameVisualizer:
     def draw_player_powerup_line1(self, surface, x, y, player_data, is_dead):
         """Draw power-up line 1: [explosion icon] [radius value]  Bomb Type: [bomb icon if applicable]"""
         text_color = COLORS['TEXT_GREY'] if is_dead else COLORS['TEXT_WHITE']
-        small_icon_size = 12  # Smaller icon size to match text height
+        small_icon_size = 14  # Smaller icon size to match text height
         
         # Explosion radius icon and value
         if 'bigger_explosion' in self.powerup_panel_icons:
