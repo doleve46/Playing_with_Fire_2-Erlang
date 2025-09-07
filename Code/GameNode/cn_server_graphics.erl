@@ -283,7 +283,6 @@ handle_info(monitor_gn_graphics_servers, State) ->
     {noreply, State#state{gn_graphics_servers = ReferencesList}};
 
 handle_info(periodic_update, State) ->
-    io:format("**DEBUG: Periodic update triggered~n"),
     CurrentTime = erlang:system_time(millisecond),
     
     % io:format("📡 Periodic update - GN servers list: ~p~n", [State#state.gn_graphics_servers]),
