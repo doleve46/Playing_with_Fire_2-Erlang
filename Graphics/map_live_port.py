@@ -2958,8 +2958,12 @@ class EnhancedSocketGameVisualizer:
         alpha = int(180 * (1 - progress))
         
         if alpha > 0:
-            pygame.draw.circle(surface, (*COLORS['TEXT_RED'], alpha), 
-                             (particle_x, particle_y), particle_size)
+            # Create a surface with per-pixel alpha for the particle
+            particle_surface = pygame.Surface((particle_size * 2, particle_size * 2), pygame.SRCALPHA)
+            particle_color = (*COLORS['TEXT_RED'], alpha)
+            pygame.draw.circle(particle_surface, particle_color, 
+                             (particle_size, particle_size), particle_size)
+            surface.blit(particle_surface, (particle_x - particle_size, particle_y - particle_size))
 
     def draw_enhanced_damage_effect(self, surface, effect):
         """Draw enhanced damage effect"""
