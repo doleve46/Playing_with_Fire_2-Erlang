@@ -358,18 +358,21 @@ handle_info({update_coord, player, PlayerNum}, State = #gn_state{}) ->
 %% * handle bomb explosions
 handle_info({'DOWN', _Ref, process, Pid, {shutdown, exploded}}, State = #gn_state{}) ->
     %% Read and remove bomb from mnesia table. Pass record to cn_server to process explosion
-    Record = case req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name) of
+    case req_player_move:read_and_remove_bomb(Pid, State#gn_state.bombs_table_name) of
         R when is_record(R, mnesia_bombs) -> 
-            R;
+            %% Successfully found and removed bomb, process explosion
+            gn_server:cast_message(cn_server, 
+                {query_request, get_registered_name(self()), 
+                    {handle_bomb_explosion, R#mnesia_bombs.position, R#mnesia_bombs.radius}}),
+            %% Update player's active bombs count, let playerFSM know.
+            notify_owner_of_bomb_explosion(R#mnesia_bombs.owner, State);
+        {error, bomb_not_found} ->
+            %% Bomb was already removed (race condition), log and continue
+            io:format("WARNING: Bomb PID ~p was already removed from table ~p (race condition)~n", 
+                     [Pid, State#gn_state.bombs_table_name]);
         Other -> 
-            io:format("ERROR: read_and_remove_bomb returned unexpected value: ~p~n", [Other]),
-            throw({unexpected_return, Other})
+            io:format("ERROR: read_and_remove_bomb returned unexpected value: ~p~n", [Other])
     end,
-    gn_server:cast_message(cn_server, 
-        {query_request, get_registered_name(self()), 
-            {handle_bomb_explosion, Record#mnesia_bombs.position, Record#mnesia_bombs.radius}}),
-    %% Update player's active bombs count, let playerFSM know.
-    notify_owner_of_bomb_explosion(Record#mnesia_bombs.owner, State),
     {noreply, State};
 
 %% * handle item creation request - from blown-up tiles
