@@ -347,10 +347,12 @@ handle_info(cleanup_expired_elements, State) ->
     {noreply, State#state{dead_players = NewDeadPlayers, active_explosions = NewExplosions}};
 
 % Enhanced mnesia table event handling
-handle_info({mnesia_table_event, {write, _Table, Record, _ActivityId}}, State) ->
+handle_info({mnesia_table_event, {write, Table, Record, _ActivityId}}, State) ->
     NewState = case Record of
         #mnesia_players{} ->
             PlayerID = Record#mnesia_players.player_number,
+            Position = Record#mnesia_players.position,
+            io:format("**CN_GRAPHICS: Player ~w position update on table ~w: ~w~n", [PlayerID, Table, Position]),
             PreviousRecord = maps:get(PlayerID, State#state.last_known_players, undefined),    % ADDED
             NewLastKnown = maps:put(PlayerID, Record, State#state.last_known_players),
             
@@ -386,6 +388,7 @@ handle_info({mnesia_table_event, {delete, Table, Key, _ActivityId}}, State) ->
                        TableName == gn3_players; TableName == gn4_players ->
             case extract_player_id_from_key(Key) of
                 {ok, PlayerID} ->
+                    io:format("**CN_GRAPHICS: Player ~w deleted from table ~w (potential death or move)~n", [PlayerID, Table]),
                     handle_enhanced_player_death(PlayerID, Table, State);
                 error ->
                     io:format("⚠️ Could not extract player ID from key: ~p~n", [Key]),
@@ -1024,10 +1027,10 @@ detect_movement_start(PreviousRecord, NewRecord) ->
         request_timer = RequestTimer
     } = NewRecord,
     
-    {PreviousMovementTimer, PreviousMovement} = case PreviousRecord of
-        undefined -> {0, false};
-        #mnesia_players{movement_timer = PrevTimer, movement = PrevMovement} -> 
-            {PrevTimer, PrevMovement}
+    {PreviousMovement} = case PreviousRecord of
+        undefined -> false;
+        #mnesia_players{movement = PrevMovement} -> 
+            PrevMovement
     end,
     
     if
@@ -1048,6 +1051,9 @@ detect_movement_start(PreviousRecord, NewRecord) ->
                 movement_confirmed => true
             },
             
+            io:format("**CN_GRAPHICS: Player ~w movement started: from ~w to ~w (direction: ~w, speed: ~w)~n", 
+                      [PlayerNum, [X, Y], Destination, Direction, Speed]),
+            
             {movement_started, PlayerData};
         
         Movement andalso MovementTimer > 0 ->
@@ -1059,6 +1065,8 @@ detect_movement_start(PreviousRecord, NewRecord) ->
                 position => [X, Y],
                 speed => Speed
             },
+            io:format("**CN_GRAPHICS: Player ~w timer update: position ~w, movement_timer ~w~n", 
+                      [PlayerNum, [X, Y], MovementTimer]),
             {timer_update, TimerData};
         
         true ->
