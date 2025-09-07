@@ -437,12 +437,21 @@ class EnhancedSocketGameVisualizer:
         self.current_height = initial_height
         self.scale_factor = min(initial_width / WINDOW_WIDTH, initial_height / WINDOW_HEIGHT)
 
-        # Enhanced font system
-        self.title_font = pygame.font.Font(None, 36)
-        self.font = pygame.font.Font(None, 24)
-        self.small_font = pygame.font.Font(None, 18)
-        self.mini_font = pygame.font.Font(None, 14)
-        self.powerup_font = pygame.font.Font(None, 20)
+        # Enhanced font system with emoji support
+        try:
+            # Try to use system fonts that support emojis
+            self.title_font = pygame.font.SysFont('dejavu sans', 36)
+            self.font = pygame.font.SysFont('dejavu sans', 24)
+            self.small_font = pygame.font.SysFont('dejavu sans', 18)
+            self.mini_font = pygame.font.SysFont('dejavu sans', 14)
+            self.powerup_font = pygame.font.SysFont('dejavu sans', 20)
+        except:
+            # Fallback to default fonts if system fonts not available
+            self.title_font = pygame.font.Font(None, 36)
+            self.font = pygame.font.Font(None, 24)
+            self.small_font = pygame.font.Font(None, 18)
+            self.mini_font = pygame.font.Font(None, 14)
+            self.powerup_font = pygame.font.Font(None, 20)
 
         # Socket management
         self.socket_manager = SocketManager(CN_SERVER_HOST, CN_SERVER_PORT)
@@ -3190,7 +3199,7 @@ class EnhancedSocketGameVisualizer:
             }
             text_color = COLORS['TEXT_WHITE']
             if player_data:
-                status_text = f"✅ ALIVE at ({player_data.x}, {player_data.y})"
+                status_text = f"[ALIVE] at ({player_data.x}, {player_data.y})"
                 status_color = COLORS['TEXT_GREEN']
             else:
                 status_text = "⏳ WAITING"
@@ -3620,9 +3629,9 @@ class EnhancedSocketGameVisualizer:
             self.virtual_surface.blit(text_surface, (x, y))
         
         # Always show current state for debugging
-        state_text = f"Dead: {list(self.current_game_state.dead_players.keys())} | Active: {list(self.current_game_state.players.keys())}"
-        state_surface = self.small_font.render(state_text, True, COLORS['TEXT_WHITE'])
-        self.virtual_surface.blit(state_surface, (10, 80))
+        #state_text = f"Dead: {list(self.current_game_state.dead_players.keys())} | Active: {list(self.current_game_state.players.keys())}"
+        #state_surface = self.small_font.render(state_text, True, COLORS['TEXT_WHITE'])
+        #self.virtual_surface.blit(state_surface, (10, 80))
 
     def draw_winner_display(self):
         """Draw winner announcement in center of map"""
