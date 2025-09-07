@@ -185,6 +185,7 @@ handle_cast({player_message, Request}, State = #gn_state{}) ->
             %% Player has died, remove from mnesia table
             req_player_move:remove_player_record(PlayerNum, State#gn_state.players_table_name),
             %% notify graphics server directly about player death
+            io:format("GN_SERVER: Sending death notification to graphics server for Player ~p on GN ~p~n", [PlayerNum, ThisGN]),
             gen_server:cast({global, cn_server_graphics}, {player_death_notification, PlayerNum, ThisGN}),
             {noreply, State};
         {player_died, TargetGN, PlayerNum} ->

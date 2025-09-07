@@ -900,6 +900,8 @@ send_death_event_to_socket(ClientPid, DeathData) ->
 %%% JSON Conversion Functions
 %%%===================================================================
 
+convert_for_json(null) ->
+    null;
 convert_for_json(#{} = Map) ->
     maps:fold(fun(K, V, Acc) ->
         NewKey = case is_atom(K) of
