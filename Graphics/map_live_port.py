@@ -2960,9 +2960,12 @@ class EnhancedSocketGameVisualizer:
         if alpha > 0:
             # Create a surface with per-pixel alpha for the particle
             particle_surface = pygame.Surface((particle_size * 2, particle_size * 2), pygame.SRCALPHA)
-            particle_color = (*COLORS['TEXT_RED'], alpha)
-            pygame.draw.circle(particle_surface, particle_color, 
+            # Use RGB color only, set alpha on the surface
+            rgb_color = COLORS['TEXT_RED']
+            pygame.draw.circle(particle_surface, rgb_color, 
                              (particle_size, particle_size), particle_size)
+            # Set the alpha for the entire surface
+            particle_surface.set_alpha(alpha)
             surface.blit(particle_surface, (particle_x - particle_size, particle_y - particle_size))
 
     def draw_enhanced_damage_effect(self, surface, effect):
