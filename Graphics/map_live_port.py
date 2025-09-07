@@ -1835,36 +1835,26 @@ class EnhancedSocketGameVisualizer:
             self.draw_legacy_powerup(surface, x, y, powerup_type)
             return
         
-        # Animated pulsing and floating effect
-        pulse = 0.9 + 0.1 * math.sin(self.time * 4)
-        float_offset = int(3 * math.sin(self.time * 2))
+        # Animated floating effect (up and down 5 pixels)
+        float_offset = int(5 * math.sin(self.time * 2))
         
         # Calculate icon position with floating animation
         icon_rect = icon.get_rect()
         icon_x = center_x - icon_rect.width // 2
         icon_y = center_y - icon_rect.height // 2 + float_offset
         
-        # Create a pulsing glow effect behind the icon
-        glow_size = int(icon_rect.width * 1.4 * pulse)
+        # Create a subtle glow effect behind the icon
+        glow_size = int(icon_rect.width * 1.2)
         if glow_size > 0:
             glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
             glow_color = COLORS.get('POWERUP_GLOW', (255, 255, 150))
-            pygame.draw.circle(glow_surf, (*glow_color, 80), (glow_size, glow_size), glow_size)
+            pygame.draw.circle(glow_surf, (*glow_color, 60), (glow_size, glow_size), glow_size)
             glow_x = center_x - glow_size
             glow_y = center_y - glow_size + float_offset
             surface.blit(glow_surf, (glow_x, glow_y))
         
-        # Draw the icon with optional scaling for pulse effect
-        if pulse != 1.0:
-            scaled_width = int(icon_rect.width * pulse)
-            scaled_height = int(icon_rect.height * pulse)
-            scaled_icon = pygame.transform.scale(icon, (scaled_width, scaled_height))
-            scaled_rect = scaled_icon.get_rect()
-            scaled_x = center_x - scaled_rect.width // 2
-            scaled_y = center_y - scaled_rect.height // 2 + float_offset
-            surface.blit(scaled_icon, (scaled_x, scaled_y))
-        else:
-            surface.blit(icon, (icon_x, icon_y))
+        # Draw the icon at fixed size with floating animation
+        surface.blit(icon, (icon_x, icon_y))
         
         # Add sparkle effects around the icon
         for i in range(3):
@@ -3260,22 +3250,23 @@ class EnhancedSocketGameVisualizer:
         # Enhanced power-up legend using actual icons
         powerup_types = [
             ('move_speed', "SPEED", COLORS['TEXT_CYAN']),
-            ('remote_ignition', "REMOTE", COLORS['TEXT_ORANGE']),
-            ('plus_bombs', "BOMBS", COLORS['TEXT_GOLD']),
-            ('bigger_explosion', "BLAST", COLORS['TEXT_RED']),
-            ('plus_life', "LIFE", COLORS['TEXT_GREEN']),
-            ('freeze_bomb', "FREEZE", COLORS['FREEZE_COLOR']),
-            ('phased', "GHOST", COLORS['TEXT_PURPLE']),
-            ('kick_bomb', "KICK", (255, 100, 255))
+            ('remote_ignition', "REMOTE BOMBS", COLORS['TEXT_ORANGE']),
+            ('plus_bombs', "EXTRA BOMBS", COLORS['TEXT_GOLD']),
+            ('repeat_bombs', "REPEATING BOMBS", COLORS['TEXT_GOLD']),
+            ('bigger_explosion', "BLAST RADIUS", COLORS['TEXT_RED']),
+            ('plus_life', "EXTRA LIFE", COLORS['TEXT_GREEN']),
+            ('freeze_bomb', "FREEZE UPON TOUCH", COLORS['FREEZE_COLOR']),
+            ('phased', "PHASED MOVEMENT", COLORS['TEXT_PURPLE']),
+            ('kick_bomb', "KICK BOMB", (255, 100, 255))
         ]
 
         start_x = 20
         start_y = 100
-        panel_icon_size = 20  # Smaller icons for the panel
+        panel_icon_size = 50  # Increased from 20 to 50 pixels
         
         for i, (powerup_type, name, color) in enumerate(powerup_types):
-            x = start_x + (i % 8) * 100
-            y = start_y + (i // 8) * 30
+            x = start_x + (i % 6) * 140  # Increased spacing from 100 to 140
+            y = start_y + (i // 6) * 70  # Increased vertical spacing from 30 to 70
             
             # Animated glow
             glow_intensity = 0.7 + 0.3 * math.sin(self.time * 3 + i * 0.5)
@@ -3283,7 +3274,9 @@ class EnhancedSocketGameVisualizer:
             # Try to use the loaded panel icon first
             panel_icon = self.powerup_panel_icons.get(powerup_type)
             if panel_icon:
-                self.powerup_panel_surface.blit(panel_icon, (x, y))
+                # Scale the panel icon to 50x50 pixels
+                scaled_panel_icon = pygame.transform.scale(panel_icon, (panel_icon_size, panel_icon_size))
+                self.powerup_panel_surface.blit(scaled_panel_icon, (x, y))
             else:
                 # Fallback to colored square if icon not available
                 fallback_color = tuple(int(c * glow_intensity) for c in color)
@@ -3291,7 +3284,7 @@ class EnhancedSocketGameVisualizer:
                 pygame.draw.rect(self.powerup_panel_surface, (255, 255, 255), (x, y, panel_icon_size, panel_icon_size), 1)
             
             name_surface = self.small_font.render(name, True, color)
-            self.powerup_panel_surface.blit(name_surface, (x + panel_icon_size + 5, y + 3))
+            self.powerup_panel_surface.blit(name_surface, (x + panel_icon_size + 10, y + 15))  # Adjusted positioning
 
         # Blit to virtual surface
         self.virtual_surface.blit(self.powerup_panel_surface, (0, POWERUP_OFFSET_Y))
