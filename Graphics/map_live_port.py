@@ -459,6 +459,11 @@ class EnhancedSocketGameVisualizer:
         self.last_death_event_time = 0.0
         self.death_event_message = ""
 
+        # Winner tracking
+        self.game_start_time = None
+        self.game_winner = None
+        self.game_end_time = None
+
         # Backend constants (will be updated from server)
         self.backend_constants = {
             'tile_move': TILE_MOVE_BASE,
@@ -661,7 +666,6 @@ class EnhancedSocketGameVisualizer:
             elif message_type == 'explosion_event':
                 self.handle_explosion_event(message_data)
             elif message_type == 'death_event':
-                debug_log(f"Received death_event message: {message_data}")
                 self.handle_death_event(message_data)
             else:
                 print(f"⚠️ Unknown message type: {message_type}")
@@ -669,6 +673,10 @@ class EnhancedSocketGameVisualizer:
     def process_map_update(self, map_data: dict) -> bool:
         """Process map update with enhanced backend timing information"""
         try:
+            # Start game timer on first map update
+            if self.game_start_time is None:
+                self.game_start_time = time.time()
+            
             # Store previous state for animation detection
             self.previous_game_state = self.copy_game_state(self.current_game_state)
 
@@ -695,7 +703,6 @@ class EnhancedSocketGameVisualizer:
             if new_dead_players:
                 for player_id, death_info in new_dead_players.items():
                     self.current_game_state.dead_players[int(player_id)] = death_info
-                debug_log(f"Map update merged dead players. Total dead: {list(self.current_game_state.dead_players.keys())}")
             self.current_game_state.backend_timing = new_backend_timing
             self.current_game_state.update_time = time.time()
 
@@ -865,11 +872,6 @@ class EnhancedSocketGameVisualizer:
         local_gn = death_data.get('local_gn', 'unknown')
         last_known_state = death_data.get('last_known_state')
         
-        debug_log(f"Handling death event for player {player_id}")
-        debug_log(f"Death time: {death_time}, local_gn: {local_gn}")
-        debug_log(f"Before death - Player {player_id} in active players: {player_id in self.current_game_state.players}")
-        debug_log(f"Before death - Player {player_id} in dead players: {player_id in self.current_game_state.dead_players}")
-        
         # Create death animation
         death_info = (death_time, last_known_state, local_gn)
         self.create_enhanced_death_animation(player_id, death_info)
@@ -883,18 +885,39 @@ class EnhancedSocketGameVisualizer:
         
         # Remove from active players if present
         if player_id in self.current_game_state.players:
-            debug_log(f"Removing player {player_id} from active players")
             del self.current_game_state.players[player_id]
         
         # Clean up animations for dead player
         if player_id in self.player_animations:
-            debug_log(f"Cleaning up animations for dead player {player_id}")
             del self.player_animations[player_id]
-            
-        debug_log(f"After death - Player {player_id} in active players: {player_id in self.current_game_state.players}")
-        debug_log(f"After death - Player {player_id} in dead players: {player_id in self.current_game_state.dead_players}")
-        debug_log(f"Total active players: {len(self.current_game_state.players)}")
-        debug_log(f"Total dead players: {len(self.current_game_state.dead_players)}")
+        
+        # Check for winner (only if we haven't already declared one)
+        if self.game_winner is None:
+            self.check_for_winner()
+
+    def check_for_winner(self):
+        """Check if there's only one player left alive and declare winner"""
+        alive_players = list(self.current_game_state.players.keys())
+        
+        # If only one player remains alive, declare them the winner
+        if len(alive_players) == 1:
+            self.game_winner = alive_players[0]
+            self.game_end_time = time.time()
+            print(f"🏆 Player {self.game_winner} wins the game!")
+    
+    def get_game_time_string(self):
+        """Get formatted game time string"""
+        if self.game_start_time is None:
+            return "0m 0s"
+        
+        # Use end time if game is over, otherwise current time
+        end_time = self.game_end_time if self.game_end_time else time.time()
+        elapsed_seconds = int(end_time - self.game_start_time)
+        
+        minutes = elapsed_seconds // 60
+        seconds = elapsed_seconds % 60
+        
+        return f"{minutes}m {seconds}s"
 
     def parse_game_state(self, json_grid: List) -> bool:
         """Parse complete game state from JSON grid data"""
@@ -937,9 +960,6 @@ class EnhancedSocketGameVisualizer:
                 if player_info != 'none':
                     player_data = self.parse_player_info(player_info, x, y)
                     if player_data:
-                        # Debug: Check if this player is supposed to be dead
-                        if player_data.player_id in self.current_game_state.dead_players:
-                            debug_log(f"Map update contains dead player {player_data.player_id} at ({x}, {y}) - will be filtered out")
                         new_players[player_data.player_id] = player_data
 
                 # Parse bomb information
@@ -957,17 +977,11 @@ class EnhancedSocketGameVisualizer:
         # Update game state - but preserve dead player state
         # Only add players to active list if they're not in dead_players
         filtered_new_players = {}
-        debug_log(f"Processing map update - found {len(new_players)} players in map data")
-        debug_log(f"Current dead players: {list(self.current_game_state.dead_players.keys())}")
         
         for player_id, player_data in new_players.items():
             if player_id not in self.current_game_state.dead_players:
                 filtered_new_players[player_id] = player_data
-                debug_log(f"Adding alive player {player_id} to active list")
-            else:
-                debug_log(f"Skipping dead player {player_id} from map update")
         
-        debug_log(f"Final active players after filtering: {list(filtered_new_players.keys())}")
         self.current_game_state.players = filtered_new_players
         self.current_game_state.bombs = new_bombs
         self.current_game_state.explosions = new_explosions
@@ -3153,12 +3167,6 @@ class EnhancedSocketGameVisualizer:
             player_data = self.current_game_state.players.get(player_id)
             is_dead = player_id in self.current_game_state.dead_players
             
-            # Debug output for player 1 only (to avoid spam)
-            if player_id == 1:
-                debug_log(f"Drawing player {player_id}: player_data={player_data is not None}, is_dead={is_dead}")
-                debug_log(f"Dead players list: {list(self.current_game_state.dead_players.keys())}")
-                debug_log(f"Active players list: {list(self.current_game_state.players.keys())}")
-            
             self.draw_enhanced_single_player_stats(self.player_panel_surface, player_id, y_pos, player_height, player_data, is_dead)
 
         # Blit to virtual surface
@@ -3572,8 +3580,9 @@ class EnhancedSocketGameVisualizer:
         # Draw death event indicator
         self.draw_death_event_indicator()
 
-        # Draw death event indicator
-        self.draw_death_event_indicator()
+        # Draw winner display only if there's a winner (only one player remains alive)
+        if self.game_winner is not None:
+            self.draw_winner_display()
 
         # Scale and display
         if self.scale_factor != 1.0:
@@ -3614,6 +3623,43 @@ class EnhancedSocketGameVisualizer:
         state_text = f"Dead: {list(self.current_game_state.dead_players.keys())} | Active: {list(self.current_game_state.players.keys())}"
         state_surface = self.small_font.render(state_text, True, COLORS['TEXT_WHITE'])
         self.virtual_surface.blit(state_surface, (10, 80))
+
+    def draw_winner_display(self):
+        """Draw winner announcement in center of map"""
+        if self.game_winner is not None:
+            # Calculate center of map area
+            map_center_x = MAP_OFFSET_X + (MAP_SIZE * TILE_SIZE) // 2
+            map_center_y = MAP_OFFSET_Y + (MAP_SIZE * TILE_SIZE) // 2
+            
+            # Winner text
+            winner_text = f"🏆 Player {self.game_winner} Wins! 🏆"
+            winner_surface = self.title_font.render(winner_text, True, COLORS['TEXT_GREEN'])
+            winner_rect = winner_surface.get_rect()
+            winner_x = map_center_x - winner_rect.width // 2
+            winner_y = map_center_y - 40
+            
+            # Game time text
+            time_text = f"Game time: {self.get_game_time_string()}"
+            time_surface = self.font.render(time_text, True, COLORS['TEXT_WHITE'])
+            time_rect = time_surface.get_rect()
+            time_x = map_center_x - time_rect.width // 2
+            time_y = map_center_y + 20
+            
+            # Draw background for winner display
+            total_width = max(winner_rect.width, time_rect.width) + 40
+            total_height = winner_rect.height + time_rect.height + 80
+            bg_x = map_center_x - total_width // 2
+            bg_y = map_center_y - total_height // 2
+            bg_rect = pygame.Rect(bg_x, bg_y, total_width, total_height)
+            
+            # Semi-transparent background
+            bg_surface = pygame.Surface((total_width, total_height), pygame.SRCALPHA)
+            pygame.draw.rect(bg_surface, (0, 0, 0, 200), (0, 0, total_width, total_height))
+            pygame.draw.rect(bg_surface, COLORS['TEXT_GREEN'], (0, 0, total_width, total_height), 3)
+            
+            self.virtual_surface.blit(bg_surface, (bg_x, bg_y))
+            self.virtual_surface.blit(winner_surface, (winner_x, winner_y))
+            self.virtual_surface.blit(time_surface, (time_x, time_y))
 
     def draw_enhanced_status_display(self):
         """Draw enhanced status display"""
