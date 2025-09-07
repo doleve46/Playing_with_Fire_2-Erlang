@@ -3286,7 +3286,7 @@ class EnhancedSocketGameVisualizer:
 
         # Draw each player's enhanced stats
         start_y = 70
-        player_height = (MAP_SIZE * TILE_SIZE - 90) // 4
+        player_height = (MAP_SIZE * TILE_SIZE - 50) // 4  # Reduced margin from 90 to 50 to give more space per player
 
         for player_id in range(1, 5):
             y_pos = start_y + (player_id - 1) * player_height
@@ -3325,7 +3325,7 @@ class EnhancedSocketGameVisualizer:
         player_color = player_colors.get(player_id, COLORS['PLAYER_1'])
 
         # Enhanced background with animated border
-        bg_rect = pygame.Rect(10, y_pos, PLAYER_PANEL_WIDTH - 20, height - 10)
+        bg_rect = pygame.Rect(10, y_pos, PLAYER_PANEL_WIDTH - 20, height - 5)  # Reduced margin from 10 to 5 for more space
         border_pulse = 0.7 + 0.3 * math.sin(self.time * 2 + player_id)
         
         # Background gradient
@@ -3414,21 +3414,26 @@ class EnhancedSocketGameVisualizer:
     def draw_player_powerup_line1(self, surface, x, y, player_data, is_dead):
         """Draw power-up line 1: [explosion icon] [radius value]  Bomb Type: [bomb icon if applicable]"""
         text_color = COLORS['TEXT_GREY'] if is_dead else COLORS['TEXT_WHITE']
-        icon_size = 16
+        small_icon_size = 12  # Smaller icon size to match text height
         
         # Explosion radius icon and value
         if 'bigger_explosion' in self.powerup_panel_icons:
             explosion_icon = self.powerup_panel_icons['bigger_explosion']
-            surface.blit(explosion_icon, (x, y))
+            # Scale down the icon to be smaller
+            scaled_icon = pygame.transform.scale(explosion_icon, (small_icon_size, small_icon_size))
+            surface.blit(scaled_icon, (x, y + 2))  # Adjust y to align with text baseline
+        else:
+            # Fallback: draw a simple circle as explosion indicator
+            pygame.draw.circle(surface, text_color, (x + small_icon_size//2, y + small_icon_size//2), small_icon_size//3)
         
         radius_text = str(player_data.explosion_radius)
         radius_surface = self.small_font.render(radius_text, True, text_color)
-        surface.blit(radius_surface, (x + icon_size + 3, y + 2))
+        surface.blit(radius_surface, (x + small_icon_size + 5, y + 2))  # More space after icon
         
         # Bomb Type label and icon
         bomb_type_text = "Bomb Type:"
         bomb_type_surface = self.small_font.render(bomb_type_text, True, text_color)
-        bomb_type_x = x + icon_size + 25
+        bomb_type_x = x + small_icon_size + 35  # More space for better separation
         surface.blit(bomb_type_surface, (bomb_type_x, y + 2))
         
         # Determine bomb type from special abilities
@@ -3439,22 +3444,29 @@ class EnhancedSocketGameVisualizer:
             bomb_icon = self.powerup_panel_icons.get('repeat_bombs')
         
         if bomb_icon:
-            bomb_icon_x = bomb_type_x + 70
-            surface.blit(bomb_icon, (bomb_icon_x, y))
+            bomb_icon_x = bomb_type_x + 80  # More space after "Bomb Type:" text
+            try:
+                # Scale down bomb icon too
+                scaled_bomb_icon = pygame.transform.scale(bomb_icon, (small_icon_size, small_icon_size))
+                surface.blit(scaled_bomb_icon, (bomb_icon_x, y + 2))
+            except pygame.error:
+                # Fallback: draw a simple rectangle as bomb indicator
+                pygame.draw.rect(surface, text_color, (bomb_icon_x, y + 2, small_icon_size, small_icon_size), 1)
 
     def draw_player_powerup_line2(self, surface, x, y, player_data, is_dead):
         """Draw power-up line 2: Max Bombs: [number]  Special: [special power if applicable]"""
         text_color = COLORS['TEXT_GREY'] if is_dead else COLORS['TEXT_WHITE']
+        small_icon_size = 12  # Same small icon size as line 1
         
         # Max Bombs
         bombs_text = f"Max Bombs: {player_data.bombs}"
         bombs_surface = self.small_font.render(bombs_text, True, text_color)
         surface.blit(bombs_surface, (x, y + 2))
         
-        # Special abilities
+        # Special abilities - more space to avoid overlap
         special_text = "Special:"
         special_surface = self.small_font.render(special_text, True, text_color)
-        special_x = x + 80
+        special_x = x + 100  # Increased from 80 to 100 for better spacing
         surface.blit(special_surface, (special_x, y + 2))
         
         # Find special ability (only one should be active at a time)
@@ -3476,13 +3488,20 @@ class EnhancedSocketGameVisualizer:
         if special_ability:
             # Draw special ability text
             ability_surface = self.small_font.render(special_ability, True, text_color)
-            ability_x = special_x + 50
+            ability_x = special_x + 55  # More space after "Special:" text
             surface.blit(ability_surface, (ability_x, y + 2))
             
             # Draw special ability icon if available
             if special_icon:
-                icon_x = ability_x + len(special_ability) * 6 + 5
-                surface.blit(special_icon, (icon_x, y))
+                icon_x = ability_x + len(special_ability) * 6 + 8  # More space before icon
+                try:
+                    # Scale down special ability icon
+                    scaled_special_icon = pygame.transform.scale(special_icon, (small_icon_size, small_icon_size))
+                    surface.blit(scaled_special_icon, (icon_x, y + 2))
+                except pygame.error:
+                    # Fallback: draw a simple triangle as special ability indicator
+                    points = [(icon_x, y + 2 + small_icon_size), (icon_x + small_icon_size//2, y + 2), (icon_x + small_icon_size, y + 2 + small_icon_size)]
+                    pygame.draw.polygon(surface, text_color, points, 1)
 
     def draw_enhanced_mini_player(self, surface, x, y, player_num, scale=1.0, is_dead=False):
         """Draw enhanced mini player"""
