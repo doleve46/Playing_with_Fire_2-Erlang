@@ -909,7 +909,9 @@ send_death_event_to_socket(ClientPid, DeathData) ->
 %%%===================================================================
 
 convert_for_json(null) ->
-    null;
+    undefined;  % JSX represents JSON null as undefined
+convert_for_json(undefined) ->
+    undefined;  % Handle undefined atoms as well
 convert_for_json(#{} = Map) ->
     maps:fold(fun(K, V, Acc) ->
         NewKey = case is_atom(K) of
