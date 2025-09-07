@@ -226,7 +226,7 @@ idle(cast, inflict_damage, Data) ->
             %% notify io/bot handler (to stop sending things, can also terminate)
             send_io_ack(player_died, NewData),
             %% notify GN - to remove player from mnesia table
-            gn_server:cast_message(Data#player_data.local_gn, {player_died, NewData#player_data.target_gn, NewData#player_data.player_number}),
+            gn_server:cast_message(Data#player_data.local_gn, {player_message, {player_died, NewData#player_data.target_gn, NewData#player_data.player_number}}),
             %% Switch to 'dead' state - process doesn't terminate, only when receiving 'killswitch'
             {next_state, dead, NewData}
     end;
@@ -298,7 +298,7 @@ waiting_for_response(cast, inflict_damage, Data) ->
             %% notify io/bot handler (to stop sending things, can also terminate)
             send_io_ack(player_died, NewData),
             %% notify GN - to remove player from mnesia table
-            gn_server:cast_message(Data#player_data.local_gn, {player_died, NewData#player_data.target_gn, NewData#player_data.player_number}),
+            gn_server:cast_message(Data#player_data.local_gn, {player_message, {player_died, NewData#player_data.target_gn, NewData#player_data.player_number}}),
             %% Switch to 'dead' state - process doesn't terminate, only when receiving 'killswitch'
             {next_state, dead, NewData}
     end;
