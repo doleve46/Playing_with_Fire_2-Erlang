@@ -1323,38 +1323,46 @@ class EnhancedSocketGameVisualizer:
         """Create death animation"""
         death_time, last_known_state, local_gn = death_info
         
+        # Determine position for death animation
         if last_known_state:
             if isinstance(last_known_state, dict):
                 pos = last_known_state.get('position', [0, 0])
             else:
                 pos = getattr(last_known_state, 'position', [0, 0])
-                
             x, y = pos if isinstance(pos, list) and len(pos) >= 2 else [0, 0]
+        else:
+            # If no last known state, try to get player position from current game state
+            if player_id in self.current_game_state.players:
+                player = self.current_game_state.players[player_id]
+                x, y = player.position if hasattr(player, 'position') else [0, 0]
+            else:
+                # Default position if no state available
+                x, y = 8, 8  # Center of map
             
+        self.game_effects.append({
+            'type': 'player_death_enhanced',
+            'player_id': player_id,
+            'x': x, 'y': y,
+            'death_time': death_time,
+            'local_gn': local_gn,
+            'start_time': self.time,
+            'duration': 3.0,
+            'last_known_state': last_known_state,
+            'active': True
+        })
+        
+        # Add death particles
+        for i in range(12):
+            angle = i * 30
             self.game_effects.append({
-                'type': 'player_death_enhanced',
+                'type': 'death_particle',
                 'player_id': player_id,
                 'x': x, 'y': y,
-                'death_time': death_time,
-                'local_gn': local_gn,
-                'start_time': self.time,
-                'duration': 3.0,
-                'last_known_state': last_known_state,
+                'angle': angle,
+                'start_time': self.time + i * 0.1,
+                'duration': 2.0,
                 'active': True
             })
-            
-            # Add death particles
-            for i in range(12):
-                angle = i * 30
-                self.game_effects.append({
-                    'type': 'death_particle',
-                    'player_id': player_id,
-                    'x': x, 'y': y,
-                    'angle': angle,
-                    'start_time': self.time + i * 0.1,
-                    'duration': 2.0,
-                    'active': True
-                })
 
     def create_damage_effect(self, player_id: int, x: int, y: int, damage: int):
         """Create damage effect"""
