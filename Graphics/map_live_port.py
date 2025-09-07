@@ -18,16 +18,22 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('death_debug.log'),
-        logging.StreamHandler(sys.stdout)
+        logging.FileHandler('death_debug.log')
     ]
 )
 
 def debug_log(message):
     """Debug logging function"""
-    logging.info(f"🎯 PYTHON: {message}")
-    print(f"🎯 PYTHON: {message}")  # Also print to console
-    sys.stdout.flush()  # Force flush
+    try:
+        logging.info(f"🎯 PYTHON: {message}")
+    except (BrokenPipeError, OSError):
+        pass  # Ignore pipe errors
+    
+    try:
+        print(f"🎯 PYTHON: {message}")  # Also print to console
+        sys.stdout.flush()  # Force flush
+    except (BrokenPipeError, OSError):
+        pass  # Ignore pipe errors
 
 # Initialize Pygame
 pygame.init()
