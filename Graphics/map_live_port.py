@@ -1805,13 +1805,13 @@ class EnhancedSocketGameVisualizer:
         center_x = x + TILE_SIZE // 2
         center_y = y + TILE_SIZE // 2
 
-        # Damaged barrel body with darker colors and dents
+        # Damaged barrel body with darker colors (static, no animation)
         for i in range(TILE_SIZE):
             column_x = x + i
             distance_from_center = abs(i - TILE_SIZE // 2)
             curvature = int(6 * (1 - (distance_from_center / (TILE_SIZE // 2))))
             
-            # Darker damaged metal colors
+            # Darker damaged metal colors (static)
             if distance_from_center < TILE_SIZE // 4:
                 color = COLORS['METAL_MID']
             elif distance_from_center < TILE_SIZE // 3:
@@ -1819,15 +1819,15 @@ class EnhancedSocketGameVisualizer:
             else:
                 color = COLORS['METAL_SHADOW']
             
-            # Add damage variation (darker spots)
-            if (i + int(self.time * 2)) % 7 == 0:
+            # Add static damage variation (darker spots at fixed positions)
+            if i % 7 == 3:  # Fixed pattern instead of time-based
                 color = tuple(max(0, c - 30) for c in color)
             
             pygame.draw.line(surface, color, 
                            (column_x, y + curvature + 2), 
                            (column_x, y + TILE_SIZE - curvature - 2), 1)
 
-        # Damaged metal bands with rust/corrosion
+        # Damaged metal bands with rust/corrosion (static)
         band_positions = [0.2, 0.8]
         for band_ratio in band_positions:
             band_y = y + int(TILE_SIZE * band_ratio)
@@ -1841,36 +1841,33 @@ class EnhancedSocketGameVisualizer:
             pygame.draw.rect(surface, COLORS['METAL_SHADOW'], 
                            (center_x - band_width // 2, band_y - 2, band_width, 1))
 
-        # Visible cracks and damage marks
+        # Static visible cracks and damage marks (fixed positions)
         crack_color = (40, 40, 40)
         
-        # Vertical crack
-        crack_x = center_x + random.randint(-8, 8)
+        # Fixed vertical crack
+        crack_x = center_x + 5
         pygame.draw.line(surface, crack_color, 
                         (crack_x, y + 6), (crack_x, y + TILE_SIZE - 6), 2)
         
-        # Horizontal crack
-        crack_y = center_y + random.randint(-6, 6)
+        # Fixed horizontal crack
+        crack_y = center_y - 3
         pygame.draw.line(surface, crack_color, 
                         (x + 8, crack_y), (x + TILE_SIZE - 8, crack_y), 1)
         
-        # Dent marks (small dark circles)
-        for i in range(3):
-            dent_x = x + random.randint(8, TILE_SIZE - 8)
-            dent_y = y + random.randint(8, TILE_SIZE - 8)
+        # Fixed dent marks (static positions)
+        dent_positions = [(x + 12, y + 10), (x + 28, y + 22), (x + 18, y + 30)]
+        for dent_x, dent_y in dent_positions:
             pygame.draw.circle(surface, crack_color, (dent_x, dent_y), 2)
 
-        # Dim metallic shine (less shiny due to damage)
+        # Static dim metallic shine (no pulsing)
         shine_positions = [0.3, 0.7]
         for shine_ratio in shine_positions:
             shine_x = x + int(TILE_SIZE * shine_ratio)
-            shine_intensity = 0.3 + 0.2 * math.sin(self.time * 2 + shine_ratio * 10)  # Reduced shine
-            shine_alpha = int(80 * shine_intensity)  # Much dimmer than normal
+            shine_alpha = 60  # Fixed alpha value, no animation
             
-            if shine_alpha > 0:
-                shine_surf = pygame.Surface((2, TILE_SIZE - 12), pygame.SRCALPHA)
-                pygame.draw.rect(shine_surf, (*COLORS['METAL_SHINE'], shine_alpha), (0, 0, 2, TILE_SIZE - 12))
-                surface.blit(shine_surf, (shine_x - 1, y + 6))
+            shine_surf = pygame.Surface((2, TILE_SIZE - 12), pygame.SRCALPHA)
+            pygame.draw.rect(shine_surf, (*COLORS['METAL_SHINE'], shine_alpha), (0, 0, 2, TILE_SIZE - 12))
+            surface.blit(shine_surf, (shine_x - 1, y + 6))
 
         # Enhanced powerup glow
         if has_powerup:
