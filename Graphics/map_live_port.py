@@ -19,7 +19,7 @@ pygame.init()
 TILE_SIZE = 40  # Size of each tile in pixels
 MAP_SIZE = 16  # Size of the map in tiles (16x16)
 PLAYER_PANEL_WIDTH = 250  # Enhanced left panel for player stats
-POWERUP_PANEL_HEIGHT = 200  # Enhanced bottom panel for power-ups (increased to fit 2 rows)
+POWERUP_PANEL_HEIGHT = 210  # Enhanced bottom panel for power-ups (increased to fit 2 rows)
 TIMER_PANEL_WIDTH = 180  # Right panel for timer information
 WINDOW_WIDTH = PLAYER_PANEL_WIDTH + MAP_SIZE * TILE_SIZE + TIMER_PANEL_WIDTH + 30  # Total width
 WINDOW_HEIGHT = MAP_SIZE * TILE_SIZE + POWERUP_PANEL_HEIGHT + 30  # Total height

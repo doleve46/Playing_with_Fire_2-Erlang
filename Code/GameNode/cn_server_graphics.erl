@@ -60,12 +60,19 @@ show_explosion(Coordinates) ->
 %% Extract player number from PID by checking its registered name
 -spec get_player_number_from_pid(pid()) -> integer().
 get_player_number_from_pid(Pid) when is_pid(Pid) ->
-    [Name] = lists:filter(
+    MatchingNames = lists:filter(
       fun(Name) ->
           global:whereis_name(Name) =:= Pid
       end,
       global:registered_names()),
-      list_to_integer([lists:last(atom_to_list(Name))]).
+    case MatchingNames of
+        [] -> 
+            % No registered name found for this PID, return default player number
+            1;
+        [Name|_] -> 
+            % Extract player number from the name (assuming name ends with player number)
+            list_to_integer([lists:last(atom_to_list(Name))])
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
