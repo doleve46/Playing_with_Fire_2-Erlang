@@ -7,6 +7,7 @@ import struct
 import socket
 import json
 import threading
+import os
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -452,6 +453,22 @@ class EnhancedSocketGameVisualizer:
             'plus_life': 'plus_life', 'freeze_bomb': 'freeze_bomb'
         }
 
+        # Load powerup icons
+        self.powerup_icons = {}
+        self.powerup_panel_icons = {}  # Smaller icons for the panel
+        self.powerup_icon_mapping = {
+            'move_speed': 'movespeed.png',
+            'remote_ignition': 'remote bomb.png',
+            'repeat_bombs': 'cool weird bomb icon.png',
+            'kick_bomb': 'kick bomb.png',
+            'phased': 'phase v2.png',
+            'plus_bombs': 'extra bomb.png',
+            'bigger_explosion': 'increased radius.png',
+            'plus_life': 'extra life.png',
+            'freeze_bomb': 'freeze bomb.png'
+        }
+        self.load_powerup_icons()
+
         # Game state
         self.map_initialized = False
         self.waiting_for_initial_map = True
@@ -494,8 +511,78 @@ class EnhancedSocketGameVisualizer:
         self.last_message_time = 0
         self.message_count = 0
 
-        print("🎮 Enhanced Socket Game Visualizer initialized")
-        print(f"🔗 Target CN server: {CN_SERVER_HOST}:{CN_SERVER_PORT}")
+    def load_powerup_icons(self):
+        """Load and scale powerup icons from the assets folder"""
+        # Get the absolute path to the script directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icons_path = os.path.join(script_dir, "assets", "powerup icons")
+        
+        # Calculate icon sizes
+        map_icon_size = int(TILE_SIZE * 0.8)  # 32px for 40px tiles (map display)
+        panel_icon_size = 20  # Smaller size for panel display
+        
+        if not os.path.exists(icons_path):
+            self.create_fallback_icons(map_icon_size, panel_icon_size)
+            return
+        
+        for powerup_type, filename in self.powerup_icon_mapping.items():
+            icon_path = os.path.join(icons_path, filename)
+            try:
+                if os.path.exists(icon_path):
+                    # Load original image
+                    original_icon = pygame.image.load(icon_path).convert_alpha()
+                    # Scale for map display
+                    map_scaled_icon = pygame.transform.scale(original_icon, (map_icon_size, map_icon_size))
+                    self.powerup_icons[powerup_type] = map_scaled_icon
+                    # Scale for panel display
+                    panel_scaled_icon = pygame.transform.scale(original_icon, (panel_icon_size, panel_icon_size))
+                    self.powerup_panel_icons[powerup_type] = panel_scaled_icon
+                else:
+                    # Create fallback icons
+                    self.powerup_icons[powerup_type] = self.create_fallback_icon(powerup_type, map_icon_size)
+                    self.powerup_panel_icons[powerup_type] = self.create_fallback_icon(powerup_type, panel_icon_size)
+            except pygame.error:
+                # Create fallback icons
+                self.powerup_icons[powerup_type] = self.create_fallback_icon(powerup_type, map_icon_size)
+                self.powerup_panel_icons[powerup_type] = self.create_fallback_icon(powerup_type, panel_icon_size)
+
+    def create_fallback_icon(self, powerup_type, icon_size):
+        """Create a fallback icon for a powerup type"""
+        fallback_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        
+        # Use powerup-specific colors
+        powerup_colors = {
+            'move_speed': COLORS.get('TEXT_CYAN', (100, 255, 255)),
+            'remote_ignition': COLORS.get('TEXT_ORANGE', (255, 165, 0)),
+            'repeat_bombs': COLORS.get('TEXT_GOLD', (255, 215, 0)),
+            'kick_bomb': (255, 100, 255),
+            'phased': COLORS.get('TEXT_PURPLE', (200, 100, 255)),
+            'plus_bombs': COLORS.get('TEXT_GOLD', (255, 215, 0)),
+            'bigger_explosion': COLORS.get('TEXT_RED', (200, 50, 50)),
+            'plus_life': COLORS.get('TEXT_GREEN', (100, 255, 100)),
+            'freeze_bomb': COLORS.get('FREEZE_COLOR', (150, 200, 255))
+        }
+        
+        color = powerup_colors.get(powerup_type, COLORS.get('POWERUP_CORE', (255, 215, 0)))
+        
+        # Draw a simple colored rectangle with border
+        pygame.draw.rect(fallback_icon, color, (0, 0, icon_size, icon_size))
+        pygame.draw.rect(fallback_icon, (0, 0, 0), (0, 0, icon_size, icon_size), 2)
+        
+        # Add simple text identifier
+        if icon_size >= 20:
+            text_surface = pygame.font.Font(None, min(24, icon_size // 2)).render(
+                powerup_type[:3].upper(), True, (0, 0, 0))
+            text_rect = text_surface.get_rect(center=(icon_size // 2, icon_size // 2))
+            fallback_icon.blit(text_surface, text_rect)
+        
+        return fallback_icon
+
+    def create_fallback_icons(self, map_icon_size, panel_icon_size):
+        """Create all fallback icons when directory not found"""
+        for powerup_type in self.powerup_icon_mapping.keys():
+            self.powerup_icons[powerup_type] = self.create_fallback_icon(powerup_type, map_icon_size)
+            self.powerup_panel_icons[powerup_type] = self.create_fallback_icon(powerup_type, panel_icon_size)
 
     def connect_to_server(self) -> bool:
         """Connect to CN server and start receiving thread"""
@@ -632,10 +719,6 @@ class EnhancedSocketGameVisualizer:
         actual_duration = total_duration / 1000.0
 
         # Start animation immediately
-        try:
-            print(f"SOCKET ANIMATION: Player {player_id}, From {from_pos} to {to_pos}, Duration {actual_duration:.2f}s")
-        except BrokenPipeError:
-            pass
         self.player_animations[player_id] = {
             'type': 'confirmed_walking',
             'start_pos': from_pos,
@@ -1737,7 +1820,68 @@ class EnhancedSocketGameVisualizer:
 
     # ADDED: draw power ups not in tile
     def draw_standalone_powerup(self, surface, x, y, powerup_type):
-        """Draw standalone powerup on free floor tile"""
+        """Draw standalone powerup using custom icons on free floor tile"""
+        # Handle edge cases
+        if not powerup_type or powerup_type == 'none':
+            return
+            
+        center_x = x + TILE_SIZE // 2
+        center_y = y + TILE_SIZE // 2
+        
+        # Get the powerup icon
+        icon = self.powerup_icons.get(powerup_type)
+        if icon is None:
+            # Fallback to old circular rendering if icon not found
+            self.draw_legacy_powerup(surface, x, y, powerup_type)
+            return
+        
+        # Animated pulsing and floating effect
+        pulse = 0.9 + 0.1 * math.sin(self.time * 4)
+        float_offset = int(3 * math.sin(self.time * 2))
+        
+        # Calculate icon position with floating animation
+        icon_rect = icon.get_rect()
+        icon_x = center_x - icon_rect.width // 2
+        icon_y = center_y - icon_rect.height // 2 + float_offset
+        
+        # Create a pulsing glow effect behind the icon
+        glow_size = int(icon_rect.width * 1.4 * pulse)
+        if glow_size > 0:
+            glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
+            glow_color = COLORS.get('POWERUP_GLOW', (255, 255, 150))
+            pygame.draw.circle(glow_surf, (*glow_color, 80), (glow_size, glow_size), glow_size)
+            glow_x = center_x - glow_size
+            glow_y = center_y - glow_size + float_offset
+            surface.blit(glow_surf, (glow_x, glow_y))
+        
+        # Draw the icon with optional scaling for pulse effect
+        if pulse != 1.0:
+            scaled_width = int(icon_rect.width * pulse)
+            scaled_height = int(icon_rect.height * pulse)
+            scaled_icon = pygame.transform.scale(icon, (scaled_width, scaled_height))
+            scaled_rect = scaled_icon.get_rect()
+            scaled_x = center_x - scaled_rect.width // 2
+            scaled_y = center_y - scaled_rect.height // 2 + float_offset
+            surface.blit(scaled_icon, (scaled_x, scaled_y))
+        else:
+            surface.blit(icon, (icon_x, icon_y))
+        
+        # Add sparkle effects around the icon
+        for i in range(3):
+            angle = (self.time * 3 + i * 120) % 360
+            sparkle_distance = icon_rect.width // 2 + 8
+            sparkle_x = center_x + int(sparkle_distance * math.cos(math.radians(angle)))
+            sparkle_y = center_y + int(sparkle_distance * math.sin(math.radians(angle))) + float_offset
+            
+            sparkle_alpha = int(255 * (0.5 + 0.5 * math.sin(self.time * 6 + i * 2)))
+            if sparkle_alpha > 50:  # Only draw visible sparkles
+                sparkle_surf = pygame.Surface((6, 6), pygame.SRCALPHA)
+                sparkle_color = (*COLORS.get('POWERUP_PULSE', (255, 255, 100))[:3], sparkle_alpha)
+                pygame.draw.circle(sparkle_surf, sparkle_color, (3, 3), 3)
+                surface.blit(sparkle_surf, (sparkle_x - 3, sparkle_y - 3))
+
+    def draw_legacy_powerup(self, surface, x, y, powerup_type):
+        """Legacy circular powerup rendering as fallback"""
         center_x = x + TILE_SIZE // 2
         center_y = y + TILE_SIZE // 2
         
@@ -3113,32 +3257,41 @@ class EnhancedSocketGameVisualizer:
             control_surface = self.small_font.render(control, True, COLORS['TEXT_WHITE'])
             self.powerup_panel_surface.blit(control_surface, (20, 50 + i * 20))
 
-        # Enhanced power-up legend
-        powerups = [
-            ("⚡", "SPEED", COLORS['TEXT_CYAN']),
-            ("📡", "REMOTE", COLORS['TEXT_ORANGE']),
-            ("💣", "BOMBS", COLORS['TEXT_GOLD']),
-            ("💥", "BLAST", COLORS['TEXT_RED']),
-            ("❤️", "LIFE", COLORS['TEXT_GREEN']),
-            ("🧊", "FREEZE", COLORS['FREEZE_COLOR']),
-            ("👻", "GHOST", COLORS['TEXT_PURPLE']),
-            ("🦵", "KICK", (255, 100, 255))
+        # Enhanced power-up legend using actual icons
+        powerup_types = [
+            ('move_speed', "SPEED", COLORS['TEXT_CYAN']),
+            ('remote_ignition', "REMOTE", COLORS['TEXT_ORANGE']),
+            ('plus_bombs', "BOMBS", COLORS['TEXT_GOLD']),
+            ('bigger_explosion', "BLAST", COLORS['TEXT_RED']),
+            ('plus_life', "LIFE", COLORS['TEXT_GREEN']),
+            ('freeze_bomb', "FREEZE", COLORS['FREEZE_COLOR']),
+            ('phased', "GHOST", COLORS['TEXT_PURPLE']),
+            ('kick_bomb', "KICK", (255, 100, 255))
         ]
 
         start_x = 20
         start_y = 100
-        for i, (icon, name, color) in enumerate(powerups):
+        panel_icon_size = 20  # Smaller icons for the panel
+        
+        for i, (powerup_type, name, color) in enumerate(powerup_types):
             x = start_x + (i % 8) * 100
-            y = start_y + (i // 8) * 25
+            y = start_y + (i // 8) * 30
             
             # Animated glow
             glow_intensity = 0.7 + 0.3 * math.sin(self.time * 3 + i * 0.5)
             
-            icon_surface = self.font.render(icon, True, tuple(int(c * glow_intensity) for c in color))
-            name_surface = self.small_font.render(name, True, color)
+            # Try to use the loaded panel icon first
+            panel_icon = self.powerup_panel_icons.get(powerup_type)
+            if panel_icon:
+                self.powerup_panel_surface.blit(panel_icon, (x, y))
+            else:
+                # Fallback to colored square if icon not available
+                fallback_color = tuple(int(c * glow_intensity) for c in color)
+                pygame.draw.rect(self.powerup_panel_surface, fallback_color, (x, y, panel_icon_size, panel_icon_size))
+                pygame.draw.rect(self.powerup_panel_surface, (255, 255, 255), (x, y, panel_icon_size, panel_icon_size), 1)
             
-            self.powerup_panel_surface.blit(icon_surface, (x, y))
-            self.powerup_panel_surface.blit(name_surface, (x + 25, y + 3))
+            name_surface = self.small_font.render(name, True, color)
+            self.powerup_panel_surface.blit(name_surface, (x + panel_icon_size + 5, y + 3))
 
         # Blit to virtual surface
         self.virtual_surface.blit(self.powerup_panel_surface, (0, POWERUP_OFFSET_Y))
@@ -3397,19 +3550,13 @@ class EnhancedSocketGameVisualizer:
 # Main execution
 if __name__ == "__main__":
     try:
-        print("🚀 Initializing Enhanced Socket-based Playing with Fire 2 Visualizer...")
-        print("🎨 Beautiful graphics from the old version with socket communication from v16")
-        print("=" * 80)
-        
         visualizer = EnhancedSocketGameVisualizer()
         visualizer.run_enhanced_game_loop()
         
     except KeyboardInterrupt:
-        print("\n⏹️ Game interrupted by user")
         pygame.quit()
         sys.exit(0)
     except Exception as e:
-        print(f"\n❌ Fatal error: {e}")
         import traceback
         traceback.print_exc()
         pygame.quit()
