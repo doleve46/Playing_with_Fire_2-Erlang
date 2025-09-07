@@ -711,7 +711,6 @@ class EnhancedSocketGameVisualizer:
                 self.handle_explosion_event(message_data)
             elif message_type == 'death_event':
                 self.handle_death_event(message_data)
-            else:
 
     def process_map_update(self, map_data: dict) -> bool:
         """Process map update with enhanced backend timing information"""
