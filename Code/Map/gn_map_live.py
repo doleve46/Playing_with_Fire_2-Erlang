@@ -19,7 +19,7 @@ pygame.init()
 TILE_SIZE = 40  # Size of each tile in pixels
 MAP_SIZE = 16  # Size of the map in tiles (16x16)
 PLAYER_PANEL_WIDTH = 250  # Enhanced left panel for player stats
-POWERUP_PANEL_HEIGHT = 160  # Enhanced bottom panel for power-ups
+POWERUP_PANEL_HEIGHT = 210  # Enhanced bottom panel for power-ups (increased to fit 2 rows)
 TIMER_PANEL_WIDTH = 180  # Right panel for timer information
 WINDOW_WIDTH = PLAYER_PANEL_WIDTH + MAP_SIZE * TILE_SIZE + TIMER_PANEL_WIDTH + 30  # Total width
 WINDOW_HEIGHT = MAP_SIZE * TILE_SIZE + POWERUP_PANEL_HEIGHT + 30  # Total height
@@ -535,7 +535,7 @@ class GNGameVisualizer:
 
         # Enhanced mapping dictionaries
         self.tile_mapping = {
-            'free': 0, 'breakable': 1, 'unbreakable': 2, 'strong': 3, 'player_start': 4
+            'free': 0, 'breakable': 1, 'unbreakable': 2, 'strong': 3, 'player_start': 4, 'one_hit': 5
         }
         self.powerup_mapping = {
             'none': 'none', 'move_speed': 'move_speed', 'remote_ignition': 'remote_ignition',
@@ -543,6 +543,22 @@ class GNGameVisualizer:
             'plus_bombs': 'plus_bombs', 'bigger_explosion': 'bigger_explosion',
             'plus_life': 'plus_life', 'freeze_bomb': 'freeze_bomb'
         }
+
+        # Load powerup icons
+        self.powerup_icons = {}
+        self.powerup_panel_icons = {}  # Smaller icons for the panel
+        self.powerup_icon_mapping = {
+            'move_speed': 'movespeed.png',
+            'remote_ignition': 'remote bomb.png',
+            'repeat_bombs': 'cool weird bomb icon.png',
+            'kick_bomb': 'kick bomb.png',
+            'phased': 'phase v2.png',
+            'plus_bombs': 'extra bomb.png',
+            'bigger_explosion': 'increased radius.png',
+            'plus_life': 'extra life.png',
+            'freeze_bomb': 'freeze bomb.png'
+        }
+        self.load_powerup_icons()
 
         # Game state
         self.map_initialized = False
@@ -590,6 +606,90 @@ class GNGameVisualizer:
         print(f"GN Game Visualizer initialized for {gn_id.upper()}")
         print(f"Target GN server: localhost:{GN_SOCKET_PORT_BASE + int(gn_id[-1])}")
         print(f"Local player: Player {self.local_player_id}")
+
+    def load_powerup_icons(self):
+        """Load and scale powerup icons from the assets folder"""
+        # Get the absolute path to the script directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icons_path = os.path.join(script_dir, "..", "..", "Graphics", "assets", "powerup icons")
+        
+        # Calculate icon sizes
+        map_icon_size = int(TILE_SIZE * 1.0)  # 40px for 40px tiles (full tile size for map display)
+        panel_icon_size = 50  # Proper 50px size for panel display
+        
+        if not os.path.exists(icons_path):
+            print(f"WARNING: Powerup icons directory not found at {icons_path}")
+            print("Creating fallback icons...")
+            self.create_fallback_icons(map_icon_size, panel_icon_size)
+            return
+        
+        for powerup_type, filename in self.powerup_icon_mapping.items():
+            icon_path = os.path.join(icons_path, filename)
+            
+            try:
+                if os.path.exists(icon_path):
+                    # Load original image
+                    original_icon = pygame.image.load(icon_path).convert_alpha()
+                    
+                    # Scale for map display (40px)
+                    map_icon = pygame.transform.smoothscale(original_icon, (map_icon_size, map_icon_size))
+                    self.powerup_icons[powerup_type] = map_icon
+                    
+                    # Scale for panel display (50px)
+                    panel_icon = pygame.transform.smoothscale(original_icon, (panel_icon_size, panel_icon_size))
+                    self.powerup_panel_icons[powerup_type] = panel_icon
+                    
+                    print(f"✓ Loaded icon for {powerup_type}: {filename}")
+                else:
+                    print(f"⚠ Icon file not found: {icon_path}")
+                    # Create fallback for this specific powerup
+                    self.powerup_icons[powerup_type] = self.create_fallback_icon(powerup_type, map_icon_size)
+                    self.powerup_panel_icons[powerup_type] = self.create_fallback_icon(powerup_type, panel_icon_size)
+                    
+            except Exception as e:
+                print(f"ERROR loading icon for {powerup_type}: {e}")
+                # Create fallback for this specific powerup
+                self.powerup_icons[powerup_type] = self.create_fallback_icon(powerup_type, map_icon_size)
+                self.powerup_panel_icons[powerup_type] = self.create_fallback_icon(powerup_type, panel_icon_size)
+
+    def create_fallback_icon(self, powerup_type, icon_size):
+        """Create a fallback icon for a powerup type"""
+        fallback_icon = pygame.Surface((icon_size, icon_size), pygame.SRCALPHA)
+        
+        # Use powerup-specific colors
+        powerup_colors = {
+            'move_speed': COLORS.get('TEXT_CYAN', (100, 255, 255)),
+            'remote_ignition': COLORS.get('TEXT_ORANGE', (255, 165, 0)),
+            'repeat_bombs': COLORS.get('TEXT_GOLD', (255, 215, 0)),
+            'kick_bomb': (255, 100, 255),
+            'phased': COLORS.get('TEXT_PURPLE', (200, 100, 255)),
+            'plus_bombs': COLORS.get('TEXT_GOLD', (255, 215, 0)),
+            'bigger_explosion': COLORS.get('TEXT_RED', (200, 50, 50)),
+            'plus_life': COLORS.get('TEXT_GREEN', (100, 255, 100)),
+            'freeze_bomb': COLORS.get('FREEZE_COLOR', (150, 200, 255))
+        }
+        
+        color = powerup_colors.get(powerup_type, COLORS.get('POWERUP_CORE', (255, 215, 0)))
+        
+        # Draw a simple colored rectangle with border
+        pygame.draw.rect(fallback_icon, color, (0, 0, icon_size, icon_size))
+        pygame.draw.rect(fallback_icon, (0, 0, 0), (0, 0, icon_size, icon_size), 2)
+        
+        # Add simple text identifier
+        if icon_size >= 20:
+            font = pygame.font.Font(None, max(12, icon_size // 4))
+            text = powerup_type[:3].upper()  # First 3 characters
+            text_surface = font.render(text, True, (0, 0, 0))
+            text_rect = text_surface.get_rect(center=(icon_size//2, icon_size//2))
+            fallback_icon.blit(text_surface, text_rect)
+        
+        return fallback_icon
+
+    def create_fallback_icons(self, map_icon_size, panel_icon_size):
+        """Create all fallback icons when directory not found"""
+        for powerup_type in self.powerup_icon_mapping.keys():
+            self.powerup_icons[powerup_type] = self.create_fallback_icon(powerup_type, map_icon_size)
+            self.powerup_panel_icons[powerup_type] = self.create_fallback_icon(powerup_type, panel_icon_size)
 
     def connect_to_server(self) -> bool:
         """Connect to GN server and start receiving thread"""
@@ -1200,6 +1300,8 @@ class GNGameVisualizer:
                     self.draw_enhanced_brick_wall(self.map_surface, pixel_x, pixel_y)
                 elif tile_type == 3:  # STRONG
                     self.draw_enhanced_metal_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
+                elif tile_type == 5:  # ONE_HIT (damaged strong barrel)
+                    self.draw_enhanced_damaged_metal_barrel(self.map_surface, pixel_x, pixel_y, has_powerup)
 
                 # Enhanced selection highlight
                 if self.selected_tile == (x, y):
@@ -1429,6 +1531,37 @@ class GNGameVisualizer:
         center_x = x + TILE_SIZE // 2
         center_y = y + TILE_SIZE // 2
         
+        # Try to use the loaded icon first
+        powerup_icon = self.powerup_icons.get(powerup_type)
+        if powerup_icon:
+            # Draw the icon with floating animation
+            float_offset = int(3 * math.sin(self.time * 3))
+            icon_x = center_x - powerup_icon.get_width() // 2
+            icon_y = center_y - powerup_icon.get_height() // 2 + float_offset
+            
+            # Add a subtle glow behind the icon
+            glow_pulse = 0.7 + 0.3 * math.sin(self.time * 4)
+            glow_size = int(25 * glow_pulse)
+            
+            if glow_size > 0:
+                glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
+                glow_color = safe_get_color('POWERUP_GLOW', 'powerup_icon_glow')
+                glow_alpha = int(100 * glow_pulse)
+                glow_rgba = create_rgba_color(glow_color, glow_alpha, 'powerup_icon_glow')
+                safe_pygame_draw_circle(glow_surf, glow_rgba, (glow_size, glow_size), glow_size, context="powerup_icon_glow")
+                surface.blit(glow_surf, (center_x - glow_size, center_y - glow_size + float_offset))
+            
+            surface.blit(powerup_icon, (icon_x, icon_y))
+            return
+        
+        # Fallback to legacy drawing if icon not available
+        self.draw_legacy_powerup(surface, x, y, powerup_type)
+
+    def draw_legacy_powerup(self, surface, x, y, powerup_type):
+        """Legacy powerup drawing for fallback"""
+        center_x = x + TILE_SIZE // 2
+        center_y = y + TILE_SIZE // 2
+        
         # Powerup colors based on type
         powerup_colors = {
             'move_speed': safe_get_color('TEXT_CYAN', 'speed_powerup'),
@@ -1473,6 +1606,116 @@ class GNGameVisualizer:
             
             particle_size = max(1, int(3 * pulse))
             safe_pygame_draw_circle(surface, color, (particle_x, particle_y), particle_size, context=f"powerup_particle_{i}")
+
+    def draw_enhanced_damaged_metal_barrel(self, surface, x, y, has_powerup=False):
+        """Enhanced damaged metal barrel (one_hit state) with visible damage"""
+        # Get colors safely
+        shadow_color = safe_get_color('SHADOW_RGB', 'damaged_metal_shadow')
+        metal_light = safe_get_color('METAL_LIGHT', 'damaged_metal_barrel')
+        metal_dark = safe_get_color('METAL_DARK', 'damaged_metal_barrel')
+        metal_shadow = safe_get_color('METAL_SHADOW', 'damaged_metal_barrel')
+        metal_shine = safe_get_color('METAL_SHINE', 'damaged_metal_barrel')
+        metal_band = safe_get_color('METAL_BAND', 'damaged_metal_barrel')
+        
+        # Drop shadow
+        shadow_surf = pygame.Surface((TILE_SIZE + 8, TILE_SIZE + 8), pygame.SRCALPHA)
+        shadow_rgba = create_rgba_color(shadow_color, 60, 'damaged_metal_barrel_shadow')
+        safe_pygame_draw_ellipse(shadow_surf, shadow_rgba, (0, 0, TILE_SIZE + 8, TILE_SIZE + 8), context="damaged_metal_shadow")
+        surface.blit(shadow_surf, (x - 4, y - 4))
+
+        center_x = x + TILE_SIZE // 2
+        center_y = y + TILE_SIZE // 2
+
+        # Enhanced barrel body with metallic gradient (more dented)
+        for i in range(TILE_SIZE):
+            y_pos = y + i
+            # More dramatic denting for damaged barrel
+            curve_factor = 1.0 + 0.4 * math.sin((i / TILE_SIZE) * math.pi) + 0.1 * math.sin((i / TILE_SIZE) * math.pi * 3)
+            width = int((TILE_SIZE - 12) * curve_factor)  # Slightly smaller due to damage
+
+            # Darker metallic coloring due to damage
+            ratio = i / TILE_SIZE
+            damage_factor = 0.7  # Make it darker to show damage
+            
+            r = int((metal_light[0] * (1 - ratio) + metal_dark[0] * ratio) * damage_factor)
+            g = int((metal_light[1] * (1 - ratio) + metal_dark[1] * ratio) * damage_factor)
+            b = int((metal_light[2] * (1 - ratio) + metal_dark[2] * ratio) * damage_factor)
+            
+            # Clamp and validate color
+            metal_color = validate_color((r, g, b), 'damaged_metal_gradient')
+            safe_pygame_draw_line(surface, metal_color,
+                           (center_x - width // 2, y_pos), (center_x + width // 2, y_pos), 1, context="damaged_metal_gradient")
+
+        # Damaged metal bands (fewer and more worn)
+        band_positions = [0.3, 0.7]  # Only 2 bands, positioned differently
+        for band_ratio in band_positions:
+            band_y = int(y + TILE_SIZE * band_ratio)
+            band_width = int((TILE_SIZE - 8) * (1.0 + 0.3 * math.sin(band_ratio * math.pi)))
+
+            # More worn band appearance
+            worn_band_color = validate_color((metal_band[0] * 0.6, metal_band[1] * 0.6, metal_band[2] * 0.6), 'worn_band')
+            safe_pygame_draw_rect(surface, worn_band_color,
+                           (center_x - band_width // 2, band_y - 1, band_width, 3), context="worn_metal_band")
+
+        # Add visible damage effects - cracks and dents (static, no animation)
+        damage_color = validate_color((40, 30, 25), 'damage_marks')
+        
+        # Static cracks
+        crack_positions = [
+            (center_x + 5, y + 8, center_x + 12, y + 20),
+            (center_x - 8, y + 15, center_x - 3, y + 25),
+            (center_x + 3, y + 28, center_x + 10, y + 35)
+        ]
+        
+        for crack in crack_positions:
+            safe_pygame_draw_line(surface, damage_color, (crack[0], crack[1]), (crack[2], crack[3]), 2, context="damage_crack")
+
+        # Static dent marks
+        dent_positions = [(center_x + 12, center_y + 10), (center_x - 12, center_y + 22), (center_x + 6, center_y + 30)]
+        for dent_x, dent_y in dent_positions:
+            safe_pygame_draw_circle(surface, damage_color, (int(dent_x), int(dent_y)), 3, context="damage_dent")
+
+        # Reduced metallic shine (damaged metal doesn't shine as much)
+        shine_positions = [0.4, 0.6]  # Fewer shine positions
+        for shine_ratio in shine_positions:
+            shine_x = x + int(TILE_SIZE * shine_ratio)
+            shine_alpha = 60  # Much reduced shine
+            
+            shine_surf = pygame.Surface((2, TILE_SIZE - 12), pygame.SRCALPHA)
+            shine_rgba = create_rgba_color(metal_shine, shine_alpha, 'damaged_metal_shine_strip')
+            safe_pygame_draw_rect(shine_surf, shine_rgba, (0, 0, 2, TILE_SIZE - 12), context="damaged_metal_shine_rect")
+            surface.blit(shine_surf, (shine_x, y + 6))
+
+        # Show powerup glow if present
+        if has_powerup:
+            self.draw_enhanced_powerup_glow(surface, center_x, center_y)
+
+    def draw_enhanced_powerup_glow(self, surface, center_x, center_y):
+        """Enhanced power-up glow with pulsing and particles"""
+        glow_intensity = 0.8 + 0.2 * math.sin(self.time * 5)
+        glow_size = int(25 + 10 * math.sin(self.time * 4))
+
+        # Multi-layered glow
+        for layer in range(3):
+            radius = glow_size - layer * 6
+            if radius > 0:
+                alpha = int(40 * glow_intensity * (1 - layer * 0.3))
+                glow_surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+                glow_color = safe_get_color('POWERUP_GLOW', 'powerup_glow') if layer == 0 else safe_get_color('POWERUP_CORE', 'powerup_core')
+                glow_rgba = create_rgba_color(glow_color, alpha, f'powerup_glow_layer_{layer}')
+                safe_pygame_draw_circle(glow_surf, glow_rgba, (radius, radius), radius, context=f"powerup_glow_{layer}")
+                surface.blit(glow_surf, (center_x - radius, center_y - radius))
+
+        # Floating particles
+        for i in range(6):
+            angle = (self.time * 2 + i * 60) % 360
+            particle_x = center_x + int(20 * math.cos(math.radians(angle)))
+            particle_y = center_y + int(20 * math.sin(math.radians(angle))) + int(3 * math.sin(self.time * 3 + i))
+            
+            particle_size = 2 + int(2 * math.sin(self.time * 4 + i))
+            if particle_size > 0:
+                pulse_color = safe_get_color('POWERUP_PULSE', 'powerup_pulse_particle')
+                safe_pygame_draw_circle(surface, pulse_color, (particle_x, particle_y), particle_size, context=f"powerup_particle_{i}")
 
     def draw_enhanced_selection_highlight(self, surface, x, y):
         """Draw enhanced selection highlight with animation"""
@@ -2109,15 +2352,15 @@ class GNGameVisualizer:
                         (0, 0, WINDOW_WIDTH, POWERUP_PANEL_HEIGHT), 2, context="powerup_panel_border")
 
         # Title
-        title_text = f"GN {self.gn_id.upper()} CONTROLS & POWER-UPS"
+        title_text = f"{self.gn_id.upper()} CONTROLS & POWER-UPS"
         title_color = safe_get_color('TEXT_GOLD', 'powerup_panel_title')
         title_surface = self.title_font.render(title_text, True, title_color)
         self.powerup_panel_surface.blit(title_surface, (20, 15))
 
         # Controls info
         controls = [
-            "ESC - Exit | R - Request refresh | H - Help | Click tiles to inspect",
-            f"GN Socket connection to localhost:{self.socket_manager.port} with real-time updates"
+            "W - Move Up | A - Move Left | S - Move Down | D - Move Right | SPACE - Place bomb | Q - Ignite Bomb (remote only) | Click tiles to inspect",
+            f"GN Socket connection to localhost:{self.socket_manager.port}, receiving updates from CN Graphics"
         ]
         
         control_color = safe_get_color('TEXT_WHITE', 'control_text')
@@ -2125,33 +2368,44 @@ class GNGameVisualizer:
             control_surface = self.small_font.render(control, True, control_color)
             self.powerup_panel_surface.blit(control_surface, (20, 50 + i * 20))
 
-        # Enhanced power-up legend
-        powerups = [
-            ("SPEED", safe_get_color('TEXT_CYAN', 'powerup_speed')),
-            ("REMOTE", safe_get_color('TEXT_ORANGE', 'powerup_remote')),
-            ("BOMBS", safe_get_color('TEXT_GOLD', 'powerup_bombs')),
-            ("BLAST", safe_get_color('TEXT_RED', 'powerup_blast')),
-            ("LIFE", safe_get_color('TEXT_GREEN', 'powerup_life')),
-            ("FREEZE", safe_get_color('FREEZE_COLOR', 'powerup_freeze')),
-            ("GHOST", safe_get_color('TEXT_PURPLE', 'powerup_ghost')),
-            ("KICK", validate_color((255, 100, 255), 'powerup_kick'))
+        # Enhanced power-up legend using actual icons
+        powerup_types = [
+            ('move_speed', "SPEED", safe_get_color('TEXT_CYAN', 'powerup_speed')),
+            ('remote_ignition', "REMOTE BOMBS", safe_get_color('TEXT_ORANGE', 'powerup_remote')),
+            ('plus_bombs', "EXTRA BOMBS", safe_get_color('TEXT_GOLD', 'powerup_bombs')),
+            ('repeat_bombs', "REPEATING BOMBS", safe_get_color('TEXT_GOLD', 'powerup_repeat')),
+            ('bigger_explosion', "BLAST RADIUS", safe_get_color('TEXT_RED', 'powerup_blast')),
+            ('plus_life', "EXTRA LIFE", safe_get_color('TEXT_GREEN', 'powerup_life')),
+            ('freeze_bomb', "FREEZE UPON TOUCH", safe_get_color('FREEZE_COLOR', 'powerup_freeze')),
+            ('phased', "PHASED MOVEMENT", safe_get_color('TEXT_PURPLE', 'powerup_ghost')),
+            ('kick_bomb', "KICK BOMB", validate_color((255, 100, 255), 'powerup_kick'))
         ]
 
         start_x = 20
         start_y = 100
-        for i, (name, color) in enumerate(powerups):
-            x = start_x + (i % 8) * 100
-            y = start_y + (i // 8) * 25
+        panel_icon_size = 50  # 50x50 pixel icons
+        
+        for i, (powerup_type, name, color) in enumerate(powerup_types):
+            x = start_x + (i % 5) * 200  # 5 powerups per row with 200px spacing
+            y = start_y + (i // 5) * 60   # Rows with 60px vertical spacing
             
             # Animated glow
             glow_intensity = 0.7 + 0.3 * math.sin(self.time * 3 + i * 0.5)
             
-            glow_color = tuple(int(c * glow_intensity) for c in color)
-            glow_color = validate_color(glow_color, 'powerup_glow')
+            # Try to use the loaded panel icon (now properly sized at 50px)
+            panel_icon = self.powerup_panel_icons.get(powerup_type)
+            if panel_icon:
+                self.powerup_panel_surface.blit(panel_icon, (x, y))
+            else:
+                # Fallback to colored square if icon not available
+                fallback_color = tuple(int(c * glow_intensity) for c in color)
+                fallback_color = validate_color(fallback_color, 'powerup_fallback')
+                safe_pygame_draw_rect(self.powerup_panel_surface, fallback_color, (x, y, panel_icon_size, panel_icon_size), context="powerup_fallback")
+                white_color = safe_get_color('TEXT_WHITE', 'powerup_border')
+                safe_pygame_draw_rect(self.powerup_panel_surface, white_color, (x, y, panel_icon_size, panel_icon_size), 1, context="powerup_border")
             
             name_surface = self.small_font.render(name, True, color)
-            
-            self.powerup_panel_surface.blit(name_surface, (x + 25, y + 3))
+            self.powerup_panel_surface.blit(name_surface, (x + panel_icon_size + 10, y + 18))  # Centered text positioning
 
         # Blit to virtual surface
         self.virtual_surface.blit(self.powerup_panel_surface, (0, POWERUP_OFFSET_Y))
