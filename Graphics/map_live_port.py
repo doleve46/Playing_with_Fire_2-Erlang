@@ -1091,7 +1091,7 @@ class EnhancedSocketGameVisualizer:
             'active': True
         }
 
-        self.camera_shake = 0.2 if bomb_data.bomb_type == 'remote_bomb' else 0.1
+        self.camera_shake = 0.2 if bomb_data.bomb_type == 'remote_ignition' else 0.1
         self.create_bomb_placement_effect(x, y, bomb_data.owner, bomb_data.bomb_type)
 
     def create_bomb_explosion_sequence(self, x: int, y: int, bomb_data: BombState):
@@ -1114,7 +1114,7 @@ class EnhancedSocketGameVisualizer:
 
         # Enhanced camera shake
         shake_intensity = min(1.0, bomb_data.radius * 0.3)
-        if bomb_data.bomb_type == 'remote_bomb':
+        if bomb_data.bomb_type == 'remote_ignition':
             shake_intensity *= 1.5
         self.camera_shake = shake_intensity
 
@@ -1830,7 +1830,7 @@ class EnhancedSocketGameVisualizer:
         # FSM state-based visual effects
         if bomb_data.status == 'frozen':
             self.draw_frozen_bomb(surface, center_x, center_y, bomb_data)
-        elif bomb_data.status == 'remote_idle':
+        elif bomb_data.status == 'remote_idle' or bomb_data.bomb_type == 'remote_ignition':
             self.draw_remote_bomb(surface, center_x, center_y, bomb_data)
         elif bomb_data.ignited:
             self.draw_ignited_bomb(surface, center_x, center_y, bomb_data)
@@ -1844,7 +1844,7 @@ class EnhancedSocketGameVisualizer:
         if bomb_data.timer > 0:
             timer_seconds = bomb_data.timer / 1000.0
             self.draw_enhanced_timer_display(surface, center_x, center_y + TILE_SIZE//2 + 25, timer_seconds)
-        elif bomb_data.status == 'remote_idle':
+        elif bomb_data.status == 'remote_idle' or bomb_data.bomb_type == 'remote_ignition':
             remote_text = "REMOTE"
             text_surface = self.mini_font.render(remote_text, True, COLORS['TEXT_CYAN'])
             text_rect = text_surface.get_rect(center=(center_x, center_y + TILE_SIZE//2 + 25))
@@ -2489,7 +2489,7 @@ class EnhancedSocketGameVisualizer:
 
         if ray_size > 0:
             # Type-specific effects
-            if bomb_type == 'remote_bomb':
+            if bomb_type == 'remote_ignition':
                 base_color = COLORS['TEXT_CYAN']
             elif bomb_type == 'freeze_bomb':
                 base_color = COLORS['FREEZE_COLOR']
@@ -2607,7 +2607,7 @@ class EnhancedSocketGameVisualizer:
 
         if burst_size > 0 and alpha > 0:
             # Type-specific colors
-            if bomb_type == 'remote_bomb':
+            if bomb_type == 'remote_ignition':
                 burst_color = COLORS['TEXT_CYAN']
             elif bomb_type == 'freeze_bomb':
                 burst_color = COLORS['FREEZE_COLOR']

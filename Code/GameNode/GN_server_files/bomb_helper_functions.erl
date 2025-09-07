@@ -103,7 +103,7 @@ find_remote_bombs_for_player(PlayerPid) ->
                 Query = qlc:q([
                     Bomb || Bomb <- mnesia:table(TableName),
                     Bomb#mnesia_bombs.owner =:= PlayerPid,
-                    Bomb#mnesia_bombs.type =:= ?REMOTE_BOMB,
+                    Bomb#mnesia_bombs.type =:= ?REMOTE_IGNITION,
                     Bomb#mnesia_bombs.ignited =:= false
                 ]),
                 qlc:e(Query) ++ Acc
