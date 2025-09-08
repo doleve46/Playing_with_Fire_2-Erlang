@@ -684,6 +684,7 @@ create_simple_map_data(MapState) ->
         }
     }.
 
+
 convert_map_for_gn_socket([]) ->
     % Create empty 16x16 grid
     EmptyCell = [<<"free">>, <<"none">>, <<"none">>, <<"none">>],
@@ -757,7 +758,7 @@ convert_bomb_safely_gn(_) ->
 
 convert_player_safely_gn(none) ->
     <<"none">>;
-convert_player_safely_gn({PlayerID, Life, Speed, Direction, Movement, MovementTimer, ImmunityTimer, RequestTimer}) ->
+convert_player_safely_gn({PlayerID, Life, Speed, Direction, Movement, MovementTimer, ImmunityTimer, RequestTimer, Bombs, ExplosionRadius, SpecialAbilities}) ->
     [
         PlayerID,
         Life,
@@ -766,9 +767,26 @@ convert_player_safely_gn({PlayerID, Life, Speed, Direction, Movement, MovementTi
         Movement,
         MovementTimer,
         ImmunityTimer,
-        RequestTimer
+        RequestTimer,
+        Bombs,
+        ExplosionRadius,
+        convert_special_abilities_safely_gn(SpecialAbilities)
     ];
-
+convert_player_safely_gn({PlayerID, Life, Speed, Direction, Movement, MovementTimer, ImmunityTimer, RequestTimer}) ->
+    % Backwards compatibility for old format - use default values
+    [
+        PlayerID,
+        Life,
+        Speed,
+        safe_atom_to_binary_gn(Direction),
+        Movement,
+        MovementTimer,
+        ImmunityTimer,
+        RequestTimer,
+        1,  % Default bombs
+        1,  % Default explosion_radius
+        []  % Default empty special_abilities
+    ];
 convert_player_safely_gn(_) ->
     <<"none">>.
 
@@ -782,6 +800,12 @@ convert_explosion_safely_gn(ExplosionData) when is_tuple(ExplosionData) ->
     <<"explosion">>;
 convert_explosion_safely_gn(_) ->
     <<"none">>.
+
+%% Convert special abilities list to JSON-safe format
+convert_special_abilities_safely_gn(SpecialAbilities) when is_list(SpecialAbilities) ->
+    [safe_atom_to_binary_gn(Ability) || Ability <- SpecialAbilities];
+convert_special_abilities_safely_gn(_) ->
+    [].
 
 monitor_python_output(Port) ->
     io:format("🔍 Starting to monitor Python output from port ~p~n", [Port]),
