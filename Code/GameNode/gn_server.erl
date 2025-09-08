@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, generate_atom_table_names/2, cast_message/2]).
+-export([start_link/1, generate_atom_table_names/2, cast_message/2, start/1]).
 
 -export([get_registered_name/1]).
 
@@ -40,6 +40,10 @@ start_link({GN_number, IsBot}) ->
     GN_name = list_to_atom("GN" ++ integer_to_list(GN_number) ++ "_server"),
     gen_server:start_link({global, GN_name}, ?MODULE, [GN_number, IsBot], [{priority, high}]).
 
+start({GN_number, IsBot, RecoveryMode}) -> % RecoveryMode = boolean
+    GN_name = list_to_atom("GN" ++ integer_to_list(GN_number) ++ "_server"),
+    gen_server:start({global, GN_name}, ?MODULE, [GN_number, IsBot, RecoveryMode], [{priority, high}]).
+
 %% Sending a message to GN using API call
 cast_message(GN_Name, Message) ->
     case global:whereis_name(GN_Name) of
@@ -56,7 +60,7 @@ cast_message(GN_Name, Message) ->
 -spec(init(list()) ->
     {ok, State :: #gn_state{}} | {ok, State :: #gn_state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([GN_number, PlayerType]) ->
+init([GN_number, PlayerType]) -> 
     Data = #gn_state{
         tiles_table_name = generate_atom_table_names(GN_number, "_tiles"),
         bombs_table_name = generate_atom_table_names(GN_number, "_bombs"),
@@ -84,6 +88,36 @@ init([GN_number, PlayerType]) ->
     %% Initialize tiles and players from the generated map
     initialize_tiles(Data#gn_state.tiles_table_name),
     initialize_players(Data#gn_state.players_table_name, PlayerType, GN_number),
+    {ok, Data};
+
+%% ALTERNATIVE GN RECOVERY INIT
+init([GN_number, _PlayerType, _RecoveryMode]) ->
+    io:format("**GN_SERVER: INIT - Starting GN ~p in Recovery Mode**~n", [GN_number]),
+    Data = #gn_state{
+        tiles_table_name = generate_atom_table_names(GN_number, "_tiles"),
+        bombs_table_name = generate_atom_table_names(GN_number, "_bombs"),
+        powerups_table_name = generate_atom_table_names(GN_number, "_powerups"),
+        players_table_name = generate_atom_table_names(GN_number, "_players")},
+    %% Wait for all tables to be created before proceeding
+    AllTableNames = [
+        Data#gn_state.tiles_table_name,
+        Data#gn_state.bombs_table_name,
+        Data#gn_state.powerups_table_name,
+        Data#gn_state.players_table_name
+    ],
+    io:format("CN: Waiting for tables to be ready: ~p~n", [AllTableNames]),
+    case mnesia:wait_for_tables(AllTableNames, 10000) of
+        ok -> 
+            io:format("✅ All mnesia tables created successfully~n");
+        {timeout, BadTabs} -> 
+            io:format("❌ Timeout waiting for tables: ~p~n", [BadTabs]),
+            error({mnesia_tables_timeout, BadTabs});
+        {error, Reason} -> 
+            io:format("❌ Error waiting for tables: ~p~n", [Reason]),
+            error({mnesia_tables_error, Reason})
+    end,
+    start_recovery(Data, GN_number),
+    io:format("**GN_SERVER: INIT - GN ~p Recovery complete**~n", [GN_number]),
     {ok, Data}.
 
 %%% ============== Handle call ==============
@@ -553,8 +587,144 @@ notify_owner_of_bomb_explosion(OwnerID, State) ->
                     %% send cn_server a request to update active bomb in mnesia, and also notify relevant fsm_player
                     gn_server:cast_message(cn_server,
                         {player_bomb_exploded, Pid});
-                _ReturnValue -> % ! shouldn't happen - error out, this is for debugging
-                    erlang:error(bad_return_value, [Pid, Result])
+                _ReturnValue -> % ! shouldn't happen normally, but might if gn crashed and recovered while a bomb was active
+                    io:format("ERROR: notify_owner_of_bomb_explosion got unexpected return value: ~p~n", [Result])
             end,
+            ok
+    end.
+
+%% ========== RECOVERY RELATED FUNCTIONS ==========
+start_recovery(State, GN_number) ->
+    %% handles the whole mnesia-to-process recovery procedure
+    io:format("**GN_SERVER: RECOVERY - Starting tiles re-initialization**~n"),
+    initialize_tiles(State#gn_state.tiles_table_name),
+    io:format("**GN_SERVER: RECOVERY - Tiles re-initialization complete**~n"),
+    io:format("**GN_SERVER: RECOVERY - Starting players re-initialization**~n"),
+    OldNewPlayerPids = recover_players(State#gn_state.players_table_name, GN_number),
+    io:format("**GN_SERVER: RECOVERY - Players re-initialization complete**~n"),
+    io:format("**GN_SERVER: RECOVERY - Starting power-up re-initialization**~n"),
+    recover_powerups(State#gn_state.powerups_table_name),
+    io:format("**GN_SERVER: RECOVERY - Power-up re-initialization complete**~n"),
+    io:format("**GN_SERVER: RECOVERY - Starting bomb re-initialization**~n"),
+    recover_bombs(State#gn_state.bombs_table_name, OldNewPlayerPids),
+    io:format("**GN_SERVER: RECOVERY - Bomb re-initialization complete**~n"),
+    ok.
+
+
+recover_players(Table, GN_number) -> % returns a list of {OldPid, NewPid} tuples for CN to update player_fsm records
+    %% iterate through all players in the table, respawn them and update the mnesia table with their new PIDs and our (GN) new PID
+    Fun = fun() ->
+        AllPlayersRecords = qlc:e(qlc:q(
+            [ P || P <- mnesia:table(Table)]
+        )),
+        OldNewPlayerPids = lists:map(
+            fun(PlayerRecord) ->
+                recover_single_player(PlayerRecord, Table, GN_number)
+            end,
+            AllPlayersRecords),
+        OldNewPlayerPids
+        end,
+        mnesia:activity(transaction, Fun).
+
+recover_single_player(PlayerRecord = #mnesia_players{}, Table, GN_number) ->
+    %% respawn player_fsm and io_handler/bot_handler processes based on mnesia record
+    %% Always initialize as a bot
+    %% read player record from mnesia table, spawn new player_fsm process, update mnesia record with new PID and GN's new PID
+    NewLocalGNName = get_registered_name(self()),
+    OldPlayerPid = PlayerRecord#mnesia_players.pid,
+    %% Check if we need to start the bot_handler
+
+    %% Modify relevant fields in the record before initializing player_fsm
+    OldLocalGNName = PlayerRecord#mnesia_players.local_gn,
+    IO_pid = case PlayerRecord#mnesia_players.target_gn of
+        OldLocalGNName -> % The player was local to this GN - spawn new bot_handler
+                {ok, IO_PID} = bot_handler:start_link(GN_number, easy),
+                IO_PID;
+        _ -> PlayerRecord#mnesia_players.io_handler_pid % otherwise, keep it as is
+    end,
+    %% Create record to pass to player_fsm - rest of the fields will be updated after it started
+    RecordToFSM = PlayerRecord#mnesia_players{
+        io_handler_pid = IO_pid,
+        bot = true % always bot in recovery mode
+        },
+    %% Get the registered name of this GN server instead of using PID
+    io:format("**GN_SERVER: RECOVERY - Starting player_fsm for player: ~p**~n", [RecordToFSM#mnesia_players.player_number]),
+    {ok, FSM_pid} = player_fsm:start_link(GN_number, NewLocalGNName, true, IO_pid, RecordToFSM), % true = bot, true = recovery mode
+    %% Update mnesia record
+    UpdatedRecord = RecordToFSM#mnesia_players{pid = FSM_pid},
+    mnesia:write(Table, UpdatedRecord, write),
+    io:format("**GN_SERVER: RECOVERY - Player ~p FSM started successfully: ~p**~n", [UpdatedRecord#mnesia_players.player_number, FSM_pid]),
+    {OldPlayerPid, FSM_pid}. % return old and new PIDs for CN to update player_fsm records
+    
+
+
+
+recover_bombs(Table, OldNewPlayerPids) ->
+    %% iterate through all bombs in the table, respawn them in their current state, update their owner's pid, and update the mnesia table with their new PIDs and our (GN) new PID
+    Fun = fun() ->
+        AllBombRecords = qlc:e(qlc:q(
+            [ P || P <- mnesia:table(Table)]
+        )),
+        lists:foreach(
+            fun(BombRecord) ->
+                %% Extract owner pid
+                OwnerOldPid = BombRecord#mnesia_bombs.owner,
+                %% Check if owner's old pid is within OldNewPlayerPids list
+                OwnerNewPid = case lists:keyfind(OwnerOldPid, 1, OldNewPlayerPids) of
+                  {_, NewPid} -> NewPid;
+                  _ -> OwnerOldPid
+                end,
+                %% Create new record to pass to bomb process
+                UpdatedBombRecord = BombRecord#mnesia_bombs{owner = OwnerNewPid},
+                %% Spawn new bomb process in recovery mode
+                {ok, {BombPid, _MonitorRef}} = bomb_as_fsm:start_recovered(UpdatedBombRecord),
+                %% Update mnesia record with new bomb PID
+                case mnesia:write(Table, UpdatedBombRecord#mnesia_bombs{pid = BombPid}, write) of
+                    ok -> 
+                        io:format("**GN_SERVER: RECOVERY - Bomb spawned successfully: ~p~n", [BombPid]),
+                        ok;
+                    {aborted, Reason} -> io:format("**GN_SERVER: RECOVERY - Bomb ~p spawn failed: ~p~n", [BombPid, Reason]),
+                        ok;
+                    Other -> io:format("**GN_SERVER: RECOVERY - Unexpected return value: ~p~n", [Other]),
+                        ok
+                end
+            end,
+            AllBombRecords)
+        end,
+        mnesia:activity(transaction, Fun).
+
+recover_powerups(Table) ->
+    %% iterate through all powerups in the table, respawn them and update the mnesia table with their new PIDs and our (GN) new PID
+    Gn_pid = self(),
+    Fun = fun() ->
+        AllRecords = qlc:e(qlc:q(
+            [ P || P <- mnesia:table(Table)]
+        )),
+        lists:foreach(
+            fun(PowerupRecord) ->
+                spawn_and_update(PowerupRecord, Table, Gn_pid)
+            end,
+            AllRecords)
+    end,
+    case mnesia:activity(transaction, Fun) of
+        {atomic, R} -> R;
+        R -> R
+    end.
+
+spawn_and_update(Record = #mnesia_powerups{}, Table, Gn_pid) ->
+    %% Extract current relevant data
+    [Pos_x, Pos_y] = Record#mnesia_powerups.position,
+    Type = Record#mnesia_powerups.type,
+    %% Spawn new powerup process
+    {ok, Pid} = powerup:start_link(Pos_x, Pos_y, Type),
+    %% Update mnesia record with new PID and GN PID
+    UpdatedRecord = Record#mnesia_powerups{pid = Pid, gn_pid = Gn_pid},
+    case mnesia:write(Table, UpdatedRecord, write) of
+        ok -> 
+            io:format("**GN_SERVER: RECOVERY - Powerup spawned successfully: ~p~n", [Pid]),
+            ok;
+        {aborted, Reason} -> io:format("**GN_SERVER: RECOVERY - Powerup ~p spawn failed: ~p~n", [Pid, Reason]),
+            ok;
+        Other -> io:format("**GN_SERVER: RECOVERY - Unexpected return value: ~p~n", [Other]),
             ok
     end.

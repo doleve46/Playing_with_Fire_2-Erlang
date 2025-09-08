@@ -204,13 +204,14 @@ handle_info({graphics_ready, _GraphicsPid}, State) ->
     {noreply, State};
 
 %% @doc Handles failure messages from the monitored processes
-handle_info({'DOWN', Ref, process, Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
-    %% todo: placeholder - deal with failing nodes/processes
-    io:format("*CN: monitored process ~w with ref ~w failed, reason:~w~n",[Pid,Ref,Reason]),
-    {noreply, Data};
+handle_info({'EXIT', Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
+    io:format("*CN: Linked process ~w failed, reason:~w~n",[Pid, Reason]),
+    NewData = handle_gn_crash(Pid, Data),
+    {noreply, NewData};
 
 %% @doc General messages received as info - as of now ignored.
 handle_info(_Info, State) ->
+    io:format("**CN_SERVER: Received Unhandled info message:~w~n", [_Info]),
     {noreply, State}.
 
 
@@ -248,7 +249,7 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
         case mnesia:read(Current_GN_table, PlayerNum, read) of
             [Record] ->
                 %% delete from table from the GN we are leaving
-                ok = mnesia:delete(Current_GN_table, Record, write),
+                ok = mnesia:delete(Current_GN_table, PlayerNum, write),
                 %% Write the data to the new GN's table
                 mnesia:write(New_GN_table, Record, write);
             [] ->
@@ -444,13 +445,13 @@ link_GNs_loop(NodeNumbers) ->
     end, NodeNumbers),
     Pids. % return list of linked PIDs
 
-link_with_retry(GN_server_name, RetryCount) when RetryCount > 8 ->
+link_with_retry(GN_server_name, RetryCount) when RetryCount > 20 ->
     erlang:error({link_failed_after_retries, GN_server_name, RetryCount});
 link_with_retry(GN_server_name, RetryCount) ->
     Pid = global:whereis_name(GN_server_name),
     case Pid of
         undefined ->
-            io:format("Process ~p not found globally, attempt ~w/8, retrying...~n", [GN_server_name, RetryCount + 1]),
+            io:format("Process ~p not found globally, attempt ~w/20, retrying...~n", [GN_server_name, RetryCount + 1]),
             timer:sleep(500),
             link_with_retry(GN_server_name, RetryCount + 1);
         _ ->
@@ -460,8 +461,85 @@ link_with_retry(GN_server_name, RetryCount) ->
                 Pid
             catch
                 _:_ ->
-                    io:format("Failed to link to ~p, attempt ~w/8, retrying...~n", [GN_server_name, RetryCount + 1]),
+                    io:format("Failed to link to ~p, attempt ~w/20, retrying...~n", [GN_server_name, RetryCount + 1]),
                     timer:sleep(500),
                     link_with_retry(GN_server_name, RetryCount + 1)
             end
     end.
+
+%% === Node crash handling functions ===
+%% @doc Handle game node crashes
+handle_gn_crash(Pid, Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) ->
+    %% find which GN crashed
+    PidsList = [GN1#gn_data.pid, GN2#gn_data.pid, GN3#gn_data.pid, GN4#gn_data.pid],
+    case lists:filter(fun(X) -> X == Pid end, PidsList) of
+        [] -> 
+            io:format("**CN_SERVER: Non gn_server process crashed. Pid: ~p~n", [Pid]),
+            ok; % do nothing
+        [CrashedPid] -> 
+            io:format("**CN_SERVER: Known gn_server process crashed. Pid: ~p~n", [CrashedPid]),
+            %% Retreives which GN it was - 1-4
+            Zip = lists:zip(PidsList, lists:seq(1,4)),
+            case lists:keyfind(CrashedPid, 1, Zip) of
+                false ->
+                    io:format("**CN_SERVER: Could not locate crashed pid in list~n"),
+                    Data;
+                {_, CrashedGNNum} ->
+                    io:format("**CN_SERVER: Crashed GN: ~p~n", [CrashedGNNum]),
+                    %% decide which node will take on this GN's responsibilities - node with least current PIDs
+                    NewHostingNode = find_node_with_least_pids(lists:delete(CrashedPid, PidsList)),
+                    io:format("**CN_SERVER: New hosting node for crashed GN #~p (Pid - ~p) is GN ~p~n", [CrashedGNNum, CrashedPid, NewHostingNode]),
+                    Recovered_GN_Pid = restart_gn(NewHostingNode, lists:nth(CrashedGNNum, Data), CrashedGNNum),
+                    %% replace the pid in the data list
+                    NewData = lists:map(
+                        fun(#gn_data{pid = OldPid} = GNData) ->
+                            case OldPid of
+                                CrashedPid -> GNData#gn_data{pid = Recovered_GN_Pid};
+                                _ -> GNData
+                            end
+                        end, Data),
+                        io:format("**CN_SERVER: Game node ~p crashed and was successfully recovered~n", [Pid]),
+                        NewData
+            end;
+        MoreThanOne ->
+            io:format("**CN_SERVER: ERROR - More than one GN matched crashed Pid: ~p~n", [MoreThanOne]),
+            Data % return unchanged
+    end.
+
+
+find_node_with_least_pids(Pids) ->
+    NodeCounts = count_nodes(Pids, #{}),
+    MinCountNode = find_min(maps:to_list(NodeCounts)),
+    element(1, MinCountNode).
+
+count_nodes([], Counts) ->
+    Counts;
+count_nodes([Pid | T], Counts) ->
+    Node = node(Pid),
+    NewCounts = maps:update_with(Node, fun(C) -> C + 1 end, 1, Counts),
+    count_nodes(T, NewCounts).
+
+find_min(NodeCounts) ->
+    Sorted = lists:sort(fun({_NodeA, CountA}, {_NodeB, CountB}) -> CountA < CountB end, NodeCounts),
+    hd(Sorted).
+
+
+%% Moves the mnesia table to the new node, restarts the GN processes on that node
+restart_gn(Node, CrashedGN_gndata=#gn_data{}, CrashedGNNum) -> 
+    %% copy the mnesia tables of the crashed GN to the new node
+    ok = mnesia:add_table_copy(CrashedGN_gndata#gn_data.tiles, Node, ram_copies),
+    ok = mnesia:add_table_copy(CrashedGN_gndata#gn_data.powerups, Node, ram_copies),
+    ok = mnesia:add_table_copy(CrashedGN_gndata#gn_data.players, Node, ram_copies),
+    ok = mnesia:add_table_copy(CrashedGN_gndata#gn_data.bombs, Node, ram_copies),
+    io:format("**CN_SERVER: RECOVERY - Transferred mnesia tables to node ~p~n", [Node]),
+    %% *** Start the GN process on the new node ***
+    %% This will also initialize the bot_handler and player_fsm processes
+    %% And also initialize all TILES based on the data within the mnesia table, over-writing their existing pids
+    io:format("**CN_SERVER: RECOVERY - Restarting GN #~p on node ~p..~n", [CrashedGNNum, Node]),
+    {ok, NewGN_Pid} = rpc:call(Node, gn_server, start, [{CrashedGNNum, true, true}]), % true = recovery mode, true = start bots
+    io:format("**CN_SERVER: RECOVERY - Linking to new GN #~p with PID ~p~n", [CrashedGNNum, NewGN_Pid]),
+    link(NewGN_Pid),
+    io:format("**CN_SERVER: RECOVERY - Restarted GN #~p on node ~p with PID ~p~n", [CrashedGNNum, Node, NewGN_Pid]),
+    io:format("**CN_SERVER: RECOVERY - Setting up power-ups, players and bombs in GN~p~n", [CrashedGNNum]),
+    io:format("**CN_SERVER: RECOVERY - finished recovering all objects for GN #~p~n", [CrashedGNNum]),
+    NewGN_Pid.

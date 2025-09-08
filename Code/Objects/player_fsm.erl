@@ -23,7 +23,7 @@
 -module(player_fsm).
 -behaviour(gen_statem).
 
--export([start_link/4]).
+-export([start_link/4, start_link/5]).
 -export([start_signal/1, send_killswitch/1, input_command/2, gn_response/2, inflict_damage/1, bomb_exploded/1, 
         update_target_gn/2, notify_power_up/2, get_player_pid/1]).
 
@@ -37,6 +37,8 @@
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %% Windows compatible
 -include("../common_parameters.hrl").
+-include_lib("../GameNode/mnesia_records.hrl").
+
 
 -record(player_data, {
     %% ! irrelevant stats are held in the appropriate mnesia table.
@@ -73,6 +75,10 @@ start_link(PlayerNumber, GN_Name, IsBot, IO_pid) ->
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
     gen_statem:start_link({global, ServerName}, ?MODULE, [PlayerNumber, GN_Name, IsBot, IO_pid], []).
 
+start_link(PlayerNumber, GN_Name, IsBot, IO_pid, RecoveryMode) ->
+    % Spawn player FSM
+    ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
+    gen_statem:start_link({global, ServerName}, ?MODULE, [PlayerNumber, GN_Name, IsBot, IO_pid, RecoveryMode], []).
 %% @doc Start the game for the player
 start_signal(PlayerPid) ->
     gen_statem:cast(PlayerPid, {game_start}).
@@ -134,7 +140,44 @@ init([PlayerNumber, GN_Name, IsBot, IOHandlerPid]) ->
     end,
     io:format("**##**PLAYER FSM FINISHED INIT **##**~n"),
     %% move to start-up state - leave when given a message that the game starts
-    {ok, startup, Data}.
+    {ok, startup, Data};
+
+%% RECOVERY MODE INIT
+init([PlayerNumber, GN_Name, _IsBot, IOHandlerPid, Recovery_player_record]) ->
+    % GN_Name is already the registered name, no conversion needed
+    Data = #player_data{
+        player_number = PlayerNumber,
+        local_gn = GN_Name,
+        target_gn = GN_Name, % starting at own GN's quarter
+        bot = true, % always bot in recovery mode
+        io_handler_pid = IOHandlerPid,
+        life = Recovery_player_record#mnesia_players.life,
+        speed = Recovery_player_record#mnesia_players.speed,
+        bombs = Recovery_player_record#mnesia_players.bombs,
+        bombs_placed = Recovery_player_record#mnesia_players.bombs_placed,
+        immunity_timer = Recovery_player_record#mnesia_players.immunity_timer,
+        request_cooldown = Recovery_player_record#mnesia_players.request_timer,
+        movement_cooldown = Recovery_player_record#mnesia_players.movement_timer,
+        direction = Recovery_player_record#mnesia_players.direction
+    },
+
+    %% set player PID in I/O handler
+    bot_handler:set_player_pid(IOHandlerPid, self()),
+    
+    %% send start signal to bot - immediate start
+    io:format("**##**PLAYER FSM INIT (RECOVERY MODE) - SENDING START SIGNAL TO BOT **##**~n"),
+    bot_handler:game_start(IOHandlerPid),
+
+    case Data#player_data.immunity_timer of
+      0 ->
+        io:format("**##**PLAYER FSM INIT (RECOVERY MODE) - STARTING IN IDLE **##**~n"),
+        erlang:send_after(?TICK_DELAY, self(), timer_tick),
+        {ok, idle, Data};
+      _ -> 
+        io:format("**##**PLAYER FSM INIT (RECOVERY MODE) - STARTING IN IMMUNITY IDLE **##**~n"),
+        erlang:send_after(?TICK_DELAY, self(), timer_tick),
+        {ok, immunity_idle, Data}
+    end.
 
 %%%===================================================================
 %%% State Functions
