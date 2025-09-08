@@ -18,7 +18,11 @@ Playing with Fire 2 is a classic game where players navigate a grid-based arena,
 
 ### Python Dependencies
 ```bash
-pip install pygame
+pip install pygame jsx
+```
+**For Python versions older than 3.7:**
+```bash
+pip install pygame dataclasses jsx
 ```
 
 ### Network Configuration
@@ -37,11 +41,6 @@ pip install pygame
    - Edit `shell scripts/node names.txt` with your actual IP addresses
    - Update the IP addresses in the shell scripts if needed
 
-3. **Build the project:**
-   ```bash
-   rebar3 clean
-   rebar3 compile
-   ```
 
 ## 🎯 How to Run
 
