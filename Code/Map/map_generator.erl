@@ -1,7 +1,7 @@
 -module(map_generator).
 
 -export([generate_map/0, generate_map/1, generate_map_with_powerups/0, generate_map_with_powerups/1,
-         visualize_map/1, get_cell_at/3, export_map/2, test_generation/0]).
+         visualize_map/1, get_cell_at/3, export_map/2, test_generation/0, create_map/0]).
 
 %% linux compatible
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
@@ -17,7 +17,7 @@
 -record(map_state, {
     size = ?MAP_SIZE,
     grid,  % Single grid with tuples: {tile_type, powerup_type, bomb_type, player_id}
-    corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     steiner_paths = [],
     statistics = #{} % Tracks tile and power-up counts
 }).
@@ -192,7 +192,7 @@ set_borders(Grid) ->
     end, Grid2).
 
 clear_player_areas(Grid) ->
-    Corners = [{1, 1}, {14, 1}, {1, 14}, {14, 14}],
+    Corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     
     lists:foldl(fun({CX, CY}, AccGrid) ->
         % Clear 2x2 area around each corner
@@ -347,7 +347,7 @@ create_game_graph() ->
 %% ===================================================================
 
 select_terminals(NumRandom) ->
-    Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    Corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     
     % Add random terminals
     RandomTerminals = select_random_terminals(NumRandom, Corners, []),
@@ -464,7 +464,7 @@ apply_steiner_tree(MapState, SteinerPaths, BreakableChance) ->
     end, MapState#map_state{steiner_paths = SteinerPaths}, SteinerPaths).
 
 is_in_player_area(X, Y) ->
-    Corners = [{1, 1}, {1, 14}, {14, 1}, {14, 14}],
+    Corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     lists:any(fun({CX, CY}) ->
         abs(X - CX) =< 1 andalso abs(Y - CY) =< 1
     end, Corners).
@@ -513,7 +513,7 @@ select_random_tile_type(BreakableProb, StrongProb, UnbreakableProb) ->
 %% ===================================================================
 
 mark_player_starts(MapState) ->
-    Corners = [{1, 1}, {14, 1}, {1, 14}, {14, 14}],
+    Corners = [{1, 14}, {14, 14}, {1, 1}, {14, 1}],
     PlayerIDs = [?PLAYER_1, ?PLAYER_2, ?PLAYER_3, ?PLAYER_4],
     
     lists:foldl(fun({{X, Y}, PlayerID}, AccMapState) ->
@@ -603,7 +603,7 @@ visualize_map(Grid) ->
             Char = case {TileType, BombType, PlayerID} of
                 {_, ?NORMAL_BOMB, _} -> " B";        % Bomb takes priority
                 {_, ?REMOTE_BOMB, _} -> " R";        % Remote bomb
-                {_, ?FREEZE_BOMB_ITEM, _} -> " F";   % Freeze bomb
+                {_, ?FREEZE_BOMB, _} -> " F";   % Freeze bomb
                 {_, _, ?PLAYER_1} -> " 1";           % Player 1
                 {_, _, ?PLAYER_2} -> " 2";           % Player 2
                 {_, _, ?PLAYER_3} -> " 3";           % Player 3
@@ -633,7 +633,7 @@ visualize_map(Grid) ->
 
 %% Start the Python port for graphical interface
 start_grid_port() ->
-    Port = open_port({spawn, "python3 map_live_port.py"}, 
+    Port = open_port({spawn, "python3 Graphics/map_live_port.py"}, 
                      [binary, exit_status, {packet, 4}]),
     register(grid_port, Port),
     Port.
@@ -728,7 +728,7 @@ export_map(Grid, Filename) ->
     io:format(File, "    PlayerID.~n~n", []),
     
     io:format(File, "get_player_starts() ->~n", []),
-    io:format(File, "    [{player_1, 1, 1}, {player_2, 1, 14}, {player_3, 14, 1}, {player_4, 14, 14}].~n", []),
+    io:format(File, "    [{player_1, 1, 14}, {player_2, 14, 14}, {player_3, 1, 1}, {player_4, 14, 1}].~n", []),
     
     file:close(File),
     io:format("📄 Unified grid map exported to ~s~n", [Filename]).
@@ -764,13 +764,22 @@ test_generation() ->
     % Visualize
     visualize_map(Grid),
 
-    % Send to Python port for graphical interface
-    io:format("Starting Python port for visualization...~n"),   % for debugging
-    start_grid_port(),
-    send_grid(Grid),
+    % NOTE: Python port visualization removed to avoid conflicts with cn_server_graphics
+    % If you need to test the map visually, use cn_server_graphics instead
+    % start_grid_port(),
+    % send_grid(Grid),
     
     % Export for testing
     %export_map(Grid, "test_unified_map.erl"),
     
     io:format("✅ Unified grid test complete!~n"),
     Grid.
+
+
+create_map() ->
+    % Generate map with full state
+    MapState = generate_map_with_powerups(),
+    Grid = MapState#map_state.grid,
+    io:format("✅ Map creation complete!~n"),
+    Grid.
+

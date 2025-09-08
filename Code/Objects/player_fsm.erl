@@ -25,7 +25,7 @@
 
 -export([start_link/4]).
 -export([start_signal/1, send_killswitch/1, input_command/2, gn_response/2, inflict_damage/1, bomb_exploded/1, 
-        update_target_gn/2, notify_power_up/2]).
+        update_target_gn/2, notify_power_up/2, get_player_pid/1]).
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
@@ -66,16 +66,17 @@
 %%%===================================================================
 
 %% @doc Spawns the player FSM with appropriate I/O handler
--spec start_link(PlayerNumber::integer(), GN_Pid::pid(), IsBot::boolean(), IO_pid::pid()) ->
+-spec start_link(PlayerNumber::integer(), GN_Name::atom(), IsBot::boolean(), IO_pid::pid()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link(PlayerNumber, GN_Pid, IsBot, IO_pid) ->
+start_link(PlayerNumber, GN_Name, IsBot, IO_pid) ->
     % Spawn player FSM
     ServerName = list_to_atom("player_" ++ integer_to_list(PlayerNumber)),
-    gen_statem:start_link({global, ServerName}, ?MODULE, [PlayerNumber, GN_Pid, IsBot, IO_pid], []).
+    gen_statem:start_link({global, ServerName}, ?MODULE, [PlayerNumber, GN_Name, IsBot, IO_pid], []).
 
 %% @doc Start the game for the player
 start_signal(PlayerPid) ->
     gen_statem:cast(PlayerPid, {game_start}).
+
 
 %% @doc Send killswitch to the player
 send_killswitch(PlayerPid) ->
@@ -85,9 +86,11 @@ send_killswitch(PlayerPid) ->
 input_command(PlayerPid, Command) ->
     gen_statem:cast(PlayerPid, {input_command, Command}).
 
+
 %% @doc Send response from GN
 gn_response(PlayerNum, Response) ->
-    gen_statem:cast(list_to_atom("player_" ++ integer_to_list(PlayerNum)), {gn_response, Response}).
+    gen_statem:cast(get_player_pid(PlayerNum), {gn_response, Response}).
+    
 
 %% @doc Inflict damage on player (from explosion)
 inflict_damage(PlayerPid) ->
@@ -112,12 +115,12 @@ notify_power_up(PlayerPid, PowerUp) -> % content should be {movespeed, X} | {bom
 callback_mode() ->
     state_functions.
 
-init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
-    {_, GN_registered_name} = process_info(GN_Pid, registered_name),
+init([PlayerNumber, GN_Name, IsBot, IOHandlerPid]) ->
+    % GN_Name is already the registered name, no conversion needed
     Data = #player_data{
         player_number = PlayerNumber,
-        local_gn = GN_registered_name,
-        target_gn = GN_registered_name, % starting at own GN's quarter
+        local_gn = GN_Name,
+        target_gn = GN_Name, % starting at own GN's quarter
         bot = IsBot,
         io_handler_pid = IOHandlerPid
     },
@@ -129,7 +132,7 @@ init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
         true -> 
             bot_handler:set_player_pid(IOHandlerPid, self())
     end,
-
+    io:format("**##**PLAYER FSM FINISHED INIT **##**~n"),
     %% move to start-up state - leave when given a message that the game starts
     {ok, startup, Data}.
 
@@ -144,6 +147,7 @@ init([PlayerNumber, GN_Pid, IsBot, IOHandlerPid]) ->
 %% when receiving said start signal, updates io/bot handler they can start
 startup(cast, {game_start}, Data) ->
     %% Notify I/O and bot handlers that the game has started
+    io:format("**##** PLAYER FSM RECEIVED 'game_start'~n"),
     ok = if
         Data#player_data.bot == false -> 
             io_handler:game_start(Data#player_data.io_handler_pid);
@@ -166,6 +170,10 @@ startup(cast, {killswitch}, Data) ->
     end,
     {stop, killswitch, Data};
 
+%% Handle tick messages in startup state (ignore them)
+startup(info, timer_tick, Data) ->
+    {keep_state, Data};
+
 %% Ignore all other inputs until game starts
 startup(_Type, _Event, Data) ->
     {keep_state, Data}.
@@ -180,6 +188,7 @@ idle(info, timer_tick, Data) ->
     handle_tick(idle, Data);
 
 idle(cast, {input_command, Command}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received input command ~p**##**~n", [idle, Command]),
     %% return value is determined in the handle function
     handle_input_command(Command, Data);
 
@@ -217,7 +226,7 @@ idle(cast, inflict_damage, Data) ->
             %% notify io/bot handler (to stop sending things, can also terminate)
             send_io_ack(player_died, NewData),
             %% notify GN - to remove player from mnesia table
-            gen_server:cast(Data#player_data.local_gn, {player_died, NewData#player_data.player_number}),
+            gn_server:cast_message(Data#player_data.local_gn, {player_message, {player_died, NewData#player_data.target_gn, NewData#player_data.player_number}}),
             %% Switch to 'dead' state - process doesn't terminate, only when receiving 'killswitch'
             {next_state, dead, NewData}
     end;
@@ -249,14 +258,16 @@ idle(Type, Event, Data) ->
 waiting_for_response(info, timer_tick, Data) ->
     handle_tick(waiting_for_response, Data);
 
-waiting_for_response(cast, {input_command, _Command}, Data) ->
+waiting_for_response(cast, {input_command, Command}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received input command ~p**##**~n", [waiting_for_response, Command]),
     %% Unexpected input command in waiting_for_response state - ignore and log
     {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
-    io:format("[~2..0B:~2..0B:~2..0B]: Unexpected input command in waiting_for_response state: ~p~n", [Hour, Min, Sec, {input_command, _Command}]),
-    error_logger:info_msg("Unexpected input command in waiting_for_response state: ~p", [{input_command, _Command}]),
+    io:format("[~2..0B:~2..0B:~2..0B]: Unexpected input command in waiting_for_response state: ~p~n", [Hour, Min, Sec, {input_command, Command}]),
+    error_logger:info_msg("Unexpected input command in waiting_for_response state: ~p", [{input_command, Command}]),
     {keep_state, Data};
 
 waiting_for_response(cast, {gn_response, Response}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received GN response ~p**##**~n", [waiting_for_response, Response]),
     handle_gn_response(Response, Data);
 
 waiting_for_response(cast, {killswitch}, Data) ->
@@ -287,7 +298,7 @@ waiting_for_response(cast, inflict_damage, Data) ->
             %% notify io/bot handler (to stop sending things, can also terminate)
             send_io_ack(player_died, NewData),
             %% notify GN - to remove player from mnesia table
-            gen_server:cast(Data#player_data.local_gn, {player_died, NewData#player_data.player_number}),
+            gn_server:cast_message(Data#player_data.local_gn, {player_message, {player_died, NewData#player_data.target_gn, NewData#player_data.player_number}}),
             %% Switch to 'dead' state - process doesn't terminate, only when receiving 'killswitch'
             {next_state, dead, NewData}
     end;
@@ -320,6 +331,7 @@ immunity_idle(info, timer_tick, Data) ->
     handle_tick(immunity_idle, Data);
 
 immunity_idle(cast, {input_command, Command}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received input command ~p**##**~n", [immunity_idle, Command]),
     %% return value is determined in the handle function
     handle_input_command(Command, Data);
 
@@ -374,6 +386,7 @@ immunity_waiting_for_response(info, timer_tick, Data) ->
     handle_tick(immunity_waiting_for_response, Data);
 
 immunity_waiting_for_response(cast, {input_command, _Command}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received input command ~p**##**~n", [waiting_for_response, _Command]),
     %% Unexpected input command in immunity_waiting_for_response state - ignore and log
     {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
     io:format("[~2..0B:~2..0B:~2..0B]: Unexpected input command in immunity_waiting_for_response state: ~p~n", [Hour, Min, Sec, {input_command, _Command}]),
@@ -381,6 +394,7 @@ immunity_waiting_for_response(cast, {input_command, _Command}, Data) ->
     {keep_state, Data};
 
 immunity_waiting_for_response(cast, {gn_response, Response}, Data) ->
+    io:format("**PLAYER FSM @ ~p: Received GN response ~p**##**~n", [immunity_waiting_for_response, Response]),
     handle_gn_response(Response, Data);
 
 immunity_waiting_for_response(cast, {killswitch}, Data) ->
@@ -451,8 +465,8 @@ handle_input_command(Command, Data) ->
             case process_command(Command, Data) of
                 {ok, Request, NewData} -> % 
                     % Request was pre-checked, send to local GN
-                    gen_server:cast(Data#player_data.local_gn, 
-                        {player_message, Request}),
+                    gn_server:cast_message(Data#player_data.local_gn, {player_message, Request}),
+                    io:format("**##** PLAYER FSM: Sent request ~p to local GN ~p**##**~n", [Request, Data#player_data.local_gn]),
                     case Data#player_data.immunity_timer of
                         0 -> %% we were at idle state, no immunity
                             {next_state, waiting_for_response, NewData};
@@ -462,11 +476,13 @@ handle_input_command(Command, Data) ->
                 {not_ok, Reason} ->
                     %% Operation blocked - send ACK to io/bot handler, keep state, set request cooldown timer
                     send_io_ack({request_denied_by_player_fsm, Reason}, Data),
+                    io:format("**##** PLAYER FSM: Command ~p denied - ~p**##**~n", [Command, Reason]),
                     NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
                     {keep_state, NewData};
                 {error, Reason} ->
                     % Invalid command
                     send_io_ack({error, Reason}, Data),
+                    io:format("**##** PLAYER FSM: Command ~p error - ~p**##**~n", [Command, Reason]),
                     {keep_state, Data}
             end;
         false -> % Still in cooldown
@@ -507,11 +523,13 @@ process_command(Command, Data) ->
 
 handle_gn_response(Response, Data) ->
     case Response of
-         {move_result, accepted} ->
+         {move_result, can_move} ->
+            io:format("**PLAYER FSM: Move accepted by GN**~n"),
             %% Move accepted - player is now moving, cannot move again for X seconds
             %% but can still drop bombs or use other abilities
             NewData = Data#player_data{
                 movement_cooldown = ?TILE_MOVE - ((Data#player_data.speed - 1) * ?MS_REDUCTION)},
+            io:format("**PLAYER FSM: New movement cooldown is ~p ms**~n", [NewData#player_data.movement_cooldown]),
             send_io_ack({move_accepted}, NewData), % "release" the io/bot handler to send more requests
             if
                 Data#player_data.immunity_timer == 0 ->
@@ -520,7 +538,8 @@ handle_gn_response(Response, Data) ->
                     {next_state, immunity_idle, NewData}
             end;
 
-        {move_result, denied} ->
+        {move_result, cant_move} ->
+            io:format("**PLAYER FSM: Move denied by GN**~n"),
             %% Move denied - short cooldown before any request
             NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
             send_io_ack({move_denied}, NewData), %% "release" the io/bot handler to send more requests
@@ -537,6 +556,7 @@ handle_gn_response(Response, Data) ->
                 request_cooldown = ?REQUEST_COOLDOWN,
                 bombs_placed = Data#player_data.bombs_placed + 1
             },
+            io:format("**PLAYER FSM: New bomb count is ~p**~n", [NewData#player_data.bombs_placed]),
             send_io_ack(bomb_placed, NewData), % "release" the io/bot handler to send more requests
             if 
                 Data#player_data.immunity_timer == 0 ->
@@ -546,7 +566,7 @@ handle_gn_response(Response, Data) ->
             end;
 
         {bomb_result, denied} ->
-            %% Bomb drop failed - restore bomb count
+            %% Bomb drop failed - begin request cooldown
             NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
             send_io_ack({bomb_not_placed}, NewData),
             if 
@@ -558,6 +578,7 @@ handle_gn_response(Response, Data) ->
 
         {ignite_result, accepted} ->
             %% Remote bombs ignited
+            io:format("**PLAYER FSM: Remote bombs ignited by GN**~n"),
             NewData = Data#player_data{request_cooldown = ?REQUEST_COOLDOWN},
             send_io_ack({ignited_bombs}, NewData),
             if 
@@ -569,6 +590,7 @@ handle_gn_response(Response, Data) ->
 
         {ignite_result, denied} ->
             %% Remote ignition failed
+            io:format("**PLAYER FSM: Remote bomb ignition failed by GN**~n"),
             %% ? This will be sent when we we don't have remote bombs to blow
             NewData = Data#player_data{
                 request_cooldown = 200     % short cooldown before retry
@@ -586,14 +608,14 @@ handle_gn_response(Response, Data) ->
             {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
             io:format("[~2..0B:~2..0B:~2..0B]: Unexpected GN response command: ~p~n",
                 [Hour, Min, Sec, {_Unknown}]),
-            error_logger:info_msg("Unexpected input command in immunity_waiting_for_response state: ~p", [{_Unknown}]),
+            error_logger:info_msg("Unexpected input command in player FSM state: ~p", [{_Unknown}]),
             send_io_ack({error, unknown_response, {_Unknown}}, Data),
             {keep_state, Data}
     end.
 
 
 handle_tick(CurrentState, Data) ->
-    %% Reduce cooldowns, notify GN of significant changes (every 1 sec), switch states if necessary
+    %% Reduce cooldowns, notify GN of significant changes, switch states if necessary
     %% Fetch Current counters
     {Immunity_cd, Request_cd, Move_cd} = {Data#player_data.immunity_timer, 
                                          Data#player_data.request_cooldown, 
@@ -608,7 +630,8 @@ handle_tick(CurrentState, Data) ->
         Immunity_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % cooldown just ended, notify GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            io:format("**PLAYER FSM: Request cooldown ended**~n"),
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn, 
                     {request_cooldown_update, Data#player_data.player_number, Updated_requestCooldown}
                 }
@@ -621,7 +644,7 @@ handle_tick(CurrentState, Data) ->
         Move_cd -> % was at 0, nothing to report or change
             ok;
         0 -> % Report movement cooldown changes every 200 ms to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {movement_cooldown_update, Data#player_data.player_number, Updated_movementCooldown}
                 }
@@ -638,38 +661,41 @@ handle_tick(CurrentState, Data) ->
     %% immunity handling - this timer is the only one responsible for state changes
     if
         Updated_immunityTimer == Immunity_cd -> % was at 0, nothing to report
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 0 -> % immunity ended, notify GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            io:format("**PLAYER FSM: Immunity ended**~n"),
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             case CurrentState of
                 immunity_idle -> {next_state, idle, NewData};
                 immunity_waiting_for_response -> {next_state, waiting_for_response, NewData}
             end;
         Updated_immunityTimer == 1000 -> % 1sec immunity left, report to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            io:format("**PLAYER FSM: 1 second of immunity left**~n"),
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         Updated_immunityTimer == 2000 -> % 2sec immunity left, report to GN
-            gen_server:cast(Data#player_data.local_gn, {player_message,
+            io:format("**PLAYER FSM: 2 seconds of immunity left**~n"),
+            gn_server:cast_message(Data#player_data.local_gn, {player_message,
                 {cooldown_update, Data#player_data.target_gn,
                     {immunity_update, Data#player_data.player_number, Updated_immunityTimer}}}),
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData};
         true -> % still in immunity or was already at 0
-            erlang:send_after(?TICK_DELAY, self(), tick), % Schedule next tick
+            erlang:send_after(?TICK_DELAY, self(), timer_tick), % Schedule next tick
             {keep_state, NewData}
     end.
 
 handle_common_events(Type, Event, Data) ->
     {{_Year, _Month, _Day}, {Hour, Min, Sec}} = calendar:local_time(),
     io:format("[~2..0B:~2..0B:~2..0B]: Unhandled event: ~p~n", [Hour, Min, Sec, {Type, Event}]),
-    error_logger:info_msg("Unhandled event: ~p~n", [{Type, Event}]),
+    error_logger:info_msg("Unhandled event (State|Event): ~p~n", [{Type, Event}]),
     {keep_state, Data}. % default handler for unexpected events
 
 
@@ -715,3 +741,12 @@ terminate(_Reason, _State, _Data) ->
 
 code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
+
+%% @doc helper function to get player's PID from his number
+get_player_pid(PlayerNumber) ->
+    case global:whereis_name(list_to_atom("player_" ++ integer_to_list(PlayerNumber))) of
+        Pid when is_pid(Pid) ->
+            Pid;
+        _ ->
+            {error, player_not_found}
+    end.

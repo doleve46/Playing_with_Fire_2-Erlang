@@ -79,11 +79,13 @@ handle_call(_Request, _From, State) ->
 handle_cast({forward_request, Destination, Request}, State) ->
     %% * forward requests look like {forward_request, Destination_GN_name, Request={..} }
     %% * Sends the new message as {forwarded, Request={..}}
-    gen_server:cast(Destination, {forwarded, Request}),
+    io:format("🔄 CN SERVER: Forwarding request to ~p: ~p~n", [Destination, Request]),
+    gn_server:cast_message(Destination, {forwarded, Request}),
     {noreply, State};
 
 %% @doc Handling checks to switch GNs
 handle_cast({query_request, AskingGN, Request}, State) ->
+    io:format("🔄 CN SERVER: Received query_request from ~p: ~p~n", [AskingGN, Request]),
     %% * this below is the Request's contents
     case Request of
         {move_request_out_of_bounds, player, PlayerNum, [X,Y]=Destination_coord, Direction} ->
@@ -91,15 +93,21 @@ handle_cast({query_request, AskingGN, Request}, State) ->
         %% * pass the appropriate GN the message:
         %% * {forwarded, {move_request_out_of_bounds, player, {playerNum, Destination_coord, Direction, [relevant buffs], AskingGN}
             TargetGN = req_player_move:get_managing_node_by_coord(X, Y),
-            Players_table = lists:nth(req_player_move:node_name_to_number(TargetGN), State#gn_data.players),
+            
+            %% Get the asking GN's data to read the player record (player belongs to asking GN, not target GN)
+            AskingGNIndex = req_player_move:node_name_to_number(AskingGN),
+            AskingGNData = lists:nth(AskingGNIndex, State),
+            Players_table = AskingGNData#gn_data.players,
             Player_record = req_player_move:read_player_from_table(PlayerNum, Players_table),
             case erlang:is_record(Player_record, mnesia_players) of
                 true -> 
-                    gen_server:cast(TargetGN,
+                    io:format("🔄 CN SERVER: Forwarding player ~p move request from ~p to ~p at coordinates ~p~n", [PlayerNum, AskingGN, TargetGN, Destination_coord]),
+                    gn_server:cast_message(TargetGN,
                         {move_request_out_of_bounds, player,
                             {PlayerNum, Destination_coord, Direction, Player_record#mnesia_players.special_abilities, AskingGN}
                     });   
                 false ->
+                    io:format("❌ CN SERVER: Player ~p not found in asking GN ~p table, Player_record: ~p~n", [PlayerNum, AskingGN, Player_record]),
                     erlang:error(record_not_found, [node(), Player_record])
             end,
             {noreply, State};
@@ -107,42 +115,56 @@ handle_cast({query_request, AskingGN, Request}, State) ->
         {handle_bomb_explosion, Coord, Radius} ->
             %% handled in a side function
             %% Calculates affected coordinates, then sends damage_taken messages to all objects impacted
-            bomb_explosion_handler(Coord, Radius);
+            bomb_explosion_handler(Coord, Radius),
+            {noreply, State};
 
         {ignite_bomb_request, PlayerNum} ->
-            RemoteBombs = bomb_helper_functions:find_remote_bombs_for_player(PlayerNum),
-            lists:foreach(fun(BombRecord) ->
-                % Send ignite message to each remote bomb
-                case BombRecord#mnesia_bombs.pid of
-                    Pid when is_pid(Pid) ->
-                        bomb_as_fsm:ignite_bomb(Pid);
-                    _ ->
-                        io:format("Warning: Invalid bomb PID for remote bomb at ~p~n", [BombRecord#mnesia_bombs.position])
-                end
-            end, RemoteBombs),
-            %% Notify Player FSM about the ignition
-            case RemoteBombs of
-                [] -> player_fsm:gn_response(PlayerNum, {ignite_result, denied});
-                _  -> player_fsm:gn_response(PlayerNum, {ignite_result, accepted})
+            case bomb_helper_functions:find_remote_bombs_for_player(player_fsm:get_player_pid(PlayerNum)) of
+                RemoteBombs when is_list(RemoteBombs) ->
+                    lists:foreach(fun(BombRecord) ->
+                        % Send ignite message to each remote bomb
+                        case BombRecord#mnesia_bombs.pid of
+                            Pid when is_pid(Pid) ->
+                                bomb_as_fsm:ignite_bomb(Pid);
+                            _ ->
+                                io:format("Warning: Invalid bomb PID for remote bomb at ~p~n", [BombRecord#mnesia_bombs.position])
+                        end
+                    end, RemoteBombs),
+                    %% Notify Player FSM about the ignition
+                    case RemoteBombs of
+                        [] -> player_fsm:gn_response(PlayerNum, {ignite_result, denied});
+                        _  -> player_fsm:gn_response(PlayerNum, {ignite_result, accepted})
+                    end;
+                {aborted, Reason} ->
+                    io:format("❌ Failed to find remote bombs for player ~p: ~p~n", [PlayerNum, Reason]),
+                    player_fsm:gn_response(PlayerNum, {ignite_result, denied});
+                Other ->
+                    io:format("❌ Unexpected result finding remote bombs for player ~p: ~p~n", [PlayerNum, Other]),
+                    player_fsm:gn_response(PlayerNum, {ignite_result, denied})
             end,
             {noreply, State}
     end;
 
 %% * handles a player transfer from one GN to another
 handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
-    Current_GN_players_table = lists:nth(req_player_move:node_name_to_number(Current_GN), State#gn_data.players),
-    New_GN_players_table = lists:nth(req_player_move:node_name_to_number(New_GN), State#gn_data.players),
+    Current_GNIndex = req_player_move:node_name_to_number(Current_GN),
+    New_GNIndex = req_player_move:node_name_to_number(New_GN),
+    Current_GNData = lists:nth(Current_GNIndex, State),
+    New_GNData = lists:nth(New_GNIndex, State),
+    Current_GN_players_table = Current_GNData#gn_data.players,
+    New_GN_players_table = New_GNData#gn_data.players,
     case transfer_player_records(PlayerNum, Current_GN_players_table, New_GN_players_table) of
         {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
         ok -> 
             %% Message the new GN to check for collisions
-            gen_server:cast(New_GN,{incoming_player, PlayerNum})
+            gn_server:cast_message(New_GN,{incoming_player, PlayerNum})
     end,
     {noreply, State};
 
 %% * Update active bombs in mnesia table and notify controlling player_fsm
-handle_cast({player_bomb_exploded, PlayerPid}, _State = #gn_data{}) ->
-    update_player_active_bombs(PlayerPid);
+handle_cast({player_bomb_exploded, PlayerPid}, State) ->
+    update_player_active_bombs(PlayerPid),
+    {noreply, State};
 
 
 %% @doc General cast messages - as of now ignored.
@@ -158,12 +180,13 @@ handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
         fun(Index) -> 
             Individual_table_names = generate_table_names(Index),
             PidA = lists:nth(Index, GN_pids_list),
+            [TilesTable, BombsTable, PowerupsTable, PlayersTable] = Individual_table_names,
             #gn_data{
                 pid = PidA,
-                tiles = lists:hd(Individual_table_names),
-                bombs = lists:nth(2, Individual_table_names),
-                powerups = lists:nth(3, Individual_table_names),
-                players = lists:last(Individual_table_names)
+                tiles = TilesTable,
+                bombs = BombsTable,
+                powerups = PowerupsTable,
+                players = PlayersTable
             }
         end, lists:seq(1,4)),
     io:format("Successfully linked to all gn_servers ~w~n", [GN_pids_list]),
@@ -172,9 +195,10 @@ handle_info({monitor_GNs, GN_playmode_list}, IrreleventState) ->
 
 %% @doc Receiving ready message from cn_server_graphics
 handle_info({graphics_ready, _GraphicsPid}, State) ->
-    io:format("Graphics server is ready~n"),
+    io:format("**CN_SERVER: Graphics server is ready~n"),
     %% Notify all GN servers to start the game
     lists:foreach(fun(#gn_data{pid = Pid}) ->
+        io:format("**CN_SERVER: Sending start_game to GN server: ~p~n", [Pid]),
         Pid ! start_game
     end, State),
     {noreply, State};
@@ -234,10 +258,22 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
     mnesia:activity(transaction, Fun).
 
 bomb_explosion_handler(Coord, Radius) ->
-    {atomic, ResultList} = calculate_explosion_reach(Coord, Radius),
-    %% * ResultList looks like [ ListForGN1, ListForGN2, ListForGN3, ListForGN4 ] , each of those is - [X,Y], [X,Y], [X,Y]...
+    ResultList = case calculate_explosion_reach(Coord, Radius) of
+        {atomic, Result} -> 
+            io:format("💥 EXPLOSION_HANDLER: Got atomic result with ~p coordinates~n", [length(lists:flatten(Result))]),
+            Result;
+        Result when is_list(Result) -> 
+            io:format("💥 EXPLOSION_HANDLER: Got list result with coordinates:~p~n", [Result]),
+            Result;
+        Other -> 
+            io:format("ERROR: Unexpected result from calculate_explosion_reach: ~p~n", [Other]),
+            throw({unexpected_explosion_result, Other})
+    end,
+    %% * ResultList looks like [ Coordinates from GN1, Coordinates From GN2, .. Gn3, GN4 ] where each one is [X,Y], [X,Y], [X,Y] with duplicates on origin coordinate
     %% ResultList can be passed to the graphics server so it knows where to show an explosion
-    cn_server_graphics:show_explosion(lists:flatten(ResultList)),
+    FlattenedCoords = [X || X <- lists:usort(ResultList), X =/= []],
+    io:format("💥 EXPLOSION_HANDLER: Sending ~p coordinates to graphics: ~p~n", [length(FlattenedCoords), FlattenedCoords]),
+    cn_server_graphics:show_explosion(FlattenedCoords),
     %% Sends inflict_damage messages to all objects affected by the explosion
     notify_affected_objects(ResultList).
 
@@ -292,69 +328,110 @@ trace_ray([X, Y], {PlusX, PlusY}=Direction, StepsLeft, Accums) ->
 
 %% Handler for letting all objects be affected by the explosion in the affected coordinates list
 notify_affected_objects(ResultList) ->
-    spawn(fun() -> process_affected_objects(lists:nth(1, ResultList), gn1_tiles, gn1_bombs, gn1_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(2, ResultList), gn2_tiles, gn2_bombs, gn2_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(3, ResultList), gn3_tiles, gn3_bombs, gn3_players) end),
-    spawn(fun() -> process_affected_objects(lists:nth(4, ResultList), gn4_tiles, gn4_bombs, gn4_players) end).
+    %% Deduplicate coordinates for each GN to prevent multiple damage application
+    GN1_coords = lists:usort(lists:nth(1, ResultList)),
+    GN2_coords = lists:usort(lists:nth(2, ResultList)),
+    GN3_coords = lists:usort(lists:nth(3, ResultList)),
+    GN4_coords = lists:usort(lists:nth(4, ResultList)),
+    
+    io:format("💥 NOTIFY_AFFECTED: GN1: ~p, GN2: ~p, GN3: ~p, GN4: ~p~n", 
+              [GN1_coords, GN2_coords, GN3_coords, GN4_coords]),
+    
+    spawn(fun() -> process_affected_objects(GN1_coords, gn1_tiles, gn1_bombs, gn1_players) end),
+    spawn(fun() -> process_affected_objects(GN2_coords, gn2_tiles, gn2_bombs, gn2_players) end),
+    spawn(fun() -> process_affected_objects(GN3_coords, gn3_tiles, gn3_bombs, gn3_players) end),
+    spawn(fun() -> process_affected_objects(GN4_coords, gn4_tiles, gn4_bombs, gn4_players) end).
 
 process_affected_objects(ListOfCoords, Tiles_table, Bombs_table, Players_table) ->
     Fun = fun() -> lists:foreach(
         fun(Coord) -> process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) end, ListOfCoords
     ) end,
-    mnesia:activity(read_only, Fun).
+    MnesiaResult = mnesia:activity(transaction, Fun),
+    io:format("DEBUG: Mnesia return value is ~p~n", [MnesiaResult]),
+    case MnesiaResult of
+        ok -> ok;
+        {atomic, Result} -> Result;
+        {aborted, Reason} -> 
+            io:format("❌ Mnesia transaction aborted for coord ~p: ~p~n", [ListOfCoords, Reason]),
+            ok;
+        Other -> 
+            io:format("❌ Unexpected result from mnesia activity for coord ~p: ~p~n", [ListOfCoords, Other]),
+            ok
+    end.
 
 process_single_coord(Coord, Tiles_table, Bombs_table, Players_table) ->
     %% using QLC querries to make this faster
-    TilesPids = qlc:e(qlc:q(
-        [T#mnesia_tiles.pid || T <- mnesia:table(Tiles_table), T#mnesia_tiles.position == Coord]
+    TilesRecords = qlc:e(qlc:q(
+        [T#mnesia_tiles{} || T <- mnesia:table(Tiles_table), T#mnesia_tiles.position == Coord]
     )),
-    BombsPids = qlc:e(qlc:q(
-        [B#mnesia_bombs.pid || B <- mnesia:table(Bombs_table), B#mnesia_bombs.position == Coord]
+    BombsRecords = qlc:e(qlc:q(
+        [B#mnesia_bombs{} || B <- mnesia:table(Bombs_table), B#mnesia_bombs.position == Coord]
     )),
-    PlayersPids = qlc:e(qlc:q(
-        [P#mnesia_players.pid || P <- mnesia:table(Players_table), P#mnesia_players.position == Coord]
+    PlayersRecords = qlc:e(qlc:q(
+        [P#mnesia_players{} || P <- mnesia:table(Players_table), P#mnesia_players.position == Coord]
     )),
-
-    % Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
-    inflict_damage_handler(TilesPids, tile, damage_taken),
-    inflict_damage_handler(BombsPids, bomb_as_fsm, damage_taken),
-    inflict_damage_handler(PlayersPids, player_fsm, inflict_damage),
+    %% Send 'inflict damage' message to all affected objects, based on their type (bomb/player/tile)
+    %% io print of the affected objects
+    io:format("💥 EXPLOSION at ~p affects ~p tiles, ~p bombs, and ~p players.~n",
+        [Coord, length(TilesRecords), length(BombsRecords), length(PlayersRecords)]),
+    inflict_damage_handler(TilesRecords, tile, damage_taken, Tiles_table),
+    inflict_damage_handler(BombsRecords, bomb_as_fsm, damage_taken, Bombs_table),
+    inflict_damage_handler(PlayersRecords, player_fsm, inflict_damage, Players_table),
     ok.
 
 
-inflict_damage_handler(PidsList, Module, Function) ->
-    lists:foreach(fun(Pid) ->
+inflict_damage_handler(RecordsList, Module, Function, Table) ->
+    lists:foreach(fun(Record) ->
         try
-            _ = apply(Module, Function, [Pid])
+            case Record of
+                R when is_record(R, mnesia_tiles) ->
+                    io:format("💥 Tile at ~p taking damage~n", [Record#mnesia_tiles.position]),
+                    _ = apply(Module, Function, [Record#mnesia_tiles.pid]),
+                    io:format("💥 Sent damage to: ~p:~p(~p)~n", [Module, Function, Record#mnesia_tiles.pid]);
+                R when is_record(R, mnesia_bombs) ->
+                    io:format("💥 Bomb at ~p taking damage~n", [Record#mnesia_bombs.position]),
+                    _ = apply(Module, Function, [Record#mnesia_bombs.pid]),
+                    io:format("💥 Sent damage to: ~p:~p(~p)~n", [Module, Function, Record#mnesia_bombs.pid]);
+                R when is_record(R, mnesia_players) ->
+                    io:format("💥 Player ~p at ~p taking damage~n", [Record#mnesia_players.player_number, Record#mnesia_players.position]),
+                    _ = apply(Module, Function, [Record#mnesia_players.pid]),
+                    io:format("💥 Sent damage to: ~p:~p(~p)~n", [Module, Function, Record#mnesia_players.pid]),
+                    UpdatedRecord = Record#mnesia_players{life = Record#mnesia_players.life - 1},
+                    mnesia:write(Table, UpdatedRecord, write),
+                    io:format("💥 Updated player ~p life to ~p~n", [Record#mnesia_players.player_number, UpdatedRecord#mnesia_players.life])
+            end
         catch
             Class:Reason ->
-                io:format(standard_error, "Error calling ~p:~p(~p). Class: ~p, Reason: ~p~n", [Module, Function, Pid, Class, Reason])
+                io:format(standard_error, "Error calling ~p:~p(). Class: ~p, Reason: ~p~n", [Module, Function, Class, Reason])
         end
-    end, PidsList),
+    end, RecordsList),
     ok.
 
 
-update_player_active_bombs(PlayerPid) ->
+update_player_active_bombs(PlayerNumber) ->
     Tables = [gn1_players, gn2_players, gn3_players, gn4_players],
-    Fun = fun() -> find_in_player_tables(PlayerPid, Tables) end,
-    {atomic, Result} = mnesia:activity(transaction, Fun),
+    Fun = fun() -> find_in_player_tables_by_number(PlayerNumber, Tables) end,
+    Result = case mnesia:activity(transaction, Fun) of
+        {atomic, R} -> R;
+        R -> R
+    end,
     case Result of
         not_found ->
-            erlang:error(player_not_found, [PlayerPid]);
+            erlang:error(player_not_found, [PlayerNumber]);
         {table_updated, Player_record} ->
             %% Notify player_fsm of this change directly
             player_fsm:bomb_exploded(Player_record#mnesia_players.pid)
     end.
 
 
-find_in_player_tables(_Pid, []) -> not_found;
-find_in_player_tables(Pid, [Table| T]) ->
-    case mnesia:index_read(Table, Pid, pid) of
+find_in_player_tables_by_number(_PlayerNumber, []) -> not_found;
+find_in_player_tables_by_number(PlayerNumber, [Table| T]) ->
+    case mnesia:index_read(Table, PlayerNumber, player_number) of
         [Record] ->  % update active bombs in mnesia table
             UpdatedRecord = Record#mnesia_players{bombs_placed = Record#mnesia_players.bombs_placed - 1},
             mnesia:write(Table, UpdatedRecord, write),
             {table_updated, Record};
-        [] -> find_in_player_tables(Pid, T)
+        [] -> find_in_player_tables_by_number(PlayerNumber, T)
     end.
 
 
@@ -362,18 +439,18 @@ find_in_player_tables(Pid, [Table| T]) ->
 link_GNs_loop(NodeNumbers) ->
     io:format("Attempt to link to all gn_servers..~n"),
     Pids = lists:map(fun(NodeNum) ->
-       GN_server_name = list_to_atom("gn" ++ integer_to_list(NodeNum) ++ "_server"),
+       GN_server_name = list_to_atom("GN" ++ integer_to_list(NodeNum) ++ "_server"),
        link_with_retry(GN_server_name, 0)
     end, NodeNumbers),
     Pids. % return list of linked PIDs
 
-link_with_retry(GN_server_name, RetryCount) when RetryCount > 4 ->
+link_with_retry(GN_server_name, RetryCount) when RetryCount > 8 ->
     erlang:error({link_failed_after_retries, GN_server_name, RetryCount});
 link_with_retry(GN_server_name, RetryCount) ->
-    Pid = whereis(GN_server_name),
+    Pid = global:whereis_name(GN_server_name),
     case Pid of
         undefined ->
-            io:format("Process ~p not found, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+            io:format("Process ~p not found globally, attempt ~w/8, retrying...~n", [GN_server_name, RetryCount + 1]),
             timer:sleep(500),
             link_with_retry(GN_server_name, RetryCount + 1);
         _ ->
@@ -383,7 +460,7 @@ link_with_retry(GN_server_name, RetryCount) ->
                 Pid
             catch
                 _:_ ->
-                    io:format("Failed to link to ~p, attempt ~w/4, retrying...~n", [GN_server_name, RetryCount + 1]),
+                    io:format("Failed to link to ~p, attempt ~w/8, retrying...~n", [GN_server_name, RetryCount + 1]),
                     timer:sleep(500),
                     link_with_retry(GN_server_name, RetryCount + 1)
             end

@@ -11,7 +11,7 @@
 
 %% API
 -export([cn_bootstrap/1, discover_GNs/1, discover_GNs_improved/1]).
--export([start/1, initial_mnesia_load/1]).
+-export([start/1, initial_mnesia_load/2]).
 
 %% ! NOTE: when terminating, need to use application:stop(mnesia)
 %% ! NOTE: for super-massive debugging use sys:trace(Pid, true).
@@ -26,7 +26,7 @@
 %% --------------------------------------------------------------
 cn_bootstrap(IP_prefix) ->
     %% Discover all GNs in the local network
-    GN_list = discover_GNs(IP_prefix),
+    GN_list = discover_GNs_improved(IP_prefix),
     io:format("Discovered GN nodes: ~p~n", [GN_list]),
     spawn(cn_start, start, [GN_list]). % spawn cn_start process
 
@@ -96,10 +96,6 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     %% Enter loop for initial connections from GNs
     ConnectedNodeNames = initial_connections_loop(0, []),
     io:format("All GN nodes (gn_start) connected successfully: ~p~n", [ConnectedNodeNames]),
-    %% Send message to all GN's gn_start to choose playmode (bot/human)
-    lists:foreach(fun(NodeName) ->
-        {gn_start, NodeName} ! {cn_start, {choose_playmode, are_you_bot}} end,
-    ConnectedNodeNames),
     %% * From this point until the game actually starts, the GNs shouldn't be able to disconnect/crash.
     %% Initialize mnesia
     AllNodes = [node()] ++ ConnectedNodeNames,
@@ -117,31 +113,71 @@ start(_GN_list) -> % currently GN_list is unsued, might be used later on.
     end,
     
     mnesia:create_schema(AllNodes), % mnesia start-up requirement
-    rpc:multicall(AllNodes, application, start, [mnesia]), % Starts mnesia on all nodes
-    TableNamesList = lists:map(fun(X) ->
-            create_tables(lists:nth(X, ConnectedNodeNames), node(), X)
-        end, lists:seq(1,length(ConnectedNodeNames))),
-    %% Create map
-    Map = map_generator:test_generation(), % ! this is a temporary call - should be something else
-    %% Load map into mnesia - in parallel processes
-    Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
-    %% Await GNs decisions to play as bot or human
-    GNs_decisions = await_players_decisions(4, [], ConnectedNodeNames),
-    io:format("GNs decisions received: ~p~n", [GNs_decisions]),
-    %% Verify mnesia loading process has finished
-    case erlang:is_process_alive(Mnesia_loading_pid) of
-        true ->
-            io:format("Mnesia loading process still alive, wait 5 more seconds...~n"),
-            timer:sleep(5000),
-            false = erlang:is_process_alive(Mnesia_loading_pid), % crash if not ready
-            io:format("Mnesia loading process finished.~n");
-        false ->
-            io:format("Mnesia loading process already finished.~n")
+    
+    % Start mnesia on all nodes and verify success
+    io:format("CN: Starting Mnesia on all nodes: ~p~n", [AllNodes]),
+    {Results, BadNodes} = rpc:multicall(AllNodes, application, start, [mnesia]),
+    
+    % Check if all nodes started Mnesia successfully
+    case BadNodes of
+        [] -> 
+            io:format("CN: Mnesia started successfully on all nodes~n"),
+            io:format("CN: Start results: ~p~n", [Results]);
+        _ -> 
+            io:format("CN: ~ts Failed to start Mnesia on nodes: ~p~n", [[16#274C],BadNodes]),
+            error({mnesia_start_failed, BadNodes})
     end,
+    
+    % Wait a bit for Mnesia to be fully ready on all nodes
+    timer:sleep(2000),
+    
+    % Verify that Mnesia is running on all nodes
+    lists:foreach(fun(Node) ->
+        case rpc:call(Node, mnesia, system_info, [is_running]) of
+            yes ->
+                io:format("CN: ~ts Mnesia confirmed running on ~p~n", [[16#2705],Node]);
+            Other ->
+                io:format("CN: ~ts Mnesia not running on ~p: ~p~n", [[16#274C],Node, Other]),
+                error({mnesia_not_running, Node, Other})
+        end
+    end, AllNodes),
+    
+    % Sort the connected nodes to ensure GN1, GN2, GN3, GN4 order
+    SortedConnectedNodeNames = lists:sort(ConnectedNodeNames),
+    io:format("CN: Sorted GN nodes for table creation: ~p~n", [SortedConnectedNodeNames]),
+    
+    % Clean up any existing tables from previous runs
+    io:format("CN: Cleaning up existing tables...~n"),
+    cleanup_existing_tables(length(SortedConnectedNodeNames)),
+    
+    TableNamesList = lists:map(fun(X) ->
+            create_tables(lists:nth(X, SortedConnectedNodeNames), node(), X)
+        end, lists:seq(1,length(SortedConnectedNodeNames))),
+    %% Create map
+    Map = map_generator:create_map(),
+    %% Load map into mnesia - synchronously
+    %Mnesia_loading_pid = spawn_link(?MODULE, initial_mnesia_load, [TableNamesList, Map]),
+    ok = initial_mnesia_load(TableNamesList, Map),
+    io:format("Mnesia loading completed successfully.~n"),
+    %% Send message to all GN's gn_start to choose playmode (bot/human) & Await their decisions
+    lists:foreach(fun(NodeName) ->
+        {gn_start, NodeName} ! {cn_start, {choose_playmode, are_you_bot}} end,
+    ConnectedNodeNames),
+    io:format("📋 Waiting for player decisions from 4 GN nodes...~n"),
+    GNs_decisions = await_players_decisions(4, [], ConnectedNodeNames),
+    io:format("✅ GNs decisions received: ~p~n", [GNs_decisions]),
     %% Open cn_server and cn_graphics_server
+    io:format("🚀 Starting CN server and CN graphics server...~n"),
     {ok, _Pid_cn_server} = cn_server:start_link(GNs_decisions),
+    io:format("✅ CN server started successfully~n"),
     {ok, _Pid_cn_graphics_server} = cn_server_graphics:start_link(ConnectedNodeNames),
-    ok. % Startup process ends gracefully
+    io:format("✅ CN graphics server started successfully~n"),
+    
+    % Keep this process alive so linked servers don't terminate
+    io:format("🔄 CN startup complete, keeping process alive...~n"),
+    receive
+        stop -> ok
+    end.
 
 %% =================== Helper Functions ======================
 
@@ -190,17 +226,21 @@ broadcast_current_connections(Counter, ListOfNodeNames) ->
     ok.
 
 %% @doc recieve-block that catches all decisions from GNs and returns a sorted list of tuples {1, true, Node_1_ID}, {2, false, Node_1_ID} ...
-await_players_decisions(0, Acc, _GN_list) -> lists:sort(fun({A,_,_}, {B,_,_}) -> A =< B end, Acc);
+await_players_decisions(0, Acc, _GN_list) -> 
+    io:format("📋 All player decisions collected!~n"),
+    lists:sort(fun({A,_,_}, {B,_,_}) -> A =< B end, Acc);
 await_players_decisions(N, Acc, GN_list) ->
+    io:format("📋 Still waiting for ~w more player decisions...~n", [N]),
     receive
         {Pid, playmode, Answer} when is_pid(Pid), is_boolean(Answer) ->
             case lists:member(node(Pid),GN_list) of
                 true ->
                     GN_number = list_to_integer([lists:nth(3, atom_to_list(node(Pid)))]),
+                    io:format("📋 Received decision from GN~w: ~p~n", [GN_number, Answer]),
                     await_players_decisions(N-1, [{GN_number, Answer, node(Pid)} | Acc ], GN_list);
                 false -> % an error - shouldn't catch such messages
                     %% print this to the screen, and for now continue as normal
-                    io:format("Unexpected message from ~p: {~p, ~p}~n", [Pid, playmode, Answer]),
+                    io:format("⚠️ Unexpected message from ~p: {~p, ~p}~n", [Pid, playmode, Answer]),
                     await_players_decisions(N, Acc, GN_list)
             end
     end.
@@ -210,6 +250,27 @@ await_players_decisions(N, Acc, GN_list) ->
 %% helper function to create mnesia table names
 generate_atom_table_names(Number, Type) ->
     list_to_atom("gn" ++ integer_to_list(Number) ++ Type).
+
+%% @doc Clean up existing tables from previous runs to avoid configuration conflicts
+cleanup_existing_tables(NumNodes) ->
+    lists:foreach(fun(NodeNum) ->
+        TilesTable = generate_atom_table_names(NodeNum, "_tiles"),
+        BombsTable = generate_atom_table_names(NodeNum, "_bombs"),
+        PowerupsTable = generate_atom_table_names(NodeNum, "_powerups"),
+        PlayersTable = generate_atom_table_names(NodeNum, "_players"),
+        
+        % Try to delete each table, ignore errors if they don't exist
+        lists:foreach(fun(TableName) ->
+            case mnesia:delete_table(TableName) of
+                {atomic, ok} ->
+                    io:format("CN: Deleted existing table ~p~n", [TableName]);
+                {aborted, {no_exists, _}} ->
+                    io:format("CN: Table ~p didn't exist (OK)~n", [TableName]);
+                {aborted, Reason} ->
+                    io:format("CN: Warning - couldn't delete table ~p: ~p~n", [TableName, Reason])
+            end
+        end, [TilesTable, BombsTable, PowerupsTable, PlayersTable])
+    end, lists:seq(1, NumNodes)).
 
 create_tables(GN_node, CN_node, Node_number) ->
     Mnesia_tiles_name = generate_atom_table_names(Node_number, "_tiles"),
@@ -252,9 +313,36 @@ create_tables(GN_node, CN_node, Node_number) ->
 
 %% @doc awaits mnesia table's finalized setup, then inserts the generated map-state to the tables
 initial_mnesia_load(TableNamesList, Map) ->
-    mnesia:wait_for_tables(lists:flatten(TableNamesList), 5000), % ? timeout is 5000ms for now
+    % Re-verify that all nodes are still running before waiting for tables
+    AllTableNames = lists:flatten(TableNamesList),
+    
+    % Get all connected GN nodes
+    ConnectedGNNodes = [N || N <- nodes(), 
+                            string:str(atom_to_list(N), "GN") > 0],
+    
+    io:format("CN: Re-verifying GN nodes before waiting for tables: ~p~n", [ConnectedGNNodes]),
+    
+    % Check each GN node's Mnesia status
+    lists:foreach(fun(Node) ->
+        case rpc:call(Node, mnesia, system_info, [is_running], 3000) of
+            yes ->
+                io:format("CN: ✅ Node ~p still running Mnesia~n", [Node]);
+            {badrpc, nodedown} ->
+                io:format("CN: ❌ Node ~p is down!~n", [Node]),
+                error({node_down_before_load, Node});
+            {badrpc, timeout} ->
+                io:format("CN: ⏰ Timeout checking node ~p~n", [Node]),
+                error({node_timeout_before_load, Node});
+            Other ->
+                io:format("CN: ❌ Node ~p Mnesia not running: ~p~n", [Node, Other]),
+                error({mnesia_not_running_before_load, Node, Other})
+        end
+    end, ConnectedGNNodes),
+    
+    io:format("CN: All GN nodes verified, waiting for tables: ~p~n", [AllTableNames]),
+    mnesia:wait_for_tables(AllTableNames, 5000), % ? timeout is 5000ms for now
     insert_map_to_database(Map),
-    io:format("*Initial map state loaded successfully to mnesia tables~n").
+    io:format("***Initial map state loaded successfully to mnesia tables~n").
 
 insert_map_to_database(Map) ->
     % full map size - 16x16 [0->15][0->15]

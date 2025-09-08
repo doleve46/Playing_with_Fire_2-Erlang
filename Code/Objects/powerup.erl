@@ -39,8 +39,12 @@
 start_link(Pos_x, Pos_y, Type) ->
     Name = list_to_atom("powerup_" ++ integer_to_list(Pos_x) ++ "_" ++ integer_to_list(Pos_y)),
     % registers *locally* as atom called 'tile_X_Y' (X,Y - numbers indicating location)
-    % TODO: maybe there's no need to register, but just hold at the GN a database of the position, type and Pid of tiles
-    gen_server:start_link({local, Name}, ?MODULE, [[Pos_x, Pos_y], Type, node()], []).
+    % Get the registered name of the calling GN server instead of its PID
+    GN_Name = case gn_server:get_registered_name(self()) of
+        undefined -> self(); % Fallback to PID if name not found
+        RegisteredName -> RegisteredName
+    end,
+    gen_server:start_link({local, Name}, ?MODULE, [[Pos_x, Pos_y], Type, GN_Name], []).
 
 
 pickup(Pid) ->
@@ -55,8 +59,9 @@ pickup(Pid) ->
 -spec(init(Args :: term()) ->
     {ok, State :: #powerup_state{}} | {ok, State :: #powerup_state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([Position, Type, Node_ID]) ->
-    {ok, #powerup_state{position=Position, type=Type, original_node_ID=Node_ID}}.
+init([Position, Type, Node_PID]) ->
+    io:format("**POWERUP: Initializing powerup of type ~p at position ~p~n", [Type, Position]),
+    {ok, #powerup_state{position=Position, type=Type, gn_pid=Node_PID, pid = self()}}.
 
 %% @private
 %% @doc Handling call messages

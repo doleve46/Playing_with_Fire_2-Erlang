@@ -14,12 +14,12 @@
 %% ? based on functionality. This file will include all functions relevant to a player requesting movement
 %% * it might also include a bomb requesting movement later on
 -export([read_player_from_table/2, calc_new_coordinates/2,
-        update_player_direction/3, handle_player_movement_clearance/3, handle_bomb_movement_clearance/3,
+        update_player_direction/3, handle_player_movement_clearance/3, handle_player_movement_clearance/4, handle_bomb_movement_clearance/3,
         get_managing_node_by_coord/2, node_name_to_number/1,
         get_records_at_location/2, interact_with_entity/4,
-        handle_player_movement/3, insert_player_movement/2, check_for_obstacles/4,
+        handle_player_movement/3, insert_player_movement/2, insert_player_movement/3, check_for_obstacles/4,
         read_and_remove_bomb/2, get_gn_number_by_coord/2,
-        read_and_update_coord/3, check_entered_coord/2, update_player_cooldowns/2]).
+        read_and_update_coord/3, check_entered_coord/2, update_player_cooldowns/2, remove_player_record/2]).
 
 -import(gn_server, [get_registered_name/1]).
 
@@ -47,30 +47,39 @@ read_and_update_coord(player, PlayerNum, Table) ->
     Fun = fun() ->
         case mnesia:read(Table, PlayerNum, write) of
             [Player_record = #mnesia_players{}] -> 
-                [New_x, New_y] = calc_new_coordinates(Player_record#mnesia_players.position, Player_record#mnesia_players.direction),
-                %% check if new coordinate fall within current managing GN
-                case get_managing_node_by_coord(New_x,New_y) of
-                    Current_gn_name -> % Player is not about to leave current GN's quarter
-                    %% update position, reset direction and movement
-                        Updated_record = Player_record#mnesia_players{
-                            position = [New_x, New_y],
-                            movement = false,
-                            direction = none
-                        },
-                        mnesia:write(Updated_record),
-                        {retain_gn, Player_record}; %% return value to calling function
-                    Other_name -> %% destination coordinate is managed by another GN (=Other_name)
-                    %% update position, target_gn name, reset movement and direction
-                    %% ask CN to transfer entry between tables
-                        Updated_record = Player_record#mnesia_players{
-                            position = [New_x, New_y],
-                            target_gn = Other_name,
-                            movement = false,
-                            direction = none
-                        },
-                        mnesia:write(Updated_record),
-                        {switch_gn, Current_gn_name, Other_name} %% return value
-                    end;
+                io:format("DEBUG: read_and_update_coord - Player ~p direction: ~p, position: ~p~n", [PlayerNum, Player_record#mnesia_players.direction, Player_record#mnesia_players.position]),
+                case Player_record#mnesia_players.direction of
+                    none ->
+                        %% Player direction is none - no movement needed, but still return player record
+                        %% for check_entered_coord (powerup pickup, etc.) at current position
+                        io:format("DEBUG: read_and_update_coord - Player ~p has direction 'none', returning current record~n", [PlayerNum]),
+                        {retain_gn, Player_record};
+                    Direction ->
+                        [New_x, New_y] = calc_new_coordinates(Player_record#mnesia_players.position, Direction),
+                        %% check if new coordinate fall within current managing GN
+                        case get_managing_node_by_coord(New_x,New_y) of
+                            Current_gn_name -> % Player is not about to leave current GN's quarter
+                            %% update position, reset direction and movement
+                                Updated_record = Player_record#mnesia_players{
+                                    position = [New_x, New_y],
+                                    movement = false,
+                                    direction = none
+                                },
+                                mnesia:write(Table, Updated_record, write),
+                                {retain_gn, Updated_record}; %% return value to calling function
+                            Other_name -> %% destination coordinate is managed by another GN (=Other_name)
+                            %% update position, target_gn name, reset movement and direction
+                            %% ask CN to transfer entry between tables
+                                Updated_record = Player_record#mnesia_players{
+                                    position = [New_x, New_y],
+                                    target_gn = Other_name,
+                                    movement = false,
+                                    direction = none
+                                },
+                                mnesia:write(Table, Updated_record, write),
+                                {switch_gn, Current_gn_name, Other_name, Updated_record} %% return value
+                        end
+                end;
             [] -> not_found % should cause an error
         end
     end,
@@ -89,29 +98,45 @@ read_player_from_table(PlayerNum, Table) ->
     mnesia:activity(transaction, Fun).
 
 
--spec calc_new_coordinates(Position::list(), Direction::up|down|left|right) -> list().
+-spec calc_new_coordinates(Position::list(), Direction::up|down|left|right|none) -> list().
 calc_new_coordinates(Position, Direction) ->
     [X,Y] = Position,
     case Direction of
         up -> [X, Y+1];
         down -> [X, Y-1];
         left -> [X-1, Y];
-        right -> [X+1,Y]
+        right -> [X+1,Y];
+        none -> Position  % Return current position if no direction
     end.
 %% =====================================================================
 %% ? solving the clusterfuck for managing the movement check
 
 %% @doc returns can_move/cant_move/dest_not_here
 handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
+    io:format("DEBUG: handle_player_movement called for Player ~p, Direction ~p~n", [PlayerNum, Direction]),
     %% ? calculate the destination coordinate, find out if the coordinate is within limits of current GN (the one initiating the function call)
     Player_record = read_player_from_table(PlayerNum, State#gn_state.players_table_name),
+    io:format("DEBUG: Player record: ~p~n", [Player_record]),
     Destination = calc_new_coordinates(Player_record#mnesia_players.position, Direction),
+    io:format("DEBUG: Calculated destination: ~p~n", [Destination]),
     Current_gn_name = get_registered_name(self()),
-    case get_managing_node_by_coord(hd(Destination),lists:last(Destination)) of
+    io:format("DEBUG: Current GN name: ~p~n", [Current_gn_name]),
+    
+    ManagingNode = get_managing_node_by_coord(hd(Destination),lists:last(Destination)),
+    io:format("DEBUG: Managing node for destination: ~p~n", [ManagingNode]),
+    
+    case ManagingNode of
+        out_of_map_bounds -> % player tried to move outside the map
+            io:format("DEBUG: Movement result: cant_move (out of bounds)~n"),
+            cant_move;
         Current_gn_name -> % destination coordinate is managed by this GN
+            io:format("DEBUG: Destination is within current GN, checking obstacles~n"),
             %% ? Checks for obstacles in the target coordinate, kickstarting any movements caused by this attempt
-            check_for_obstacles(Destination, Player_record#mnesia_players.special_abilities, Direction, State);
+            Result = check_for_obstacles(Destination, Player_record#mnesia_players.special_abilities, Direction, State),
+            io:format("DEBUG: check_for_obstacles result: ~p~n", [Result]),
+            Result;
         _Other_name ->
+            io:format("DEBUG: Movement result: dest_not_here (managed by ~p)~n", [ManagingNode]),
             dest_not_here
     end.
 
@@ -119,12 +144,35 @@ handle_player_movement(PlayerNum, Direction, State = #gn_state{}) ->
 check_for_obstacles(Coordinate, BuffsList, Initiator_Direction, State = #gn_state{}) -> 
     %% ? Fetch every entity in that coordinate using QLC
     Entities_at_coord = get_records_at_location(Coordinate, State),
+    io:format("DEBUG: Entities at coordinate ~p: ~p~n", [Coordinate, Entities_at_coord]),
     %% ? Deal with possible interactions - returns can_move/cant_move
     interact_with_entity(Entities_at_coord, BuffsList, Initiator_Direction, State).
 
 
-%% @doc Update movement to 'true', set time remainning based on movespeed
+%% @doc Update movement to 'true', set time remaining based on movespeed, and set direction
 %% time remaining = <Base_time> - (Player_speed - 1) * <MS_REDUCTION>
+insert_player_movement(PlayerNum, Table, Direction) ->
+    Fun = fun() ->
+        case mnesia:read(Table, PlayerNum, sticky_write) of
+            [Player_record = #mnesia_players{}] ->
+                Updated_record = Player_record#mnesia_players{
+                    movement = true,
+                    direction = Direction,
+                    movement_timer = ?TILE_MOVE - (Player_record#mnesia_players.speed -1)*?MS_REDUCTION % * Set counter based on movespeed
+                    },
+                %% Insert updated record into the correct table (not inferred from record name)
+                io:format("DEBUG: insert_player_movement - player num ~p movement timer is ~p, direction is ~p~n", [Updated_record#mnesia_players.player_number, Updated_record#mnesia_players.movement_timer, Direction]),
+                mnesia:write(Table, Updated_record, sticky_write),
+                ok;
+            [] -> % didn't find 
+                not_found
+        end
+    end,
+    Result = mnesia:activity(transaction, Fun),
+    io:format("DEBUG: insert_player_movement result: ~p~n", [Result]),
+    Result.
+
+%% @doc Legacy function for backward compatibility - update movement only
 insert_player_movement(PlayerNum, Table) ->
     Fun = fun() ->
         case mnesia:read(Table, PlayerNum, sticky_write) of
@@ -133,14 +181,17 @@ insert_player_movement(PlayerNum, Table) ->
                     movement = true,
                     movement_timer = ?TILE_MOVE - (Player_record#mnesia_players.speed -1)*?MS_REDUCTION % * Set counter based on movespeed
                     },
-                %% Insert updated record into table
-                mnesia:write(Updated_record),
+                %% Insert updated record into the correct table (not inferred from record name)
+                io:format("DEBUG: insert_player_movement - player num ~p movement timer is ~p~n", [Updated_record#mnesia_players.player_number, Updated_record#mnesia_players.movement_timer]),
+                mnesia:write(Table, Updated_record, sticky_write),
                 ok;
             [] -> % didn't find 
                 not_found
         end
     end,
-    mnesia:activity(transaction, Fun).
+    Result = mnesia:activity(transaction, Fun),
+    io:format("DEBUG: insert_player_movement result: ~p~n", [Result]),
+    Result.
 
 
 
@@ -151,7 +202,7 @@ get_records_at_location(Coordinate, State = #gn_state{}) ->
         Players = qlc:eval(qlc:q([ {player, P} || P <- mnesia:table(State#gn_state.players_table_name), P#mnesia_players.position == Coordinate])),
         Tiles ++ Bombs ++ Players
     end,
-    mnesia:activity(read_only, Fun).
+    mnesia:activity(sync_dirty, Fun).
 
 
 -spec interact_with_entity(list(), list(), up|down|left|right, #gn_state{}) -> can_move|cant_move.
@@ -230,18 +281,32 @@ update_bomb_direction_movement(Bomb, Bombs_table, ToUpdate) ->
 
 read_and_remove_bomb(BombPid, Bombs_table) ->
     Fun = fun() ->
-        [Record] = mnesia:match_object(Bombs_table, #mnesia_bombs{pid = BombPid, _ = '_'}, read),
-        mnesia:delete_object(Record),
-        Record
+        case mnesia:match_object(Bombs_table, #mnesia_bombs{pid = BombPid, _ = '_'}, read) of
+            [] ->
+                {error, bomb_not_found};
+            [Record] ->
+                mnesia:delete_object(Bombs_table, Record, write),
+                Record;
+            Multiple ->
+                Record = hd(Multiple),
+                mnesia:delete_object(Bombs_table, Record, write),
+                Record
+        end
     end,
-    mnesia:activity(transaction, Fun).
+    case mnesia:activity(transaction, Fun) of
+        {atomic, Result} -> 
+            Result;
+        Result -> 
+            Result  % Handle direct returns from mnesia:activity
+    end.
 %% =====================================================================
 
 -spec get_managing_node_by_coord(X::integer(), Y::integer()) -> atom().
-get_managing_node_by_coord(X,Y) when X >= 0, X =< 7, Y > 7, Y =< 15 -> 'GN1_server';
-get_managing_node_by_coord(X,Y) when X > 7, X =< 15 , Y > 7 , Y =< 15 -> 'GN2_server';
-get_managing_node_by_coord(X,Y) when X >= 0 , X =< 7 , Y >= 0 , Y =< 7 -> 'GN3_server';
-get_managing_node_by_coord(X,Y) when X > 7 , X =< 15 , Y >= 0 , Y =< 7 -> 'GN4_server'.
+get_managing_node_by_coord(X,Y) when X > 0, X =< 7, Y > 7, Y < 15 -> 'GN1_server';
+get_managing_node_by_coord(X,Y) when X > 7, X < 15 , Y > 7 , Y < 15 -> 'GN2_server';
+get_managing_node_by_coord(X,Y) when X > 0 , X =< 7 , Y > 0 , Y =< 7 -> 'GN3_server';
+get_managing_node_by_coord(X,Y) when X > 7 , X < 15 , Y > 0 , Y =< 7 -> 'GN4_server';
+get_managing_node_by_coord(_X, _Y) -> out_of_map_bounds.
 
 
 node_name_to_number(Name) ->
@@ -262,7 +327,7 @@ update_player_direction(PlayerNum, Table, NewValue) ->
             [Player_record = #mnesia_players{}] ->
                 Updated_record = Player_record#mnesia_players{direction = NewValue},
                 %% Insert updated record into table
-                mnesia:write(Updated_record),
+                mnesia:write(Table, Updated_record, sticky_write),
                 Updated_record;
             [] -> % didn't find 
                 not_found
@@ -272,8 +337,9 @@ update_player_direction(PlayerNum, Table, NewValue) ->
 
 
 %% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
-handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
-    %% ? For debugging purposes ONLY, we are letting the player FSM know of approved move requests. Later on should be only if they are denied
+%% Version with direction parameter for cross-GN movements
+handle_player_movement_clearance(PlayerNum, Answer, Direction, Table_name) ->
+    io:format("DEBUG: handle_player_movement_clearance/4 called with PlayerNum=~p, Answer=~p, Direction=~p~n", [PlayerNum, Answer, Direction]),
     %% both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first,
     %% Then the database update occurs (different for both)
     Player_record = read_player_from_table(PlayerNum, Table_name),
@@ -284,7 +350,42 @@ handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
             player_fsm:gn_response(PlayerNum, {move_result, Answer}); 
         true ->
             %% Player FSM is on another machine, forward through CN->local GN
-            gen_server:cast(cn_server,
+            %% local_gn now contains the registered name, no conversion needed
+            gn_server:cast_message(cn_server,
+                {forward_request, Player_record#mnesia_players.local_gn,
+                    {gn_answer, {move_result, player, PlayerNum, Answer}}
+                })
+    end,
+    case Answer of
+        can_move ->
+            %% move is possible. Update data, open movement timer with the correct direction
+            insert_player_movement(PlayerNum, Table_name, Direction);
+        cant_move -> % cannot move to the other node
+            %% Update direction to none
+            case erlang:is_record(update_player_direction(PlayerNum, Table_name, 'none'), mnesia_players) of
+                true -> ok;
+                _ -> 
+                    %% couldn't find the record, crash the process
+                    erlang:error(record_not_found, [node(), Player_record])
+            end
+    end.
+
+%% @doc handles the operations needed to be done after given a reply for a movement clearance request to another GN for a player
+%% Legacy version without direction (for backward compatibility)
+handle_player_movement_clearance(PlayerNum, Answer, Table_name) ->
+    io:format("DEBUG: handle_player_movement_clearance/3 called with PlayerNum=~p, Answer=~p (NO DIRECTION)~n", [PlayerNum, Answer]),
+    %% both options (can_move/cant_move) send a reply to the player FSM based on his location - this is done first,
+    %% Then the database update occurs (different for both)
+    Player_record = read_player_from_table(PlayerNum, Table_name),
+    %% respond to the player FSM
+    if
+        Player_record#mnesia_players.target_gn == Player_record#mnesia_players.local_gn ->
+            %% Player FSM is on this node, send message directly
+            player_fsm:gn_response(PlayerNum, {move_result, Answer}); 
+        true ->
+            %% Player FSM is on another machine, forward through CN->local GN
+            %% local_gn now contains the registered name, no conversion needed
+            gn_server:cast_message(cn_server,
                 {forward_request, Player_record#mnesia_players.local_gn,
                     {gn_answer, {move_result, player, PlayerNum, Answer}}
                 })
@@ -315,6 +416,8 @@ handle_bomb_movement_clearance(_BombNum, Answer, _Table_name) -> % todo: impleme
 
 -spec check_entered_coord(#mnesia_players{}, State::#gn_state{}) -> ok.
 check_entered_coord(Player_record, State) ->
+    io:format("**CHECK_ENTERED_COORD: Player ~p checking position ~p for powerups**~n", 
+              [Player_record#mnesia_players.player_number, Player_record#mnesia_players.position]),
     %% Check for powerups in new position, if any are found - add their effect to the player's mnesia table entry
     %% When a powerup is taken it is sent a a 'pickup(Pid)' command to stop & terminate it.
     %% This powerup entry is removed from the mnesia table - triggered by the termination msg from the powerup process.
@@ -325,16 +428,23 @@ check_entered_coord(Player_record, State) ->
             [] -> ?NO_POWERUP;
             [?NO_POWERUP] -> ?NO_POWERUP;
             [Found_powerup] -> % a powerup is present at the new position of the player
+                io:format("**CHECK_ENTERED_COORD: Found powerup ~p at position ~p, PID ~p**~n", 
+                          [Found_powerup#mnesia_powerups.type, Player_record#mnesia_players.position, Found_powerup#mnesia_powerups.pid]),
                 %% remove current powerup from table, send msg to process to terminate
                 mnesia:delete(State#gn_state.powerups_table_name, Player_record#mnesia_players.position, write), % remove powerup from table
                 powerup:pickup(Found_powerup#mnesia_powerups.pid), % send msg to terminate process
+                io:format("**CHECK_ENTERED_COORD: Powerup removed from table and pickup signal sent**~n"),
                 Found_powerup#mnesia_powerups.type % returns the powerup (from the transaction)
         end
         end,
         Powerup = mnesia:activity(transaction, Fun),
         if
-            Powerup == ?NO_POWERUP -> ok; % no powerup found in position
+            Powerup == ?NO_POWERUP -> 
+                io:format("**CHECK_ENTERED_COORD: No powerup to consume**~n"),
+                ok; % no powerup found in position
             true -> % consume power-up into player, notify player for selected powerups
+                io:format("**CHECK_ENTERED_COORD: Consuming powerup ~p for player ~p**~n", 
+                          [Powerup, Player_record#mnesia_players.player_number]),
                 consume_powerup(Powerup, Player_record, State#gn_state.players_table_name)
         end.
 
@@ -342,6 +452,8 @@ check_entered_coord(Player_record, State) ->
 
 consume_powerup(Powerup, Player_record, Players_table) ->
     %% @doc Based on current player's powerups, change/update his power in the mnesia table.
+    io:format("**CONSUME_POWERUP: Player ~p consuming powerup ~p**~n", 
+              [Player_record#mnesia_players.player_number, Powerup]),
     Updated_record = case Powerup of
         %% ---- Powerups that the player FSM should be notified about ----
         ?MOVE_SPEED -> % movespeed buff
@@ -418,3 +530,18 @@ update_player_cooldowns(Message, Players_table) ->
             ok
     end,
     ok.
+
+
+remove_player_record(PlayerNum, Table) ->
+    Fun = fun() ->
+        %% Read entry from current GN
+        case mnesia:read(Table, PlayerNum, read) of
+            [Record] ->
+                %% delete from table from the GN we are leaving
+                ok = mnesia:delete(Table, Record, write),
+                io:format("DEBUG: remove_player_record - Player ~p removed from table ~p~n", [PlayerNum, Table]);
+            [] ->
+                {error, not_found}
+        end
+    end,
+    mnesia:activity(transaction, Fun).

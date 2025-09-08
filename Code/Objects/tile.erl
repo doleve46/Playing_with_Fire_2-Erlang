@@ -85,16 +85,22 @@ handle_call(_Request, _From, State = #tile_state{}) ->
 
 handle_cast(inflict_damage, State = #tile_state{}) ->
     %% React to being hit by an explosion based on tile type
+    io:format("🔥 TILE DEBUG: Tile at ~p (type: ~p) taking damage~n", [State#tile_state.position, State#tile_state.type]),
     case State#tile_state.type of
         unbreakable -> % damage to unbreakable tile does nothing
+            io:format("🔥 TILE DEBUG: Unbreakable tile - no damage~n"),
             {noreply, State};
         breakable -> % damage to breakable tile breaks it, handled under terminate/2
+            io:format("🔥 TILE DEBUG: Breakable tile - will terminate and create powerup~n"),
             {stop, normal, State};
         ?STRONG -> % moves to 2nd phase of breaking, notify "rulling" GN
+            io:format("🔥 TILE DEBUG: Strong tile - transitioning to one_hit~n"),
             New_State = State#tile_state{type = one_hit},
             notify_gn(New_State, one_hit),
+            io:format("🔥 TILE DEBUG: Strong tile - notified GN, continuing as one_hit~n"),
             {noreply, New_State};
         one_hit -> % being hit again - breaks the tile
+            io:format("🔥 TILE DEBUG: One-hit tile - will terminate and create powerup~n"),
             {stop, normal, State}
     end;
 
@@ -128,9 +134,12 @@ handle_info(Info, State = #tile_state{}) ->
     State :: #tile_state{}) -> term()).
 
 terminate(normal, State = #tile_state{}) ->
+    io:format("🔥 TILE DEBUG: Tile at ~p (type: ~p) terminating normally - will create powerup~n", [State#tile_state.position, State#tile_state.type]),
     notify_gn(State, tile_breaking);
 
-terminate(_Reason, _State = #tile_state{}) -> ok.
+terminate(Reason, State = #tile_state{}) -> 
+    io:format("🔥 TILE DEBUG: Tile at ~p (type: ~p) terminating abnormally - reason: ~p~n", [State#tile_state.position, State#tile_state.type, Reason]),
+    ok.
 
 
 %% @private
@@ -151,5 +160,5 @@ notify_gn(State = #tile_state{}, Message) ->
     %% Messages supported: tile_breaking, one_hit
     [X,Y] = State#tile_state.position,
     GN_name = req_player_move:get_managing_node_by_coord(X, Y),
-    gen_server:cast(GN_name, {tile_update, Message, State#tile_state.position}),
+    gn_server:cast_message(GN_name, {tile_update, Message, State#tile_state.position}),
     ok.

@@ -43,7 +43,12 @@
 start_monitor(Pos_x, Pos_y, Type, Optional) ->
     %% optional is a list containing [Player_ID, Radius]
     %% bomb is nameless - identified based on Pid
-    gen_statem:start_monitor(?MODULE, [[Pos_x, Pos_y], Type, self(), Optional], []).
+    %% Get the registered name of the calling GN server instead of its PID
+    GN_Name = case gn_server:get_registered_name(self()) of
+        undefined -> self(); % Fallback to PID if name not found
+        Name -> Name
+    end,
+    gen_statem:start_monitor(?MODULE, [[Pos_x, Pos_y], Type, GN_Name, Optional], []).
 
 %% @doc send freeze message to bomb
 freeze_bomb(BombPid) ->
@@ -93,13 +98,23 @@ init([Position, Type, Gn_Pid, Optional]) ->
                         radius = Radius}
     end,
     case StateData#bomb_state.type of
-        regular ->
-            UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
+        ?NORMAL_BOMB ->
+            UpdatedData = StateData#bomb_state{
+                ignited = {true, erlang:system_time(millisecond)}, 
+                internal_timer = ?EXPLODE_DELAY
+            },
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]};
-        remote -> 
-            {ok, remote_idle, StateData}; % TODO: complete implementation
-        repeating -> % repeating bomb, w.i.p
-            UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
+        ?REMOTE_IGNITION -> 
+            UpdatedData = StateData#bomb_state{
+                ignited = false,
+                internal_timer = none
+            },
+            {ok, remote_idle, UpdatedData}; % TODO: complete implementation
+        ?REPEAT_BOMBS -> % repeating bomb, w.i.p
+            UpdatedData = StateData#bomb_state{
+                ignited = {true, erlang:system_time(millisecond)},
+                internal_timer = ?EXPLODE_DELAY
+            },
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]}
     end.
 
@@ -140,10 +155,12 @@ code_change(_OldVsn, StateName, State = #bomb_state{}, _Extra) ->
 %%% state functions
 %%%===================================================================
 %% ~~~~~~~~~ State = armed ~~~~~~~~~
-%% Syntax for state enter actions - not used here, but syntax is valid
-%armed(enter, _OldState, StateData = #bomb_state{}) ->
-%    UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
-%    {keep_state, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]};
+%% Handle state enter events
+armed(enter, _OldState, StateData = #bomb_state{}) ->
+    %% Just keep the current state when entering armed state
+    %% send a self-message "bomb tick" after 1000 ms
+    erlang:send_after(1000, self(), bomb_tick),
+    {keep_state, StateData};
 
 armed(cast, freeze, StateData = #bomb_state{}) ->
     %% if already frozen - do nothing.
@@ -161,7 +178,7 @@ armed({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     %% Reply with direction change (to be updated in mnesia table) 
     %% request movement in said direction, sent to local GN
     %% remain in the same state until answered, retain state_timeout
-    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
     {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
 
 armed(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
@@ -187,8 +204,28 @@ armed(cast, ignite, StateData = #bomb_state{}) ->
 
 armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
+armed(info, bomb_tick, StateData = #bomb_state{}) ->
+    %% internal tick message - decrease internal timer by 1000 ms
+    case StateData#bomb_state.internal_timer of
+        none -> % should not happen - remote bomb not ignited - log this and ignore
+            io:format("bomb @ armed: received bomb_tick for a bomb not ignited - ignoring~n"),
+            {keep_state_and_data};
+        Timer when is_integer(Timer) ->
+            NewTimer = Timer - 1000,
+            if
+                NewTimer =< 0 -> % time to explode
+                    %% trigger explosion immediately
+                    %% cancel state_timeout and move to exploded state
+                    {stop, {shutdown, exploded}, StateData};
+                true -> % update timer and set new state_timeout
+                    %% let GN know about the new timer value
+                    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {update_timer, self(), NewTimer}}),
+                    erlang:send_after(1000, self(), bomb_tick),
+                    {keep_state, StateData#bomb_state{internal_timer = NewTimer}}
+            end
+    end;
 
 armed(_Type, _Message, StateData = #bomb_state{}) ->
     log_unexpected_message(armed, _Type, _Message),
@@ -210,7 +247,7 @@ active_movement(enter, _OldState, StateData = #bomb_state{}) ->
 
 active_movement(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 active_movement(cast, freeze, StateData = #bomb_state{}) ->
     %% if already frozen - do nothing.
@@ -240,7 +277,7 @@ active_movement({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
             TimeLeft = TempTime - erlang:system_time(millisecond),
             if
                 TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
-                    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+                    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
                     {next_state, armed, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode},
                         {reply, GN, {UpdatedData#bomb_state{direction=Direction}, false}}]
                     };
@@ -270,10 +307,10 @@ active_movement(info, Send_after_timers, StateData = #bomb_state{}) ->
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
                 movement = true
             },
-            UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
+            gn_server:cast_message(UpdatedData#bomb_state.gn_pid, {updated_position, UpdatedData#bomb_state.position}), % message GN with new position
             {keep_state, UpdatedData};
         full_tile_change -> % finished a full movement, checking if we can continue moving
-            StateData#bomb_state.gn_pid ! {request_movement, StateData#bomb_state.direction},
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {request_movement, StateData#bomb_state.direction}),
             {keep_state, StateData#bomb_state{movement = false}} % currently not moving, awaiting reply
     end;
 
@@ -319,7 +356,7 @@ delayed_explosion_state(info, _AnyMessage, StateData = #bomb_state{}) ->
 
 delayed_explosion_state(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 delayed_explosion_state(_Type, _Message, StateData = #bomb_state{}) ->
     log_unexpected_message(delayed_explosion_state, _Type, _Message),
@@ -333,7 +370,7 @@ remote_idle({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     %% message from GN received - kicked by player.
     %% Reply with request for movement in said direction: {request_movement, Direction}
     %% remain in the same state until answered, retain state_timeout
-    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
     {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
 
 remote_idle(cast, {reply_move_req, Answer}, StateData = #bomb_state{}) ->
@@ -355,20 +392,49 @@ remote_idle(cast, damage_taken, StateData = #bomb_state{}) ->
 remote_idle(cast, ignite, StateData = #bomb_state{}) ->
     if
         StateData#bomb_state.status == frozen -> % bomb is frozen and armed,
-            UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
+            UpdatedData = StateData#bomb_state{
+                ignited = {true, erlang:system_time(millisecond)},
+                internal_timer = ?FREEZE_DELAY
+            },
             {next_state, remote_armed, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]};
         true ->
-            {stop, exploded, StateData}
+            {stop, {shutdown, exploded}, StateData}
     end;
 
 remote_idle(_Type, _Message, StateData = #bomb_state{}) ->
     log_unexpected_message(remote_idle, _Type, _Message),
     {keep_state, StateData}.
 %% ~~~~~~~~~ State = remote_idle ~~~~~~~~~
+remote_armed(enter, _OldState, StateData = #bomb_state{}) ->
+    %% Just keep the current state when entering remote_armed state
+    %% send a self-message "bomb tick" after 1000 ms
+    erlang:send_after(1000, self(), bomb_tick),
+    {keep_state, StateData};
+
+remote_armed(info, bomb_tick, StateData = #bomb_state{}) ->
+    %% internal tick message - decrease internal timer by 1000 ms
+    case StateData#bomb_state.internal_timer of
+        none -> % should not happen - remote bomb not ignited - log this and ignore
+            io:format("Bomb @ remote_armed: received bomb_tick for a bomb not ignited - ignoring~n"),
+            {keep_state_and_data};
+        Timer when is_integer(Timer) ->
+            NewTimer = Timer - 1000,
+            if
+                NewTimer =< 0 -> % time to explode
+                    %% trigger explosion immediately
+                    %% cancel state_timeout and move to exploded state
+                    {stop, {shutdown, exploded}, StateData};
+                true -> % update timer and set new state_timeout
+                    %% let GN know about the new timer value
+                    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {update_timer, self(), NewTimer}}),
+                    erlang:send_after(1000, self(), bomb_tick),
+                    {keep_state, StateData#bomb_state{internal_timer = NewTimer}}
+            end
+    end;
 
 remote_armed(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 remote_armed(cast, freeze, StateData = #bomb_state{}) ->
     %% Already frozen, ignore this
@@ -381,7 +447,7 @@ remote_armed({call, GN}, {kick, Direction}, StateData = #bomb_state{}) ->
     TimeLeft = calc_new_explode_delay(StateData) - erlang:system_time(millisecond),
     if
         TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
-            gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
             {keep_state, StateData#bomb_state{direction = Direction}, [{reply, GN, Direction}]};
         true -> % not enough time - do not make request
             {keep_state, StateData, [{reply, GN, StateData#bomb_state.direction}]}
@@ -442,7 +508,7 @@ remote_idle_movement({call, GN}, {kick, Direction}, StateData = #bomb_state{}) -
             {next_state, remote_idle, UpdatedData, [{reply, GN, {none, false}}]};
         true ->
             %% any other direction - send request to move at new direction
-            gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
             {next_state, remote_idle, UpdatedData, [{reply, GN, {none, false}}]}
     end;
 
@@ -464,10 +530,10 @@ remote_idle_movement(info, Send_after_timers, StateData = #bomb_state{}) ->
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
                 movement = true
             },
-            UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
+            gn_server:cast_message(UpdatedData#bomb_state.gn_pid, {updated_position, UpdatedData#bomb_state.position}), % message GN with new position
             {keep_state, UpdatedData};
         full_tile_change -> % finished a full movement, checking if we can continue moving
-            StateData#bomb_state.gn_pid ! {request_movement, StateData#bomb_state.direction},
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {request_movement, StateData#bomb_state.direction}),
             {keep_state, StateData#bomb_state{movement = false}} % currently not moving, awaiting reply
     end;
 
@@ -495,9 +561,12 @@ remote_idle_movement(cast, ignite, StateData = #bomb_state{}) ->
     %% else (frozen) - update record, start state_timeout timer & switch to remote_armed_frozen_movement
     case StateData#bomb_state.status of
         normal -> % not frozen, explode immediately
-            {stop, exploded, StateData};
+            {stop, {shutdown, exploded}, StateData};
         frozen -> % frozen, update record, start timer, switch states
-            UpdatedData = StateData#bomb_state{ignited = {true, erlang:system_time(millisecond)}},
+            UpdatedData = StateData#bomb_state{
+                ignited = {true, erlang:system_time(millisecond)},
+                internal_timer = ?FREEZE_DELAY
+            },
             {next_state, remote_armed_frozen_movement, UpdatedData, [{state_timeout, ?FREEZE_DELAY, explode}]}
     end;
 
@@ -517,7 +586,7 @@ remote_idle_movement(_Type, _Message, StateData = #bomb_state{}) ->
 
 remote_armed_frozen_movement(state_timeout, _Reason, StateData = #bomb_state{}) ->
     %% bomb timeout handler - bomb is exploding
-    {stop, exploded, StateData};
+    {stop, {shutdown, exploded}, StateData};
 
 remote_armed_frozen_movement(cast, freeze, StateData = #bomb_state{}) ->
     %% already frozen, change nothing
@@ -538,7 +607,7 @@ remote_armed_frozen_movement({call, GN}, {kick, Direction}, StateData = #bomb_st
             TimeLeft = TempTime - erlang:system_time(millisecond),
             if
                 TimeLeft > ?MIN_MOVE_REQ_TIME -> % enough time
-                    gen_server:cast(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
+                    gn_server:cast_message(StateData#bomb_state.gn_pid, {bomb_message, {move_request, self(), GN, Direction}}),
                     {next_state, remote_armed, UpdatedData#bomb_state{direction = Direction},
                         [{state_timeout, TempTime - erlang:system_time(millisecond), explode},
                         {reply, GN, {Direction, false}}]};
@@ -566,10 +635,10 @@ remote_armed_frozen_movement(info, Send_after_timers, StateData = #bomb_state{})
                 position = new_position(StateData#bomb_state.position, StateData#bomb_state.direction),
                 movement = true
             },
-            UpdatedData#bomb_state.gn_pid ! {updated_position, UpdatedData#bomb_state.position}, % message GN with new position
+            gn_server:cast_message(UpdatedData#bomb_state.gn_pid, {updated_position, UpdatedData#bomb_state.position}), % message GN with new position
             {keep_state, UpdatedData};
         full_tile_change -> % finished a full movement, checking if we can continue moving
-            StateData#bomb_state.gn_pid ! {request_movement, StateData#bomb_state.direction},
+            gn_server:cast_message(StateData#bomb_state.gn_pid, {request_movement, StateData#bomb_state.direction}),
             {keep_state, StateData#bomb_state{movement = false}} % currently not moving, awaiting reply
     end;
 

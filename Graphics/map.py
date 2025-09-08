@@ -904,7 +904,7 @@ class EnhancedMapVisualizer:
         for x in range(MAP_SIZE):
             for y in range(MAP_SIZE):
                 pixel_x = y * TILE_SIZE
-                pixel_y = x * TILE_SIZE
+                pixel_y = (MAP_SIZE - 1 - x) * TILE_SIZE
 
                 tile_type = self.map_data['tiles'][x][y]
                 powerup = self.map_data['powerups'][x][y]

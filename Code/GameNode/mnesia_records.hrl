@@ -36,14 +36,14 @@
     direction = none, % none/up/down/left/right
     owner = none, % player name/ID (?) of whoever placed the bomb. 'none' is for a bomb that fell from a broken tile (or simply no owner)
     gn_pid, % GN Pid who oversees this process
-
+    internal_timer = 5000, % timer for having restore points for bomb explosion timer
     pid = none
 }).
 
 -record(mnesia_powerups, {
     position, % position - [X,Y]
     type, % type of power up - can be movement speed, extra bombs etc..
-    original_node_ID, % original creating node ID - TODO: unsure of necessity
+    gn_pid, % original creating node ID - TODO: unsure of necessity
 
     pid = none
 }).

@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, send_input/2, set_player_pid/2]).
+-export([start_link/1, set_player_pid/2, game_start/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
@@ -28,7 +28,7 @@
     player_number,           % Player number (1-4)
     waiting_for_ack = false, % Waiting for player response
     input_buffer = [],       % Buffered inputs while waiting
-    keyboard_mode = true     % true for keyboard, false for bot
+    keyboard_pid = none      % holds pid for the keyboard process (the one comm. with the Python port)
 }).
 
 %%%===================================================================
@@ -39,36 +39,30 @@
 start_link(PlayerNumber) ->
     ServerName = list_to_atom("io_handler_" ++ integer_to_list(PlayerNumber)),
     gen_server:start_link({local, ServerName}, ?MODULE, 
-        [PlayerNumber], []).
-
-%% @doc Send input (for testing)
-send_input(PlayerNumber, Input) ->
-    ServerName = list_to_atom("io_handler_" ++ integer_to_list(PlayerNumber)),
-    gen_server:cast(ServerName, {external_input, Input}).
+        [PlayerNumber], []).  % true = keyboard mode for human players
 
 %% @doc Set the player PID after player FSM starts
 set_player_pid(IOHandlerPid, PlayerPid) ->
     gen_server:call(IOHandlerPid, {set_player_pid, PlayerPid}).
 
+game_start(IOHandlerPid) ->
+    gen_server:cast(IOHandlerPid, game_start).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-init([PlayerNumber, KeyboardMode]) ->
+init([PlayerNumber]) ->
     State = #io_state{
-        player_number = PlayerNumber,
-        keyboard_mode = KeyboardMode
+        player_number = PlayerNumber
     },
-    
-    % Start input polling if in keyboard mode
-    case KeyboardMode of
-        true -> erlang:send_after(?TICK_DELAY, self(), poll_input);
-        false -> ok
-    end,
-    
+
+    %% Await 'start_game' message before starting input polling
+    io:format("**##**IO HANDLER FINISHED INIT **##**~n"),
     {ok, State}.
 
 handle_call({set_player_pid, PlayerPid}, _From, State) ->
+    io:format("**##**IO HANDLER: Player PID set to ~p**##**~n", [PlayerPid]),
     NewState = State#io_state{player_pid = PlayerPid},
     {reply, ok, NewState};
 
@@ -94,30 +88,33 @@ handle_cast({player_ack, Response}, State) ->
             process_input(NextInput, UpdatedState)
     end;
 
+handle_cast(game_start, State) -> % TODO: This is actually not working in current iteration - need to adapt (add field to state?)
+    io:format("**##**IO HANDLER: Game started for player ~p**##**~n", [State#io_state.player_number]),
+    {noreply, State};
+
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(poll_input, State) ->
+handle_info({keyboard_input, Keypress}, State) ->
     % Poll for keyboard input
-    Input = read_keyboard_input(),
+    Input = read_keyboard_input(Keypress),
     
     NewState = case Input of
         no_input -> State;
         Key -> 
+            io:format("**##** POLL_INPUT: Processing key: ~p~n", [Key]),
             case process_input(Key, State) of
                 {noreply, S} -> S;
                 _ -> State
             end
     end,
     
-    % Schedule next poll
-    erlang:send_after(?TICK_DELAY, self(), poll_input),
     {noreply, NewState};
 
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, State) ->
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -132,7 +129,8 @@ process_input(Input, State) ->
         {ok, Command} ->
             case State#io_state.waiting_for_ack of
                 true ->
-                    % Buffer input while waiting for ack
+                    %% Buffer input while waiting for ack
+                    %% ? I think it's better to just drop additional inputs
                     NewBuffer = State#io_state.input_buffer ++ [Input],
                     NewState = State#io_state{input_buffer = NewBuffer},
                     {noreply, NewState};
@@ -145,6 +143,7 @@ process_input(Input, State) ->
                             {noreply, State};
                         PlayerPid ->
                             player_fsm:input_command(PlayerPid, Command),
+                            io:format("***IO_HANDLER: Sent command ~p to player ~p~n", [Command, PlayerPid]),
                             NewState = State#io_state{waiting_for_ack = true},
                             {noreply, NewState}
                     end
@@ -216,18 +215,59 @@ display_response(Response, PlayerNumber) ->
             io:format("Player ~p: ~p~n", [PlayerNumber, Response])
     end.
 
-%% @doc Read keyboard input 
-read_keyboard_input() ->
-    % For testing
-    case io:get_chars('', 1) of
-        eof -> no_input;
-        " " -> space;
-        "w" -> w;
-        "a" -> a;
-        "s" -> s;
-        "d" -> d;
-        "e" -> b;
-        "q" -> q;
-        "\e" -> escape;
-        _ -> no_input
+%% @doc Read keyboard input (non-blocking)
+read_keyboard_input(Key) ->
+    io:format("**##** READ_INPUT: Received keyboard_input message: ~p~n", [Key]),
+    case Key of
+        <<"space">> -> space;
+        <<"w">> -> w;
+        <<"a">> -> a;
+        <<"s">> -> s;
+        <<"d">> -> d;
+        <<"e">> -> e;
+        <<"q">> -> q;
+        <<27, 91, 65>> -> arrow_up; %% todo: doesn't work - doesnt even register on the graphics as a message
+        <<27, 91, 66>> -> arrow_down;
+        <<27, 91, 67>> -> arrow_right;
+        <<27, 91, 68>> -> arrow_left;
+        _ -> 
+            io:format("**##** READ_INPUT: Unknown key: ~p~n", [Key]),
+            no_input
+    end.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+
+%%%===================================================================
+%%% Keyboard control - python-based input port
+%%%===================================================================
+keyboard_input_handler(IOHandlerPid) ->
+    % Get the directory of this module and construct path to keyhelper.py
+    {ok, CurrentDir} = file:get_cwd(),
+    KeyHelperPath = filename:join([CurrentDir, "src", "Code", "Objects", "keyhelper.py"]),
+    Command = "python3 " ++ KeyHelperPath,
+    Port = open_port({spawn, Command}, [binary, exit_status]),
+    io:format("**** KEYBOARD LOOP: Started key helper port ~p with command: ~s~n", [Port, Command]),
+    keyboard_input_loop(IOHandlerPid, Port).
+
+keyboard_input_loop(IOHandlerPid, Port) ->
+    io:format("**** KEYBOARD LOOP: Starting, waiting for input...~n"),
+    receive
+        {Port, {data, <<Key>>}} ->
+            io:format("**** KEYBOARD LOOP: Received keyboard input: ~p~n", [Key]),
+            % Convert binary to string
+            KeyString = binary_to_list(<<Key>>),
+            IOHandlerPid ! {keyboard_input, KeyString},
+            time:sleep(100), % to not overwhelm from consistent pressing, wait between transmission to IOHandler
+            keyboard_input_loop(IOHandlerPid, Port);
+        {Port, {exit_status, Status}} ->
+            io:format("**** KEYBOARD LOOP: Key helper exited with status: ~p~n", [Status]),
+            ok;
+        stop -> % TODO: should be used when ending the game? 
+            io:format("**** KEYBOARD LOOP: Stopping...~n"),
+            port_close(Port),
+            io:format("**** KEYBOARD LOOP: Stopped.~n"),
+            ok
     end.

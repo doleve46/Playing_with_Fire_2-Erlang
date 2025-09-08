@@ -13,7 +13,8 @@
 -record(powerup_state, {
     position, % position - [X,Y]
     type, % type of power up - can be movement speed, extra bombs etc..
-    original_node_ID % original creating node ID - TODO: unsure of necessity
+    gn_pid, % original creating node ID - TODO: unsure of necessity
+    pid % this process's PID
 }).
 
 -record(tile_state, {
@@ -31,5 +32,6 @@
     direction = none, % desired moving direction, can be - none/up/down/left/right
     movement = false, % can be - false / {true, TimerRef}
     owner, % owner of the bomb - can be none or player ID (not pid)
-    gn_pid % GN pid who oversees this process
+    gn_pid, % GN pid who oversees this process
+    internal_timer % timer for having restore points for bomb explosion timer
 }).
