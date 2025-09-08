@@ -256,7 +256,11 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
                 {error, not_found}
         end
     end,
-    mnesia:activity(transaction, Fun).
+    case mnesia:activity(transaction, Fun) of
+        {atomic, ok} -> ok;
+        {atomic, {error, not_found}} -> {error, not_found};
+        {aborted, Reason} -> {error, Reason}
+    end.
 
 bomb_explosion_handler(Coord, Radius) ->
     ResultList = case calculate_explosion_reach(Coord, Radius) of
