@@ -23,15 +23,15 @@
 }).
 
 %% Power-up configuration for random selection
--define(POWERUP_CONFIG, [
+-define(POWERUP_CONFIG, [ % ? reduced kick-bomb chance to 0 to avoid crashed - feature removed for now
     % Rare power-ups (1 number each)
-    {?REMOTE_IGNITION, 1, rare},
+    {?MOVE_SPEED, 1, rare},
     {?REPEAT_BOMBS, 2, rare},
     {?PHASED, 3, rare},
     {?FREEZE_BOMB, 4, rare},
     % Regular power-ups (2 numbers each)
     {?MOVE_SPEED, [5, 6], regular},
-    {?KICK_BOMB, [7, 8], regular},
+    {?REMOTE_IGNITION, [7, 8], regular},
     {?PLUS_BOMBS, [9, 10], regular},
     {?BIGGER_EXPLOSION, [11, 12], regular},
     {?PLUS_LIFE, [13, 14], regular}

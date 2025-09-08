@@ -92,22 +92,12 @@ init([GNNodes]) ->
     % Monitoring of gn graphics servers
     erlang:send_after(4*?TICK_DELAY, self(), monitor_gn_graphics_servers),
    
-    % Start socket server
-    erlang:send(self(), start_socket_server),
-   
-    % Start periodic updates
-    erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
-   
-    % Start periodic timer updates - NEW
-    erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
-   
-    % Clean up dead players and explosions periodically
-    erlang:send_after(5000, self(), cleanup_expired_elements),
+    
     
     process_flag(trap_exit, true),
 
     % Start Python visualizer
-    start_python_visualizer(),
+    %start_python_visualizer(),
     
     io:format("Enhanced CN Graphics Server initialized with Socket communication~n"),
     io:format("**DEBUG: CN Graphics Server PID: ~p~n", [self()]),
@@ -281,6 +271,19 @@ handle_info(monitor_gn_graphics_servers, State) ->
     io:format("🚀 Attempting to monitor all GN graphics servers...~n"),
     ReferencesList = monitor_gn_graphics_servers(State#state.gn_nodes),
     io:format("✅ Monitoring was successful!: ~p~n", [length(ReferencesList)]),
+    % Start socket server
+    erlang:send(self(), start_socket_server),
+   
+    % Start periodic updates
+    erlang:send_after(2*?TICK_DELAY, self(), periodic_update),
+   
+    % Start periodic timer updates - NEW
+    erlang:send_after(?TICK_DELAY, self(), send_periodic_timer_updates),
+   
+    % Clean up dead players and explosions periodically
+    erlang:send_after(5000, self(), cleanup_expired_elements),
+    % Start Python visualizer
+    start_python_visualizer(),
     {noreply, State#state{gn_graphics_servers = ReferencesList}};
 
 handle_info(periodic_update, State) ->
