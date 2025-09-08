@@ -155,9 +155,14 @@ generate_bot_action(State) ->
 
 %% @doc Easy bot - mostly random movement, occasional bombs
 generate_easy_action(State) ->
-    case rand:uniform() < ?BOMB_PROBABILITY andalso State#bot_state.bomb_cooldown =< 0 of
+    case rand:uniform() < ?BOMB_PROBABILITY of
         true ->
-            drop_bomb;
+            case State#bot_state.bomb_cooldown =< 0 of
+                true ->
+                    drop_bomb;
+                false -> 
+                    ignite_remote
+            end;
         false ->
             Directions = [up, down, left, right],
             Direction = lists:nth(rand:uniform(length(Directions)), Directions),
