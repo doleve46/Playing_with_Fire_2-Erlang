@@ -539,10 +539,16 @@ find_min(NodeCounts) ->
 %% Moves the mnesia table to the new node, restarts the GN processes on that node
 restart_gn(Node, CrashedGN_gndata=#gn_data{}, CrashedGNNum) -> 
     %% copy the mnesia tables of the crashed GN to the new node
-    ok = mnesia:add_table_copy(CrashedGN_gndata#gn_data.tiles, Node, ram_copies),
-    ok = mnesia:add_table_copy(CrashedGN_gndata#gn_data.powerups, Node, ram_copies),
-    ok = mnesia:add_table_copy(CrashedGN_gndata#gn_data.players, Node, ram_copies),
-    ok = mnesia:add_table_copy(CrashedGN_gndata#gn_data.bombs, Node, ram_copies),
+    Tables = [CrashedGN_gndata#gn_data.tiles, CrashedGN_gndata#gn_data.powerups,
+              CrashedGN_gndata#gn_data.players, CrashedGN_gndata#gn_data.bombs],
+    lists:foreach(fun(Tab) ->
+        case mnesia:add_table_copy(Tab, Node, ram_copies) of
+            ok -> ok;
+            {atomic, ok} -> ok;
+            {aborted, Reason} -> erlang:error(add_table_copy_failed, {Tab, Reason});
+            Other -> erlang:error(add_table_copy_failed, {Tab, Other})
+        end
+    end, Tables),
     io:format("**CN_SERVER: RECOVERY - Transferred mnesia tables to node ~p~n", [Node]),
     %% *** Start the GN process on the new node ***
     %% This will also initialize the bot_handler and player_fsm processes
