@@ -154,12 +154,17 @@ handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
     Current_GN_players_table = Current_GNData#gn_data.players,
     New_GN_players_table = New_GNData#gn_data.players,
     case transfer_player_records(PlayerNum, Current_GN_players_table, New_GN_players_table) of
-        {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
         ok -> 
             %% Message the new GN to check for collisions
-            gn_server:cast_message(New_GN,{incoming_player, PlayerNum})
-    end,
-    {noreply, State};
+            gn_server:cast_message(New_GN,{incoming_player, PlayerNum}),
+            {noreply, State};
+        {error, not_found} ->
+            io:format("❌ CN_SERVER: transfer_player_records - player ~p not found in table ~p~n", [PlayerNum, Current_GN_players_table]),
+            {noreply, State};
+        {error, Reason} ->
+            io:format("❌ CN_SERVER: transfer_player_records failed for player ~p: ~p~n", [PlayerNum, Reason]),
+            {noreply, State}
+    end;
 
 %% * Update active bombs in mnesia table and notify controlling player_fsm
 handle_cast({player_bomb_exploded, PlayerPid}, State) ->
@@ -204,13 +209,14 @@ handle_info({graphics_ready, _GraphicsPid}, State) ->
     {noreply, State};
 
 %% @doc Handles failure messages from the monitored processes
-handle_info({'DOWN', Ref, process, Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
-    %% todo: placeholder - deal with failing nodes/processes
-    io:format("*CN: monitored process ~w with ref ~w failed, reason:~w~n",[Pid,Ref,Reason]),
-    {noreply, Data};
+handle_info({'EXIT', Pid, Reason} , Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) -> 
+    io:format("*CN: Linked process ~w failed, reason:~w~n",[Pid, Reason]),
+    NewData = handle_gn_crash(Pid, Data),
+    {noreply, NewData};
 
 %% @doc General messages received as info - as of now ignored.
 handle_info(_Info, State) ->
+    io:format("**CN_SERVER: Received Unhandled info message:~w~n", [_Info]),
     {noreply, State}.
 
 
@@ -248,14 +254,21 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
         case mnesia:read(Current_GN_table, PlayerNum, read) of
             [Record] ->
                 %% delete from table from the GN we are leaving
-                ok = mnesia:delete(Current_GN_table, Record, write),
+                ok = mnesia:delete(Current_GN_table, PlayerNum, write),
                 %% Write the data to the new GN's table
-                mnesia:write(New_GN_table, Record, write);
+                mnesia:write(New_GN_table, Record, write),
+                ok;
             [] ->
                 {error, not_found}
         end
     end,
-    mnesia:activity(transaction, Fun).
+    case mnesia:activity(transaction, Fun) of
+        ok -> ok;
+        {atomic, ok} -> ok;
+        {atomic, {error, not_found}} -> {error, not_found};
+        {aborted, Reason} -> {error, Reason};
+        Other -> {error, Other}
+    end.
 
 bomb_explosion_handler(Coord, Radius) ->
     ResultList = case calculate_explosion_reach(Coord, Radius) of
@@ -397,7 +410,7 @@ inflict_damage_handler(RecordsList, Module, Function, Table) ->
                     _ = apply(Module, Function, [Record#mnesia_players.pid]),
                     io:format("💥 Sent damage to: ~p:~p(~p)~n", [Module, Function, Record#mnesia_players.pid]),
                     UpdatedRecord = Record#mnesia_players{life = Record#mnesia_players.life - 1},
-                    mnesia:write(Table, UpdatedRecord, write),
+                    mnesia:dirty_write(Table, UpdatedRecord),
                     io:format("💥 Updated player ~p life to ~p~n", [Record#mnesia_players.player_number, UpdatedRecord#mnesia_players.life])
             end
         catch
@@ -465,3 +478,114 @@ link_with_retry(GN_server_name, RetryCount) ->
                     link_with_retry(GN_server_name, RetryCount + 1)
             end
     end.
+
+%% === Node crash handling functions ===
+%% @doc Handle game node crashes
+handle_gn_crash(Pid, Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#gn_data{}]) ->
+    %% find which GN crashed
+    PidsList = [GN1#gn_data.pid, GN2#gn_data.pid, GN3#gn_data.pid, GN4#gn_data.pid],
+    case lists:filter(fun(X) -> X == Pid end, PidsList) of
+        [] -> 
+            io:format("**CN_SERVER: Non gn_server process crashed. Pid: ~p~n", [Pid]),
+            Data; % do nothing
+        [CrashedPid] -> 
+            io:format("**CN_SERVER: Known gn_server process crashed. Pid: ~p~n", [CrashedPid]),
+            %% Retreives which GN it was - 1-4
+            Zip = lists:zip(PidsList, lists:seq(1,4)),
+            case lists:keyfind(CrashedPid, 1, Zip) of
+                false ->
+                    io:format("**CN_SERVER: Could not locate crashed pid in list~n"),
+                    Data;
+                {_, CrashedGNNum} ->
+                    io:format("**CN_SERVER: Crashed GN: ~p~n", [CrashedGNNum]),
+                    %% decide which node will take on this GN's responsibilities - node with least current PIDs
+                    NewHostingNode = find_node_with_least_pids(lists:delete(CrashedPid, PidsList)),
+                    io:format("**CN_SERVER: New hosting node for crashed GN #~p (Pid - ~p) is GN ~p~n", [CrashedGNNum, CrashedPid, NewHostingNode]),
+                    Recovered_GN_Pid = restart_gn(NewHostingNode, lists:nth(CrashedGNNum, Data), CrashedGNNum),
+                    %% replace the pid in the data list
+                    NewData = lists:map(
+                        fun(#gn_data{pid = OldPid} = GNData) ->
+                            case OldPid of
+                                CrashedPid -> GNData#gn_data{pid = Recovered_GN_Pid};
+                                _ -> GNData
+                            end
+                        end, Data),
+                        io:format("**CN_SERVER: Game node ~p crashed and was successfully recovered~n", [Pid]),
+                        NewData
+            end;
+        MoreThanOne ->
+            io:format("**CN_SERVER: ERROR - More than one GN matched crashed Pid: ~p~n", [MoreThanOne]),
+            Data % return unchanged
+    end.
+
+
+find_node_with_least_pids(Pids) ->
+    NodeCounts = count_nodes(Pids, #{}),
+    MinCountNode = find_min(maps:to_list(NodeCounts)),
+    element(1, MinCountNode).
+
+count_nodes([], Counts) ->
+    Counts;
+count_nodes([Pid | T], Counts) ->
+    Node = node(Pid),
+    NewCounts = maps:update_with(Node, fun(C) -> C + 1 end, 1, Counts),
+    count_nodes(T, NewCounts).
+
+find_min(NodeCounts) ->
+    Sorted = lists:sort(fun({_NodeA, CountA}, {_NodeB, CountB}) -> CountA < CountB end, NodeCounts),
+    hd(Sorted).
+
+%% helper: perform add_table_copy but normalize/catch results so we don't crash CN
+safe_add_table_copy(Tab, Node) ->
+    Resp = catch mnesia:add_table_copy(Tab, Node, ram_copies),
+    case Resp of
+        ok -> ok;
+        {atomic, ok} -> ok;
+        {aborted, Reason} ->
+            io:format("**CN_SERVER: add_table_copy aborted for ~p -> ~p: ~p~n", [Tab, Node, Reason]),
+            {error, Reason};
+        {'EXIT', Reason} ->
+            io:format("**CN_SERVER: add_table_copy exception for ~p -> ~p: ~p~n", [Tab, Node, Reason]),
+            {error, Reason};
+        Other ->
+            io:format("**CN_SERVER: add_table_copy unexpected result for ~p -> ~p: ~p~n", [Tab, Node, Other]),
+            {error, Other}
+    end.
+
+%% Moves the mnesia table to the new node, restarts the GN processes on that node
+restart_gn(Node, CrashedGN_gndata=#gn_data{}, CrashedGNNum) -> 
+    %% copy the mnesia tables of the crashed GN to the new node
+    Tables = [CrashedGN_gndata#gn_data.tiles, CrashedGN_gndata#gn_data.powerups,
+              CrashedGN_gndata#gn_data.players, CrashedGN_gndata#gn_data.bombs],
+    Results = [ safe_add_table_copy(Tab, Node) || Tab <- Tables ],
+    case lists:all(fun(X) -> X == ok end, Results) of
+        true ->
+            io:format("**CN_SERVER: RECOVERY - Transferred mnesia tables to node ~p~n", [Node]);
+        false ->
+            %% log and continue restart (won't crash CN).
+            io:format("**CN_SERVER: WARNING - add_table_copy had failures for node ~p: ~p. Continuing restart without full copies.~n",
+                      [Node, Results])
+    end,
+    %% *** Start the GN process on the new node ***
+    %% This will also initialize the bot_handler and player_fsm processes
+    %% And also initialize all TILES based on the data within the mnesia table, over-writing their existing pids
+    io:format("**CN_SERVER: RECOVERY - Restarting GN #~p on node ~p..~n", [CrashedGNNum, Node]),
+    NewGN_Pid = case rpc:call(Node, gn_server, start, [{CrashedGNNum, true, true}]) of
+        {badarg, Reason} ->
+            io:format("**CN_SERVER: RECOVERY - Failed to start GN #~p on node ~p: ~p~n", [CrashedGNNum, Node, Reason]),
+            erlang:error(gn_recovery_failed, [CrashedGNNum, Node, Reason]);
+        {ok, Pid} -> Pid;
+        {error, Reason} ->
+            io:format("**CN_SERVER: RECOVERY - Failed to start GN #~p on node ~p: ~p~n", [CrashedGNNum, Node, Reason]),
+            erlang:error(gn_recovery_failed, [CrashedGNNum, Node, Reason]);
+        Pid when is_pid(Pid) -> Pid;
+        Other ->
+            io:format("**CN_SERVER: RECOVERY - Unexpected result starting GN #~p on node ~p: ~p~n", [CrashedGNNum, Node, Other]),
+            erlang:error(gn_recovery_failed, [CrashedGNNum, Node, Other])
+    end,
+    io:format("**CN_SERVER: RECOVERY - Linking to new GN #~p with PID ~p~n", [CrashedGNNum, NewGN_Pid]),
+    link(NewGN_Pid),
+    io:format("**CN_SERVER: RECOVERY - Restarted GN #~p on node ~p with PID ~p~n", [CrashedGNNum, Node, NewGN_Pid]),
+    io:format("**CN_SERVER: RECOVERY - Setting up power-ups, players and bombs in GN~p~n", [CrashedGNNum]),
+    io:format("**CN_SERVER: RECOVERY - finished recovering all objects for GN #~p~n", [CrashedGNNum]),
+    NewGN_Pid.

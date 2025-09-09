@@ -501,7 +501,7 @@ terminate(Reason, State) ->
         case ServerEntry of
             {_MonitorRef, _Node, Pid} when is_pid(Pid) ->
                 % 3-tuple format with PID
-                case is_process_alive(Pid) of
+                case safe_is_alive(Pid) of
                     true -> exit(Pid, shutdown);
                     false -> ok
                 end;
@@ -1758,3 +1758,9 @@ handle_confirmed_player_death(PlayerID, Table, State) ->
         last_known_players = NewLastKnown,
         global_player_tracking = NewGlobalTracking
     }.
+
+%% safe guard before calling is_process_alive/1
+safe_is_alive(Pid) when is_pid(Pid) ->
+    erlang:is_process_alive(Pid);
+safe_is_alive(_) ->
+    false.

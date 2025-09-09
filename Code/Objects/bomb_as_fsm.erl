@@ -14,7 +14,7 @@
 -behaviour(gen_statem).
 
 %% API
--export([start_monitor/4,
+-export([start_monitor/4, start_recovered/1,
     freeze_bomb/1, kick_bomb/2, answer_move_req/2, damage_taken/1, ignite_bomb/1]).
 
 %% gen_statem callbacks
@@ -31,6 +31,7 @@
 %-include_lib("src/clean-repo/Code/common_parameters.hrl").
 %% Windows compatible
 -include("../common_parameters.hrl").
+-include_lib("../GameNode/mnesia_records.hrl").
 
 
 %%%===================================================================
@@ -49,6 +50,13 @@ start_monitor(Pos_x, Pos_y, Type, Optional) ->
         Name -> Name
     end,
     gen_statem:start_monitor(?MODULE, [[Pos_x, Pos_y], Type, GN_Name, Optional], []).
+
+%% RECOVERY MODE
+start_recovered(BombRecord) ->
+    %% BombRecord is a #mnesia_bombs{} record fetched from mnesia table
+    %% Spawn a bomb process in recovery mode, using the data within the record
+    %% Get the registered name of the calling GN server instead of its PID
+    gen_statem:start_monitor(?MODULE, [BombRecord], []).
 
 %% @doc send freeze message to bomb
 freeze_bomb(BombPid) ->
@@ -109,14 +117,56 @@ init([Position, Type, Gn_Pid, Optional]) ->
                 ignited = false,
                 internal_timer = none
             },
-            {ok, remote_idle, UpdatedData}; % TODO: complete implementation
+            {ok, remote_idle, UpdatedData};
         ?REPEAT_BOMBS -> % repeating bomb, w.i.p
             UpdatedData = StateData#bomb_state{
                 ignited = {true, erlang:system_time(millisecond)},
                 internal_timer = ?EXPLODE_DELAY
             },
             {ok, armed, UpdatedData, [{state_timeout, ?EXPLODE_DELAY, explode}]}
+    end;
+
+%% RECOVERED INIT
+init([Record]) ->
+    %% Record is a #mnesia_bombs{} record fetched from mnesia table
+    %% Initialize the bomb process based on the data within the record
+    %% Determine initial state based on the record's data
+    %% Blow up time is based on the internal_timer value saved within mnesia upon crash
+    Data = #bomb_state{
+        position = Record#mnesia_bombs.position,
+        type = Record#mnesia_bombs.type,
+        status = Record#mnesia_bombs.status,
+        radius = Record#mnesia_bombs.radius,
+        direction = Record#mnesia_bombs.direction,
+        movement = Record#mnesia_bombs.movement,
+        owner = Record#mnesia_bombs.owner,
+        gn_pid = Record#mnesia_bombs.gn_pid,
+        internal_timer = Record#mnesia_bombs.internal_timer
+    },
+    %% Determine state based on type, ignited status, and movement
+    case Data#bomb_state.type of
+        ?NORMAL_BOMB -> % regular bomb, ignited by default
+            IgnitedVal = {true, erlang:system_time(millisecond) - Record#mnesia_bombs.internal_timer},
+            {ok, armed, Data#bomb_state{ignited = IgnitedVal}, [{state_timeout, Data#bomb_state.internal_timer, explode}]};
+        ?REPEAT_BOMBS -> % repeating bomb, ignited by default - treat just like a normal bomb for now
+            IgnitedVal = {true, erlang:system_time(millisecond) - Record#mnesia_bombs.internal_timer},
+            {ok, armed, Data#bomb_state{ignited = IgnitedVal}, [{state_timeout, Data#bomb_state.internal_timer, explode}]};
+        ?REMOTE_IGNITION ->
+            case Data#bomb_state.status of
+                normal -> % not ignited - remote_idle state
+                    UpdatedData = Data#bomb_state{ignited = false, internal_timer = none},
+                    {ok, remote_idle, UpdatedData};
+                _Frozen -> % remote bomb is frozen - check if ignited
+                    case Data#bomb_state.ignited of
+                        false -> % not ignited - remote_idle state
+                            UpdatedData = Data#bomb_state{ignited = false, internal_timer = none},
+                            {ok, remote_idle, UpdatedData};
+                        _ -> % ignited - remote_armed state
+                            {ok, remote_armed, Data, [{state_timeout, Data#bomb_state.internal_timer, explode}]}
+                    end
+            end
     end.
+
 
 %% @private
 %% @doc This function is called by a gen_statem when it needs to find out
@@ -168,7 +218,7 @@ armed(cast, freeze, StateData = #bomb_state{}) ->
     if
         StateData#bomb_state.status == frozen -> {keep_state_and_data};
         true ->
-            UpdatedData = StateData#bomb_state{status=frozen},
+            UpdatedData = StateData#bomb_state{status=frozen, internal_timer = StateData#bomb_state.internal_timer + ?FREEZE_DELAY},
             TempTime = calc_new_explode_delay(StateData),
             {keep_state, UpdatedData, [{state_timeout, TempTime - erlang:system_time(millisecond), explode}]}
     end;
