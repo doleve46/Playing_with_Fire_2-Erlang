@@ -8,7 +8,7 @@ REPO_URL="https://github.com/roialus/Playing_with_Fire_2-Earlang.git"
 
 # Branch to clone
 # BRANCH="linux_temp_master"   # <<< change this to the branch you want
-BRANCH="changes_roi"   # <<< change this to the branch you want
+BRANCH="main"   # <<< change this to the branch you want
 
 # Temporary directory
 TMP_DIR=$(mktemp -d)
