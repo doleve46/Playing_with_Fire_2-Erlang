@@ -272,7 +272,7 @@ handle_cast({forwarded, Request}, State = #gn_state{}) ->
                     %% Everything as normal (found the record), pass the message
                     player_fsm:gn_response(PlayerNum, {move_result, Answer});
                 false -> % crash the process
-                    erlang:error(record_not_found, [node(), Player_record])
+                    io:format("❌ GN_SERVER ERROR: Player record not found for player ~p in table ~p~n", [PlayerNum, State#gn_state.players_table_name])
             end,
             {noreply, State};
 

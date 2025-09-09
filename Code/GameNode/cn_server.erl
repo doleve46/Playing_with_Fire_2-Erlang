@@ -535,21 +535,37 @@ find_min(NodeCounts) ->
     Sorted = lists:sort(fun({_NodeA, CountA}, {_NodeB, CountB}) -> CountA < CountB end, NodeCounts),
     hd(Sorted).
 
+%% helper: perform add_table_copy but normalize/catch results so we don't crash CN
+safe_add_table_copy(Tab, Node) ->
+    Resp = catch mnesia:add_table_copy(Tab, Node, ram_copies),
+    case Resp of
+        ok -> ok;
+        {atomic, ok} -> ok;
+        {aborted, Reason} ->
+            io:format("**CN_SERVER: add_table_copy aborted for ~p -> ~p: ~p~n", [Tab, Node, Reason]),
+            {error, Reason};
+        {'EXIT', Reason} ->
+            io:format("**CN_SERVER: add_table_copy exception for ~p -> ~p: ~p~n", [Tab, Node, Reason]),
+            {error, Reason};
+        Other ->
+            io:format("**CN_SERVER: add_table_copy unexpected result for ~p -> ~p: ~p~n", [Tab, Node, Other]),
+            {error, Other}
+    end.
 
 %% Moves the mnesia table to the new node, restarts the GN processes on that node
 restart_gn(Node, CrashedGN_gndata=#gn_data{}, CrashedGNNum) -> 
     %% copy the mnesia tables of the crashed GN to the new node
     Tables = [CrashedGN_gndata#gn_data.tiles, CrashedGN_gndata#gn_data.powerups,
               CrashedGN_gndata#gn_data.players, CrashedGN_gndata#gn_data.bombs],
-    lists:foreach(fun(Tab) ->
-        case mnesia:add_table_copy(Tab, Node, ram_copies) of
-            ok -> ok;
-            {atomic, ok} -> ok;
-            {aborted, Reason} -> erlang:error(add_table_copy_failed, {Tab, Reason});
-            Other -> erlang:error(add_table_copy_failed, {Tab, Other})
-        end
-    end, Tables),
-    io:format("**CN_SERVER: RECOVERY - Transferred mnesia tables to node ~p~n", [Node]),
+    Results = [ safe_add_table_copy(Tab, Node) || Tab <- Tables ],
+    case lists:all(fun(X) -> X == ok end, Results) of
+        true ->
+            io:format("**CN_SERVER: RECOVERY - Transferred mnesia tables to node ~p~n", [Node]);
+        false ->
+            %% log and continue restart (won't crash CN).
+            io:format("**CN_SERVER: WARNING - add_table_copy had failures for node ~p: ~p. Continuing restart without full copies.~n",
+                      [Node, Results])
+    end,
     %% *** Start the GN process on the new node ***
     %% This will also initialize the bot_handler and player_fsm processes
     %% And also initialize all TILES based on the data within the mnesia table, over-writing their existing pids
