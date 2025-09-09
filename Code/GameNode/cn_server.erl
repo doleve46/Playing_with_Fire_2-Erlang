@@ -154,12 +154,17 @@ handle_cast({transfer_records, player, PlayerNum, Current_GN, New_GN}, State) ->
     Current_GN_players_table = Current_GNData#gn_data.players,
     New_GN_players_table = New_GNData#gn_data.players,
     case transfer_player_records(PlayerNum, Current_GN_players_table, New_GN_players_table) of
-        {error, not_found} -> erlang:error(transfer_player_failed, [node(), PlayerNum]);
         ok -> 
             %% Message the new GN to check for collisions
-            gn_server:cast_message(New_GN,{incoming_player, PlayerNum})
-    end,
-    {noreply, State};
+            gn_server:cast_message(New_GN,{incoming_player, PlayerNum}),
+            {noreply, State};
+        {error, not_found} ->
+            io:format("❌ CN_SERVER: transfer_player_records - player ~p not found in table ~p~n", [PlayerNum, Current_GN_players_table]),
+            {noreply, State};
+        {error, Reason} ->
+            io:format("❌ CN_SERVER: transfer_player_records failed for player ~p: ~p~n", [PlayerNum, Reason]),
+            {noreply, State}
+    end;
 
 %% * Update active bombs in mnesia table and notify controlling player_fsm
 handle_cast({player_bomb_exploded, PlayerPid}, State) ->
@@ -257,9 +262,11 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
         end
     end,
     case mnesia:activity(transaction, Fun) of
+        ok -> ok;
         {atomic, ok} -> ok;
         {atomic, {error, not_found}} -> {error, not_found};
-        {aborted, Reason} -> {error, Reason}
+        {aborted, Reason} -> {error, Reason};
+        Other -> {error, Other}
     end.
 
 bomb_explosion_handler(Coord, Radius) ->
@@ -479,7 +486,7 @@ handle_gn_crash(Pid, Data=[GN1=#gn_data{}, GN2=#gn_data{}, GN3=#gn_data{}, GN4=#
     case lists:filter(fun(X) -> X == Pid end, PidsList) of
         [] -> 
             io:format("**CN_SERVER: Non gn_server process crashed. Pid: ~p~n", [Pid]),
-            ok; % do nothing
+            Data; % do nothing
         [CrashedPid] -> 
             io:format("**CN_SERVER: Known gn_server process crashed. Pid: ~p~n", [CrashedPid]),
             %% Retreives which GN it was - 1-4
