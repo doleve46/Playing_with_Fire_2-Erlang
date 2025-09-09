@@ -410,7 +410,7 @@ inflict_damage_handler(RecordsList, Module, Function, Table) ->
                     _ = apply(Module, Function, [Record#mnesia_players.pid]),
                     io:format("💥 Sent damage to: ~p:~p(~p)~n", [Module, Function, Record#mnesia_players.pid]),
                     UpdatedRecord = Record#mnesia_players{life = Record#mnesia_players.life - 1},
-                    mnesia:write(Table, UpdatedRecord, write),
+                    mnesia:dirty_write(Table, UpdatedRecord),
                     io:format("💥 Updated player ~p life to ~p~n", [Record#mnesia_players.player_number, UpdatedRecord#mnesia_players.life])
             end
         catch
