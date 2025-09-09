@@ -256,7 +256,8 @@ transfer_player_records(PlayerNum, Current_GN_table, New_GN_table) ->
                 %% delete from table from the GN we are leaving
                 ok = mnesia:delete(Current_GN_table, PlayerNum, write),
                 %% Write the data to the new GN's table
-                mnesia:write(New_GN_table, Record, write);
+                mnesia:write(New_GN_table, Record, write),
+                ok;
             [] ->
                 {error, not_found}
         end
@@ -547,7 +548,19 @@ restart_gn(Node, CrashedGN_gndata=#gn_data{}, CrashedGNNum) ->
     %% This will also initialize the bot_handler and player_fsm processes
     %% And also initialize all TILES based on the data within the mnesia table, over-writing their existing pids
     io:format("**CN_SERVER: RECOVERY - Restarting GN #~p on node ~p..~n", [CrashedGNNum, Node]),
-    {ok, NewGN_Pid} = rpc:call(Node, gn_server, start, [{CrashedGNNum, true, true}]), % true = recovery mode, true = start bots
+    NewGN_Pid = case rpc:call(Node, gn_server, start, [{CrashedGNNum, true, true}]) of
+        {badarg, Reason} ->
+            io:format("**CN_SERVER: RECOVERY - Failed to start GN #~p on node ~p: ~p~n", [CrashedGNNum, Node, Reason]),
+            erlang:error(gn_recovery_failed, [CrashedGNNum, Node, Reason]);
+        {ok, Pid} -> Pid;
+        {error, Reason} ->
+            io:format("**CN_SERVER: RECOVERY - Failed to start GN #~p on node ~p: ~p~n", [CrashedGNNum, Node, Reason]),
+            erlang:error(gn_recovery_failed, [CrashedGNNum, Node, Reason]);
+        Pid when is_pid(Pid) -> Pid;
+        Other ->
+            io:format("**CN_SERVER: RECOVERY - Unexpected result starting GN #~p on node ~p: ~p~n", [CrashedGNNum, Node, Other]),
+            erlang:error(gn_recovery_failed, [CrashedGNNum, Node, Other])
+    end,
     io:format("**CN_SERVER: RECOVERY - Linking to new GN #~p with PID ~p~n", [CrashedGNNum, NewGN_Pid]),
     link(NewGN_Pid),
     io:format("**CN_SERVER: RECOVERY - Restarted GN #~p on node ~p with PID ~p~n", [CrashedGNNum, Node, NewGN_Pid]),
