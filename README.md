@@ -15,42 +15,57 @@ Playing with Fire 2 is a classic game where players navigate a grid-based arena,
 - **Rebar3** (Erlang build tool)
 - **Python 3.x**
 - **Pygame** library
+- **jsx** library (used for Python-Erlang communication)
+
+### Erlang Dependencies
+
+```bash
+Within rebar.config:
+...
+{deps, [{jsx, "~> 3.0"}]}
+...
+```
 
 ### Python Dependencies
 ```bash
-pip install pygame jsx
+pip install pygame
 ```
 **For Python versions older than 3.7:**
 ```bash
-pip install pygame dataclasses jsx
+pip install pygame dataclasses
 ```
 
 ### Network Configuration
-- All nodes must be on the same network or have proper firewall configurations
+- All nodes must be on the same local network or have proper firewall configurations
 - Default cookie: `12345` (configured in shell scripts)
 
 ## 🚀 Installation
 
-1. **Clone the repository:**
+1. **Create a rebar3 app
+   ```bash
+   rebar3 new app playing_with_fire
+   ```
+2. **Clone the repository:**
    ```bash
    git clone https://github.com/roialus/Playing_with_Fire_2-Earlang.git
    cd Playing_with_Fire_2-Earlang
    ```
 
-2. **Update network configuration:**
-   - Edit `shell scripts/node names.txt` with your actual IP addresses
+3. **Update network configuration:**
+   - Edit `shell scripts/node names.txt` with your IP addresses
    - Update the IP addresses in the shell scripts if needed
 
 
 ## 🎯 How to Run
 
 ### Starting the Game
+**Note:** before using the shell scripts, update the project's path (where you cloned the repo) within the scripts
 
 1.**Start Game Nodes (on each player machine):**
    ```bash
    # For Game Node 1
    chmod +x "shell scripts/start_gn1.sh"
-   ./shell\ scripts/start_gn1.sh
+   ./shell scripts/start_gn1.sh
    
    # Similarly for GN2, GN3, GN4 (use respective scripts)
    ```
@@ -59,7 +74,7 @@ pip install pygame dataclasses jsx
 2. **Start the Central Node (CN):**
    ```bash
    chmod +x "shell scripts/start_cn.sh"
-   ./shell\ scripts/start_cn.sh
+   ./shell scripts/start_cn.sh
    ```
  
 4. **Connect and Play:**
