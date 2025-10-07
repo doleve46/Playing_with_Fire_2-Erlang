@@ -41,7 +41,7 @@ pip install pygame dataclasses
 
 ## 🚀 Installation
 
-1. **Create a rebar3 app
+1. **Create a rebar3 app:**
    ```bash
    rebar3 new app playing_with_fire
    ```
